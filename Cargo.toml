@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["afast", "afast-macros", "example"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["ahriknow <ahriknow@ahriknow.com>"]
+license = "MIT"
+description = "A high-performance web backend framework for Rust. Auto generate client code (js, ts, kt)."
+repository = "https://github.com/ahriknow/afast"
+keywords = ["web", "framework", "backend", "http", "async"]
+categories = ["web-programming", "asynchronous"]
+
+[workspace.dependencies]
+afast = { version = "0.1.0", path = "afast", features = ["ts"] }
+afast-macros = { version = "0.1.0", path = "afast-macros" }
+afastdata = { version = "0.0.6" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+tokio = { version = "1", features=["full"] }
+tokio-tungstenite = { version = "0.26" }
+futures-util = { version = "0.3" }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = { version = "0.1" }

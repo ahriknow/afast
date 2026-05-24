@@ -1,0 +1,40 @@
+[package]
+name = "afast"
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["tag-u8"]
+ts = []
+js = []
+ws = ["tokio-tungstenite", "futures-util"]
+http = ["hyper", "hyper-util", "http-body-util"]
+tcp = []
+code = ["http"]
+doc = ["http", "js"]
+kt = []
+seq64 = []
+len64 = []
+ordinary-http = ["http", "dep:serde", "dep:serde_json"]
+tag-u8 = ["afastdata/tag-u8"]
+tag-u16 = ["afastdata/tag-u16"]
+tag-u32 = ["afastdata/tag-u32"]
+
+[dependencies]
+afast-macros.workspace = true
+afastdata.workspace = true
+tokio.workspace = true
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }

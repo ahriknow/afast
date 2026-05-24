@@ -1,0 +1,33 @@
+[package]
+name = "example"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["ordinary-http"]
+ordinary-http = ["afast/ordinary-http"]
+
+[dependencies]
+afast = { path = "../afast", features = [
+    "tcp",
+    "http",
+    "ws",
+    "ordinary-http",
+    "js",
+    "ts",
+    "kt",
+    "doc"
+] }
+afast-macros.workspace = true
+afastdata.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hyper.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true
