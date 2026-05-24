@@ -30,7 +30,7 @@ Kotlin 客户端代码，内置交互式 API 文档。
 
 ```toml
 [dependencies]
-afast = { version = "0.1.1", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.2", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
