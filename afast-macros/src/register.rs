@@ -1,4 +1,4 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 
 /// Expands a `register!(name)` invocation into a call to the auto-generated
@@ -15,17 +15,17 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
 }
 
 /// Expands a `register_ordinary!(name)` invocation into a call to the
-/// auto-generated function `__ordinary_entry_name()`, which returns an
-/// `OrdinaryHandlerDef`.
+/// auto-generated public entry function `name()`, which returns a
+/// `HandlerEntry`.
 ///
 /// The entry function is produced by `#[get]`, `#[post]`, and similar
-/// HTTP-method macros, and includes both the handler entry and the
-/// ordinary invoker reference.
+/// HTTP-method macros. As of v0.1.1 the ordinary invoker is embedded
+/// directly in the `HandlerEntry`, so the hidden `__ordinary_entry_*`
+/// function is no longer needed.
 pub fn expand_ordinary(input: TokenStream) -> syn::Result<TokenStream> {
-    let ident: syn::Ident = syn::parse2(input)?;
-    let fn_name = syn::Ident::new(&format!("__ordinary_entry_{}", ident), Span::call_site());
+    let path: syn::Path = syn::parse2(input)?;
 
     Ok(quote! {
-        #fn_name()
+        #path()
     })
 }

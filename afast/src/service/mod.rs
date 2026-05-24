@@ -1,10 +1,10 @@
 use crate::handler::Handler;
 #[cfg(feature = "ordinary-http")]
-use crate::handler::OrdinaryHandlerDef;
+use crate::handler::HandlerEntry;
 
 /// Information about a registered ordinary HTTP route within a service.
 ///
-/// Stores the HTTP method, path, and handler definition for an ordinary
+/// Stores the HTTP method, path, and handler entry for an ordinary
 /// (non-binary) route, enabling the server to build a routing table.
 #[cfg(feature = "ordinary-http")]
 #[derive(Clone)]
@@ -13,8 +13,8 @@ pub struct OrdinaryRouteInfo {
     pub method: &'static str,
     /// Route path (e.g. `"/users/:id"`).
     pub path: String,
-    /// The handler definition containing the invoker and metadata.
-    pub def: OrdinaryHandlerDef,
+    /// The handler entry containing name, invoker, metadata, and ordinary invoker.
+    pub handler_entry: HandlerEntry,
 }
 
 /// A named group of handlers representing an API service.
@@ -71,14 +71,14 @@ impl Service {
         mut self,
         method: &'static str,
         path: &'static str,
-        def: OrdinaryHandlerDef,
+        entry: HandlerEntry,
     ) -> Self {
-        let handler = Handler::ordinary_leaf(path, method, def.clone());
+        let handler = Handler::ordinary_leaf(path, method, entry.clone());
         self.handlers.push(handler);
         self.ordinary_routes.push(OrdinaryRouteInfo {
             method,
             path: path.to_string(),
-            def,
+            handler_entry: entry,
         });
         self
     }

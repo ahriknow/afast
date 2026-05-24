@@ -69,7 +69,7 @@ pub async fn serve(
         .map(|r| CompiledOrdinaryRoute {
             method: r.method,
             pattern: RoutePattern::parse(&r.path),
-            invoker: r.def.ordinary_invoker,
+            invoker: r.handler_entry.ordinary_invoker.unwrap(),
         })
         .collect();
 

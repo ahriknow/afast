@@ -3,11 +3,16 @@ use afast::{AFast, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, re
 mod handler;
 mod state;
 
-use handler::admin::*;
-use handler::article::*;
-use handler::auth::*;
-use handler::chat::*;
-use handler::*;
+use handler::admin::{
+    delete_user, delete_user_http, get_user_http, list_users, list_users_http, update_user,
+    update_user_http,
+};
+use handler::article::{
+    create_article, delete_article, get_article, list_articles, update_article,
+};
+use handler::auth::{create_token, get_user_id, login, register};
+use handler::chat::chat_echo;
+use handler::{health, info};
 use state::AppState;
 
 // ─── Entry Point ──────────────────────────────────────────────────
@@ -21,12 +26,12 @@ async fn main() {
 
     let admin_svc = service!("admin", "Admin Service" => {
         group("user" => {
-            h(create_user),
+            h(handler::admin::create_user),
             h(list_users),
             h(update_user),
             h(delete_user),
             get("", list_users_http),
-            post("", create_user_http),
+            post("", handler::admin::create_user_http),
             group(":user_id" => {
                 get("", get_user_http),
                 put("", update_user_http),

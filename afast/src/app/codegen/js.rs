@@ -1653,7 +1653,7 @@ pub(crate) fn generate_service_js(
     // Also collect headers from top-level ordinary routes
     #[cfg(feature = "ordinary-http")]
     for route in &svc.ordinary_routes {
-        for param in route.def.handler_entry.meta.params {
+        for param in route.handler_entry.meta.params {
             if param.extractor == "Header" {
                 let ty = param.ty.to_string();
                 if !headers_cl.iter().any(|c| c.ty == ty) {

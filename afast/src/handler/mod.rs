@@ -115,31 +115,65 @@ pub trait OrdinaryHandlerInvoker: Send + Sync {
     >;
 }
 
-/// Definition of an ordinary HTTP route, produced by `register_ordinary!`.
-///
-/// Bundles a [`HandlerEntry`] with its corresponding [`OrdinaryHandlerInvoker`]
-/// so the router can dispatch incoming HTTP requests to the correct handler.
-#[cfg(feature = "ordinary-http")]
-#[derive(Clone)]
-pub struct OrdinaryHandlerDef {
-    /// The handler entry containing name, invoker, and metadata.
-    pub handler_entry: HandlerEntry,
-    /// Static reference to the type-erased ordinary invoker.
-    pub ordinary_invoker: &'static dyn OrdinaryHandlerInvoker,
-}
-
 /// A compiled handler reference, produced by the `register!` macro.
 ///
-/// Contains the handler's static name, invoker trait object, and metadata.
-/// Used by the `service!` macro to build the handler tree.
+/// Contains the handler's static name, invoker trait object, metadata, and
+/// optionally an ordinary HTTP invoker (when the handler was defined with
+/// `#[get]`/`#[post]`/etc.).
 #[derive(Clone)]
 pub struct HandlerEntry {
     /// Handler function name.
     pub name: &'static str,
-    /// Static reference to the type-erased invoker.
+    /// Static reference to the type-erased binary invoker.
     pub invoker: &'static dyn HandlerInvoker,
     /// Handler metadata for code generation and introspection.
     pub meta: &'static HandlerMeta,
+    /// Ordinary HTTP invoker, set only for handlers defined with
+    /// `#[get]`/`#[post]`/`#[put]`/`#[delete]`/`#[patch]`.
+    #[cfg(feature = "ordinary-http")]
+    pub ordinary_invoker: Option<&'static dyn OrdinaryHandlerInvoker>,
+}
+
+impl HandlerEntry {
+    /// Creates a `HandlerEntry` for a binary-protocol handler.
+    ///
+    /// The `ordinary_invoker` field (when present) is set to `None`.
+    /// This constructor is the stable public API; proc macros emit a call
+    /// to it so they don't need to know about optional fields.
+    #[doc(hidden)]
+    pub fn new(
+        name: &'static str,
+        invoker: &'static dyn HandlerInvoker,
+        meta: &'static HandlerMeta,
+    ) -> Self {
+        Self {
+            name,
+            invoker,
+            meta,
+            #[cfg(feature = "ordinary-http")]
+            ordinary_invoker: None,
+        }
+    }
+
+    /// Creates a `HandlerEntry` with an ordinary HTTP invoker.
+    ///
+    /// Only available with the `ordinary-http` feature. Used by proc macros
+    /// for `#[get]`/`#[post]`/etc. handlers.
+    #[doc(hidden)]
+    #[cfg(feature = "ordinary-http")]
+    pub fn with_ordinary(
+        name: &'static str,
+        invoker: &'static dyn HandlerInvoker,
+        meta: &'static HandlerMeta,
+        ordinary_invoker: &'static dyn OrdinaryHandlerInvoker,
+    ) -> Self {
+        Self {
+            name,
+            invoker,
+            meta,
+            ordinary_invoker: Some(ordinary_invoker),
+        }
+    }
 }
 
 /// A node in the handler tree.
@@ -163,9 +197,9 @@ pub struct Handler {
     pub method: &'static str,
     /// Route path for ordinary routes. Empty for binary and group nodes.
     pub path: &'static str,
-    /// Ordinary handler definition for group-nested ordinary routes.
+    /// Ordinary handler entry for group-nested ordinary routes.
     #[cfg(feature = "ordinary-http")]
-    pub ordinary_def: Option<OrdinaryHandlerDef>,
+    pub ordinary_def: Option<HandlerEntry>,
 }
 
 // Static dummy metadata shared by all group (namespace) nodes.
@@ -264,20 +298,16 @@ impl Handler {
     /// through a separate routing path.
     #[doc(hidden)]
     #[cfg(feature = "ordinary-http")]
-    pub fn ordinary_leaf(
-        path: &'static str,
-        method: &'static str,
-        def: OrdinaryHandlerDef,
-    ) -> Self {
+    pub fn ordinary_leaf(path: &'static str, method: &'static str, entry: HandlerEntry) -> Self {
         Self {
-            name: def.handler_entry.name,
+            name: entry.name,
             invoker: &DummyInvoker,
-            meta: def.handler_entry.meta,
+            meta: entry.meta,
             children: Vec::new(),
             offset: 0,
             method,
             path,
-            ordinary_def: Some(def),
+            ordinary_def: Some(entry),
         }
     }
 }

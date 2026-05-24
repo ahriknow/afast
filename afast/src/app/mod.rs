@@ -652,7 +652,7 @@ fn collect_ordinary_from_tree(
             routes.push(OrdinaryRouteInfo {
                 method: h.method,
                 path: full_path,
-                def: def.clone(),
+                handler_entry: def.clone(),
             });
         } else {
             // Group or binary leaf: name contributes to child path prefix

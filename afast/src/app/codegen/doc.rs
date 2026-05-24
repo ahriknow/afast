@@ -579,7 +579,7 @@ fn build_schema(svc: &Service) -> String {
     // here, applying the same non-standard-header filter.
     #[cfg(feature = "ordinary-http")]
     for route in &svc.ordinary_routes {
-        for param in route.def.handler_entry.meta.params {
+        for param in route.handler_entry.meta.params {
             if param.extractor == "Header" {
                 let ty = param.ty.to_string();
                 if !headers.iter().any(|c| c.ty == ty) {

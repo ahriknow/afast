@@ -1,8 +1,25 @@
 # Changelog
 
-## [0.1.0] — Unreleased
+## [0.1.1] — Unreleased
 
-Initial release.
+### Changed
+
+- `service!` macro now supports full paths: `h(handler::admin::create_user)`, `get(":id", handler::admin::get_user)`.
+- `OrdinaryHandlerInvoker` is embedded directly in `HandlerEntry`; `OrdinaryHandlerDef` removed. Hidden `__ordinary_entry_*` symbols are no longer needed, so ordinary HTTP handlers no longer require `use ...::*` wildcard imports.
+
+### Fixed
+
+- `DocConfig::withe()` typo → `DocConfig::with()`.
+- Doc page long-connection connect button errors (null client, missing Data inputs).
+- `cargo publish --token` deprecation → `cargo login` in publish workflow.
+
+### Optimized
+
+- Single tree walk for handler table construction (was two passes).
+
+## [0.1.0]
+
+Rewrite of 0.0.x — first public release.
 
 ### Features
 

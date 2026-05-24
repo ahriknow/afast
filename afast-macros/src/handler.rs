@@ -292,6 +292,11 @@ pub fn expand(
         // Ordinary HTTP handler path: generates both an OrdinaryHandlerInvoker
         // (for HTTP routing) and a dummy HandlerInvoker (to satisfy the
         // HandlerEntry type, which always requires a binary invoker).
+        //
+        // The ordinary invoker is embedded directly in the HandlerEntry so
+        // that `register!` (or `register_ordinary!`) produces a single public
+        // entry function call — no hidden `__ordinary_entry_*` symbols are
+        // needed at the call site.
 
         let ordinary_invoker_ident = syn::Ident::new(
             &format!("__OrdinaryInvoker_{}", fn_name_str),
@@ -299,10 +304,6 @@ pub fn expand(
         );
         let ordinary_invoker_const = syn::Ident::new(
             &format!("__ORDINARY_INVOKER_{}", fn_name_str),
-            Span::call_site(),
-        );
-        let ordinary_entry_fn = syn::Ident::new(
-            &format!("__ordinary_entry_{}", fn_name_str),
             Span::call_site(),
         );
 
@@ -326,25 +327,13 @@ pub fn expand(
 
             #return_type_ref
 
-            /// Returns a `HandlerEntry` referencing this handler's metadata and
-            /// binary-protocol invoker. Called at registration time by
-            /// `register!(name)` or `h(name)` within a service definition.
             pub fn #fn_name() -> afast::HandlerEntry {
-                afast::HandlerEntry {
-                    name: stringify!(#fn_name),
-                    invoker: &#invoker_const,
-                    meta: &#meta_ident,
-                }
-            }
-
-            /// Returns an `OrdinaryHandlerDef` referencing both the handler entry
-            /// and the ordinary invoker. Called at registration time by
-            /// `register_ordinary!(name)`.
-            pub fn #ordinary_entry_fn() -> afast::OrdinaryHandlerDef {
-                afast::OrdinaryHandlerDef {
-                    handler_entry: #fn_name(),
-                    ordinary_invoker: &#ordinary_invoker_const,
-                }
+                afast::HandlerEntry::with_ordinary(
+                    stringify!(#fn_name),
+                    &#invoker_const,
+                    &#meta_ident,
+                    &#ordinary_invoker_const,
+                )
             }
         })
     } else {
@@ -365,15 +354,12 @@ pub fn expand(
 
             #return_type_ref
 
-            /// Returns a `HandlerEntry` referencing this handler's metadata and
-            /// binary-protocol invoker. Called at registration time by
-            /// `register!(name)` or `h(name)` within a service definition.
             pub fn #fn_name() -> afast::HandlerEntry {
-                afast::HandlerEntry {
-                    name: stringify!(#fn_name),
-                    invoker: &#invoker_const,
-                    meta: &#meta_ident,
-                }
+                afast::HandlerEntry::new(
+                    stringify!(#fn_name),
+                    &#invoker_const,
+                    &#meta_ident,
+                )
             }
         })
     }
