@@ -27,11 +27,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Login to crates.io
+        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
       - name: Publish afast-macros
-        run: cargo publish -p afast-macros --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p afast-macros
 
       - name: Wait for afast-macros to be available
         run: sleep 30
 
       - name: Publish afast
-        run: cargo publish -p afast --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p afast
