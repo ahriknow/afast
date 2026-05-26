@@ -3,7 +3,7 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 use syn::{Expr, ExprLit};
-use syn::{FnArg, ItemFn, Lit, LitStr, Meta, Pat, Type};
+use syn::{FnArg, ItemFn, Lit, LitInt, LitStr, Meta, Pat, Type};
 
 /// Describes a single handler parameter discovered during signature analysis.
 struct ParamInfo {
@@ -43,7 +43,7 @@ pub fn expand(
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name) = parse_handler_attrs_from_tokens(&attr)?;
+    let (desc, api_name, cache_seconds) = parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, method)?;
 
     // Detect whether the handler mixes binary and ordinary extractors, which is
@@ -270,6 +270,7 @@ pub fn expand(
         method.unwrap_or(""),
         method.is_some(),
         &param_meta_entries,
+        cache_seconds,
     );
 
     let invoker_ident = syn::Ident::new(&format!("__Invoker_{}", fn_name_str), Span::call_site());
@@ -365,17 +366,20 @@ pub fn expand(
     }
 }
 
-/// Parses the `desc(...)` and `name(...)` attributes from the handler's
-/// attribute tokens.
+/// Parses the `desc(...)`, `name(...)`, and `cache(...)` attributes from the
+/// handler's attribute tokens.
 ///
-/// Returns `(description, api_name)` where both may be empty if the
-/// corresponding attribute was not provided.
-fn parse_handler_attrs_from_tokens(attr_tokens: &TokenStream) -> syn::Result<(String, String)> {
+/// Returns `(description, api_name, cache_seconds)`. `cache_seconds` defaults
+/// to 0 (no caching) when the attribute is not provided.
+fn parse_handler_attrs_from_tokens(
+    attr_tokens: &TokenStream,
+) -> syn::Result<(String, String, u64)> {
     let mut desc = String::new();
     let mut api_name = String::new();
+    let mut cache_seconds: u64 = 0;
 
     if attr_tokens.is_empty() {
-        return Ok((desc, api_name));
+        return Ok((desc, api_name, cache_seconds));
     }
 
     let parser = |input: syn::parse::ParseStream| -> syn::Result<Vec<Meta>> {
@@ -407,6 +411,13 @@ fn parse_handler_attrs_from_tokens(attr_tokens: &TokenStream) -> syn::Result<(St
                     {
                         api_name = s.value();
                     }
+                } else if nv.path.is_ident("cache") {
+                    if let Expr::Lit(ExprLit {
+                        lit: Lit::Int(n), ..
+                    }) = nv.value
+                    {
+                        cache_seconds = n.base10_parse()?;
+                    }
                 }
             }
             Meta::List(list) => {
@@ -416,13 +427,16 @@ fn parse_handler_attrs_from_tokens(attr_tokens: &TokenStream) -> syn::Result<(St
                 } else if list.path.is_ident("name") {
                     let lit: LitStr = list.parse_args()?;
                     api_name = lit.value();
+                } else if list.path.is_ident("cache") {
+                    let lit: LitInt = list.parse_args()?;
+                    cache_seconds = lit.base10_parse()?;
                 }
             }
             _ => {}
         }
     }
 
-    Ok((desc, api_name))
+    Ok((desc, api_name, cache_seconds))
 }
 
 /// Analyzes each parameter in the handler's function signature and classifies
@@ -707,7 +721,8 @@ fn build_param_meta_entries(params: &[ParamInfo]) -> Vec<TokenStream> {
 }
 
 /// Builds the `HandlerMeta` const describing the handler's name, description,
-/// API name, parameter list, return type, and transport characteristics.
+/// API name, parameter list, return type, transport characteristics, and
+/// client-side cache duration.
 fn build_handler_meta(
     fn_name_str: &str,
     desc: &str,
@@ -718,6 +733,7 @@ fn build_handler_meta(
     method: &str,
     is_ordinary: bool,
     param_meta_entries: &[TokenStream],
+    cache_seconds: u64,
 ) -> TokenStream {
     let meta_ident = syn::Ident::new(&format!("__META_{}", fn_name_str), Span::call_site());
     let ret_struct = match return_structure {
@@ -736,6 +752,7 @@ fn build_handler_meta(
             is_ordinary: #is_ordinary,
             method: #method,
             path: "",
+            cache_seconds: #cache_seconds,
         };
     }
 }

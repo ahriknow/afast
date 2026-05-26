@@ -24,6 +24,7 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 - **Nested Handler Structure** — Organize APIs with `group`, auto-generating hierarchical paths
 - **Recursive Type Discovery** — `#[derive(Tag)]` with function pointers, no global registry
 - **Client Strategy Pattern** — Transport chosen at construction, immutable thereafter, zero overhead
+- **Client-Side Caching** — `cache(seconds)` attribute, class-level static cache, returns cached data for identical params
 
 ## Quick Start
 
@@ -156,6 +157,7 @@ async fn get_user_handler(
 
 - `desc("...")` — Sets description used in docs and JSDoc comments
 - `name("...")` — Overrides the client-side method name (defaults to the Rust function name)
+- `cache(seconds)` — Enables client-side caching; requests with identical params within `seconds` return cached data
 
 ### Multiple States
 
@@ -586,6 +588,63 @@ function reference at runtime.
 
 Nested types are fully expanded — never replaced with `Object`.
 
+## Client-Side Caching
+
+The `cache(seconds)` attribute enables client-side caching for handlers, reducing redundant requests.
+
+### Server-Side
+
+Both `#[handler]` and ordinary HTTP macros (`#[get]`, `#[post]`, etc.) support `cache(seconds)`:
+
+```rust
+#[handler(desc("List users"), cache(60))]
+async fn list_users(
+    state: State<AppState>,
+    req: Data<ListUsersRequest>,
+) -> Result<ListUsersResponse> {
+    // ...
+}
+```
+
+### Generated Client Methods
+
+```typescript
+// Cached for 60 seconds, force defaults to false
+const users = await client.apis.admin.listUsers({ page: 1, size: 20 });
+// Within 60 seconds, same params return cached data without a network request
+
+// force = true forces a fresh fetch
+const fresh = await client.apis.admin.listUsers({ page: 1, size: 20 }, true);
+```
+
+### Cache Strategy
+
+- **Class-level** — Cache is stored on the class `static _cache`, shared across all instances
+- **Param-aware** — Cache key is composed of method name + serialized params; changed params trigger a fresh request
+- **Lazy caching** — `force = false` with valid cache returns immediately; `force = true` bypasses cache
+- **Cross-language** — TypeScript, JavaScript, and Kotlin clients use the same caching strategy
+
+TS client cache structure:
+
+```typescript
+private static _cache = new Map<string, { data: any; expiry: number }>();
+```
+
+JS client:
+
+```javascript
+/** @type {Map<string, { data: any; expiry: number }>} */
+static _cache = new Map();
+```
+
+Kotlin client:
+
+```kotlin
+companion object {
+    private val _cache = mutableMapOf<String, Pair<Long, Any?>>()
+}
+```
+
 ## About TextEncoder / TextDecoder
 
 The generated client code (including Socket and binary serialization) uses the
@@ -594,6 +653,8 @@ The generated client code (including Socket and binary serialization) uses the
 - **React Native** (all versions)
 - **WeChat Mini Programs** (non-standard Web API environment)
 - **Older browsers** (Chrome < 38, Firefox < 19, Safari < 10.1, all IE versions)
+
+This can be resolved by manually implementing `TextEncoder` and `TextDecoder` on global.
 
 ### Solutions
 
@@ -662,16 +723,7 @@ example/         — Example project (full usage including HTTP, WS, TCP, docs)
 
 ```bash
 # Start the example server
-cargo run --example server --features "js,ws,http,seq64,len64"
-
-# JS tests (requires bun or node)
-bun test_ws.js     # WebSocket: 11 tests
-bun test_http.js   # HTTP: 16 tests
-bun test_chat.js   # Chat: 10 tests
-
-# TS tests (requires bun or tsx)
-bun test_ws.ts
-bun test_http.ts
+cargo run -p example
 ```
 
 ## Roadmap

@@ -229,6 +229,19 @@ fn has_ordinary_handlers(handlers: &[Handler]) -> bool {
     false
 }
 
+/// Recursively checks whether any handler in the tree has `cache_seconds > 0`.
+fn has_cache_handlers_js(handlers: &[Handler]) -> bool {
+    for h in handlers {
+        if h.meta.cache_seconds > 0 {
+            return true;
+        }
+        if has_cache_handlers_js(&h.children) {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── JSDoc typedef generation ─────────────────────────────────
 
 /// Emits a JSDoc `@typedef` block for a Header struct. Fields that
@@ -793,6 +806,8 @@ fn handler_method_js(
     _prefix: &str,
     base_indent: &str,
     debug: bool,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -800,6 +815,7 @@ fn handler_method_js(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let id = handler.offset;
     let indent = format!("{}    ", base_indent);
 
@@ -837,11 +853,38 @@ fn handler_method_js(
         fn_params.push("callback".to_string());
     }
 
+    // Cache: add force param
+    if cache_seconds > 0 {
+        fn_params.push("force = false".to_string());
+    }
+
     let params_str = fn_params.join(", ");
 
     // Build body
     let ind = format!("{}    ", indent);
     let mut body_lines = Vec::new();
+
+    // Cache check (before serialization, so we skip work on cache hit)
+    if cache_seconds > 0 {
+        let req_vars: Vec<String> = data_params.iter().map(|(v, _)| v.clone()).collect();
+        let req_expr = if req_vars.is_empty() {
+            "\"[]\"".to_string()
+        } else {
+            format!("JSON.stringify([{}])", req_vars.join(", "))
+        };
+        body_lines.push(format!("{}const _cacheKey = \"{}\";", ind, cache_key));
+        body_lines.push(format!("{}const _currentReq = {};", ind, req_expr));
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    const _cached = {client}Client._cache.get(_cacheKey);",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
+            ind
+        ));
+        body_lines.push(format!("{}}}", ind));
+    }
 
     body_lines.push(format!("{}const w=this._writer();", ind));
 
@@ -952,16 +995,42 @@ fn handler_method_js(
         body_lines.push(format!("{}return socket;", ind));
     } else {
         body_lines.push(format!("{}const r=this._reader(_resp);", ind));
-        generate_return_js(
-            &mut body_lines,
-            "r",
-            meta.return_type,
-            &ind,
-            meta.return_structure,
-            true,
-            debug,
-            func_name,
-        );
+        if cache_seconds > 0 {
+            generate_return_js(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &ind,
+                meta.return_structure,
+                false,
+                debug,
+                func_name,
+            );
+            body_lines.push(format!(
+                "{ind}{client}Client._cache.set(_cacheKey, {{ request: _currentReq, response: _result, expiry: Date.now() + {cache_ms} }});",
+                ind = ind,
+                client = class_name,
+                cache_ms = cache_seconds * 1000,
+            ));
+            if debug {
+                body_lines.push(format!(
+                    "{}if (this._debug) console.log('[afast:debug] ← {}', JSON.stringify(_result));",
+                    ind, func_name
+                ));
+            }
+            body_lines.push(format!("{}return _result;", ind));
+        } else {
+            generate_return_js(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &ind,
+                meta.return_structure,
+                true,
+                debug,
+                func_name,
+            );
+        }
     }
 
     let body = body_lines.join("\n");
@@ -988,6 +1057,8 @@ fn ordinary_handler_method_js(
     base_indent: &str,
     header_count: usize,
     debug: bool,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -995,6 +1066,7 @@ fn ordinary_handler_method_js(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let method = if meta.method.is_empty() {
         "GET"
     } else {
@@ -1039,7 +1111,19 @@ fn ordinary_handler_method_js(
         }
     }
 
-    let fn_sig = format!("{}:async(request)=>", func_name);
+    let fn_sig = if cache_seconds > 0 {
+        if data_fields.is_empty() {
+            format!("{}:async(force = false)=>", func_name)
+        } else {
+            format!("{}:async(request, force = false)=>", func_name)
+        }
+    } else {
+        if data_fields.is_empty() {
+            format!("{}:async()=>", func_name)
+        } else {
+            format!("{}:async(request)=>", func_name)
+        }
+    };
 
     // Build method body
     let mut body_lines = Vec::new();
@@ -1116,6 +1200,29 @@ fn ordinary_handler_method_js(
         || method == "DELETE";
     let needs_opts = needs_body || header_count > 0 || method != "GET";
 
+    // Cache check (after URL/query construction, before fetch)
+    if cache_seconds > 0 {
+        body_lines.push(format!("{}const _cacheKey = \"{}\";", ind, cache_key));
+        if body_param.is_some() {
+            body_lines.push(format!(
+                "{}const _currentReq = url + ':' + JSON.stringify(request.body);",
+                ind
+            ));
+        } else {
+            body_lines.push(format!("{}const _currentReq = url;", ind));
+        }
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    const _cached = {client}Client._cache.get(_cacheKey);",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
+            ind
+        ));
+        body_lines.push(format!("{}}}", ind));
+    }
+
     // Debug: log request
     if debug {
         if data_fields.is_empty() {
@@ -1167,6 +1274,16 @@ fn ordinary_handler_method_js(
         ));
     }
 
+    // Cache store (before debug log)
+    if cache_seconds > 0 {
+        body_lines.push(format!(
+            "{ind}{client}Client._cache.set(_cacheKey, {{ request: _currentReq, response: data, expiry: Date.now() + {cache_ms} }});",
+            ind = ind,
+            client = class_name,
+            cache_ms = cache_seconds * 1000,
+        ));
+    }
+
     // Debug: log response
     if debug {
         body_lines.push(format!(
@@ -1205,6 +1322,7 @@ fn generate_handler_object_js(
     seq64: bool,
     header_count: usize,
     debug: bool,
+    class_name: &str,
 ) -> String {
     let mut lines = Vec::new();
     let inner_indent = format!("{}    ", indent);
@@ -1227,6 +1345,7 @@ fn generate_handler_object_js(
                 seq64,
                 header_count,
                 debug,
+                class_name,
             );
             lines.push(format!(
                 "{}{}: {{",
@@ -1238,6 +1357,8 @@ fn generate_handler_object_js(
         } else {
             // Leaf handler — generate JSDoc + method
             let prefix_str = handler_prefix(&child_path);
+            let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+            let cache_key = cache_key_parts.join(".");
             if h.meta.is_ordinary {
                 // Ordinary HTTP handler
                 lines.push(format!("{}/**", inner_indent));
@@ -1316,6 +1437,8 @@ fn generate_handler_object_js(
                     indent,
                     header_count,
                     debug,
+                    class_name,
+                    &cache_key,
                 ));
             } else {
                 // Binary handler
@@ -1393,6 +1516,8 @@ fn generate_handler_object_js(
                     &prefix_str,
                     indent,
                     debug,
+                    class_name,
+                    &cache_key,
                 ));
             }
         }
@@ -1695,7 +1820,21 @@ pub(crate) fn generate_service_js(
 
     // Client class
     let class_name = to_pascal_case(&svc.name);
+    #[cfg(feature = "ordinary-http")]
+    let has_cache = has_cache_handlers_js(&svc.handlers)
+        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+    #[cfg(not(feature = "ordinary-http"))]
+    let has_cache = has_cache_handlers_js(&svc.handlers);
     lines.push(format!("export class {}Client {{", class_name));
+
+    // Static cache (shared across all instances)
+    if has_cache {
+        lines.push(
+            "    /** @type {Map<string, { request: string, response: any, expiry: number }>} */".to_string(),
+        );
+        lines.push("    static _cache = new Map();".to_string());
+    }
+
     lines.push(format!("    /** @type {{{}}} */", transport_union));
     lines.push("    _transport;".into());
     lines.push("    /** @type {string} */".into());
@@ -2873,6 +3012,7 @@ pub(crate) fn generate_service_js(
         seq64,
         headers_cl.len(),
         debug,
+        &class_name,
     );
     lines.push(handler_obj);
 

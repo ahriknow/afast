@@ -23,6 +23,7 @@ Kotlin 客户端代码，内置交互式 API 文档。
 - **嵌套 Handler 结构** — 通过 `group` 组织 API 命名空间，自动生成层级路径
 - **递归类型发现** — `#[derive(Tag)]` 通过函数指针递归发现嵌套类型，无需全局注册表
 - **客户端策略模式** — 构造时选择 WS/HTTP，之后不可切换，运行时零分支开销
+- **客户端缓存** — `cache(seconds)` 属性，生成类级别静态缓存，相同参数请求直接返回缓存数据
 
 ## 快速开始
 
@@ -155,6 +156,7 @@ async fn get_user_handler(
 
 - `desc("...")` — 设置描述，用于文档和 JSDoc 注释
 - `name("...")` — 覆盖客户端方法名（默认使用 Rust 函数名）
+- `cache(seconds)` — 启用客户端缓存，seconds 秒内相同参数的请求返回缓存数据，避免重复请求
 
 ### 多 State 支持
 
@@ -578,6 +580,63 @@ const mergedClient = new ApiClient('ws://localhost:5000');
 
 嵌套类型完整展开，不会用 `Object` 带过。
 
+## 客户端缓存
+
+通过 `cache(seconds)` 属性，可以为 Handler 启用客户端缓存，减少重复请求。
+
+### 服务端
+
+`#[handler]` 和普通 HTTP 宏（`#[get]`、`#[post]` 等）均支持 `cache(seconds)`：
+
+```rust
+#[handler(desc("用户列表"), cache(60))]
+async fn list_users(
+    state: State<AppState>,
+    req: Data<ListUsersRequest>,
+) -> Result<ListUsersResponse> {
+    // ...
+}
+```
+
+### 生成的客户端方法
+
+```typescript
+// 缓存 60 秒，force 默认为 false
+const users = await client.apis.admin.listUsers({ page: 1, size: 20 });
+// 60 秒内相同参数直接返回缓存数据，不发请求
+
+// force = true 强制刷新缓存
+const fresh = await client.apis.admin.listUsers({ page: 1, size: 20 }, true);
+```
+
+### 缓存策略
+
+- **类级别** — 缓存存储在类的 `static _cache` 上，所有实例共享
+- **参数感知** — 缓存键由方法名 + 序列化的参数组成，参数变化自动重新请求
+- **惰性缓存** — `force = false` 且缓存未过期时直接返回；`force = true` 忽略缓存
+- **多语言一致** — TypeScript、JavaScript、Kotlin 客户端使用相同的缓存策略
+
+TS 客户端缓存存储结构：
+
+```typescript
+private static _cache = new Map<string, { data: any; expiry: number }>();
+```
+
+JS 客户端：
+
+```javascript
+/** @type {Map<string, { data: any; expiry: number }>} */
+static _cache = new Map();
+```
+
+Kotlin 客户端：
+
+```kotlin
+companion object {
+    private val _cache = mutableMapOf<String, Pair<Long, Any?>>()
+}
+```
+
 ## 关于 TextEncoder / TextDecoder
 
 生成的客户端代码（包括 Socket 类和二进制序列化）使用了 `TextEncoder` 和
@@ -586,6 +645,8 @@ const mergedClient = new ApiClient('ws://localhost:5000');
 - **React Native**（所有版本）
 - **微信小程序**（非标准 Web API 环境）
 - **较旧的浏览器**（Chrome < 38, Firefox < 19, Safari < 10.1, IE 全版本）
+
+可以通过手动在全局变量上实现 `TextEncoder` 和 `TextDecoder` 来解决
 
 ### 解决方案
 
@@ -654,16 +715,7 @@ example/         — 示例项目（含 HTTP、WS、TCP、文档等完整用法�
 
 ```bash
 # 启动示例服务器
-cargo run --example server --features "js,ws,http,seq64,len64"
-
-# JS 测试（需要 bun 或 node）
-bun test_ws.js     # WebSocket: 11 个测试
-bun test_http.js   # HTTP: 16 个测试
-bun test_chat.js   # Chat: 10 个测试
-
-# TS 测试（需要 bun 或 tsx）
-bun test_ws.ts
-bun test_http.ts
+cargo run -p example
 ```
 
 ## 路线图

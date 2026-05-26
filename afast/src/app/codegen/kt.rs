@@ -396,6 +396,19 @@ struct CustomInfo {
     ty: String,
 }
 
+/// Recursively checks whether any handler in the tree has `cache_seconds > 0`.
+fn has_cache_handlers_kt(handlers: &[Handler]) -> bool {
+    for h in handlers {
+        if h.meta.cache_seconds > 0 {
+            return true;
+        }
+        if has_cache_handlers_kt(&h.children) {
+            return true;
+        }
+    }
+    false
+}
+
 fn collect_customs(handlers: &[Handler]) -> Vec<CustomInfo> {
     let mut customs: Vec<CustomInfo> = Vec::new();
     collect_customs_recursive(handlers, &mut customs);
@@ -785,6 +798,24 @@ fn generate_return_kt(
     }
     let expr = response_expr_kt(reader, ty, indent, structure, Some(resp_type));
     lines.push(format!("{}return {}", indent, expr));
+}
+
+/// Like `generate_return_kt` but assigns to `_result` instead of returning.
+/// Used by cached handlers that need to store the result before returning.
+fn generate_return_kt_assign(
+    lines: &mut Vec<String>,
+    reader: &str,
+    ty: &str,
+    resp_type: &str,
+    indent: &str,
+    structure: Option<fn() -> &'static TagMeta>,
+) {
+    if ty == "()" {
+        lines.push(format!("{}val _result = Unit", indent));
+        return;
+    }
+    let expr = response_expr_kt(reader, ty, indent, structure, Some(resp_type));
+    lines.push(format!("{}val _result = {}", indent, expr));
 }
 
 // ─── Request serialization ──────────────────────────────────────────
@@ -1217,6 +1248,8 @@ fn handler_method_kt(
     prefix: &str,
     base_indent: &str,
     svc_name: &str,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -1224,6 +1257,7 @@ fn handler_method_kt(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let id = handler.offset;
     let indent = format!("{}    ", base_indent);
 
@@ -1268,6 +1302,11 @@ fn handler_method_kt(
         fn_params.push("callback: (ByteArray, (Any) -> Unit) -> Unit".to_string());
     }
 
+    // Cache: add force param
+    if cache_seconds > 0 {
+        fn_params.push("force: Boolean = false".to_string());
+    }
+
     let params_str = fn_params.join(", ");
 
     // Determine the Kotlin return type.  Long-connection handlers
@@ -1292,6 +1331,40 @@ fn handler_method_kt(
     // 5. Deserialises the response (or creates an AfastSocket).
     let ind = format!("{}    ", indent);
     let mut body_lines = Vec::new();
+
+    // Cache check (before serialization)
+    if cache_seconds > 0 {
+        let cache_key_parts: Vec<String> = data_params.iter().map(|(v, _)| v.clone()).collect();
+        let req_expr = if cache_key_parts.is_empty() {
+            "\"[]\"".to_string()
+        } else if cache_key_parts.len() == 1 {
+            format!("{}.toString()", cache_key_parts[0])
+        } else {
+            format!("listOf({}).toString()", cache_key_parts.join(", "))
+        };
+        body_lines.push(format!("{}val _cacheKey = \"{}\"", ind, cache_key));
+        body_lines.push(format!("{}val _currentReq = {}", ind, req_expr));
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    val _cached = {client}Client._cache[_cacheKey]",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached != null && _currentReq == _cached.first && System.currentTimeMillis() < _cached.second.first) {{",
+            ind
+        ));
+        let cast_return = if meta.long_connection || meta.return_type == "()" {
+            "".to_string()
+        } else {
+            format!(" as {}", return_type)
+        };
+        body_lines.push(format!(
+            "{}        return _cached.second.second{}",
+            ind, cast_return
+        ));
+        body_lines.push(format!("{}    }}", ind));
+        body_lines.push(format!("{}}}", ind));
+    }
 
     body_lines.push(format!("{}val w = BinaryWriter()", ind));
 
@@ -1382,14 +1455,32 @@ fn handler_method_kt(
         body_lines.push(format!("{}return socket", ind));
     } else {
         body_lines.push(format!("{}val r = BinaryReader(resp)", ind));
-        generate_return_kt(
-            &mut body_lines,
-            "r",
-            meta.return_type,
-            &return_type,
-            &ind,
-            meta.return_structure,
-        );
+        if cache_seconds > 0 {
+            generate_return_kt_assign(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &return_type,
+                &ind,
+                meta.return_structure,
+            );
+            body_lines.push(format!(
+                "{ind}{client}Client._cache[_cacheKey] = _currentReq to (System.currentTimeMillis() + {cache_ms}L to _result)",
+                ind = ind,
+                client = class_name,
+                cache_ms = cache_seconds * 1000,
+            ));
+            body_lines.push(format!("{}return _result", ind));
+        } else {
+            generate_return_kt(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &return_type,
+                &ind,
+                meta.return_structure,
+            );
+        }
     }
 
     let body = body_lines.join("\n");
@@ -1423,6 +1514,8 @@ fn ordinary_handler_method_kt(
     base_indent: &str,
     _svc_name: &str,
     debug: bool,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -1430,6 +1523,7 @@ fn ordinary_handler_method_kt(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let method = if meta.method.is_empty() {
         "GET"
     } else {
@@ -1471,6 +1565,9 @@ fn ordinary_handler_method_kt(
     if let Some(p) = body_param {
         fn_params.push(format!("body: {}", kt_type_of(p, "Body")));
     }
+    if cache_seconds > 0 {
+        fn_params.push("force: Boolean = false".to_string());
+    }
     let params_str = fn_params.join(", ");
 
     // Determine the Kotlin return type.  Structured returns use the
@@ -1499,7 +1596,48 @@ fn ordinary_handler_method_kt(
     // 4. Sends a JSON body (for POST/PUT/PATCH).
     // 5. Reads and deserialises the JSON response.
     let mut body_lines = Vec::new();
-    body_lines.push(format!("{}return withContext(Dispatchers.IO) {{", ind));
+
+    // Cache check (before I/O dispatch)
+    if cache_seconds > 0 {
+        let mut req_var_names: Vec<String> = Vec::new();
+        if param_param.is_some() { req_var_names.push("params".to_string()); }
+        if query_param.is_some() { req_var_names.push("queries".to_string()); }
+        if body_param.is_some() { req_var_names.push("body".to_string()); }
+        let req_expr = if req_var_names.is_empty() {
+            "\"[]\"".to_string()
+        } else if req_var_names.len() == 1 {
+            format!("{}.toString()", req_var_names[0])
+        } else {
+            format!("listOf({}).toString()", req_var_names.join(", "))
+        };
+        body_lines.push(format!("{}val _cacheKey = \"{}\"", ind, cache_key));
+        body_lines.push(format!("{}val _currentReq = {}", ind, req_expr));
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    val _cached = {client}Client._cache[_cacheKey]",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached != null && _currentReq == _cached.first && System.currentTimeMillis() < _cached.second.first) {{",
+            ind
+        ));
+        if meta.return_type == "()" {
+            body_lines.push(format!("{}        return", ind));
+        } else {
+            body_lines.push(format!(
+                "{}        return _cached.second.second as {}",
+                ind, kt_return
+            ));
+        }
+        body_lines.push(format!("{}    }}", ind));
+        body_lines.push(format!("{}}}", ind));
+    }
+
+    if cache_seconds > 0 {
+        body_lines.push(format!("{}val _result = withContext(Dispatchers.IO) {{", ind));
+    } else {
+        body_lines.push(format!("{}return withContext(Dispatchers.IO) {{", ind));
+    }
     let in_ctx = format!("{}    ", ind);
 
     let group_prefix = group_path.join("/");
@@ -1733,6 +1871,17 @@ fn ordinary_handler_method_kt(
 
     body_lines.push(format!("{}}}", ind));
 
+    // Cache store (after withContext, before return)
+    if cache_seconds > 0 {
+        body_lines.push(format!(
+            "{ind}{client}Client._cache[_cacheKey] = _currentReq to (System.currentTimeMillis() + {cache_ms}L to _result)",
+            ind = ind,
+            client = class_name,
+            cache_ms = cache_seconds * 1000,
+        ));
+        body_lines.push(format!("{}return _result", ind));
+    }
+
     let body = body_lines.join("\n");
 
     format!(
@@ -1796,6 +1945,11 @@ pub(crate) fn generate_service_kt(
         lines.push("".to_string());
     }
     let class_name = to_pascal_case(&svc.name);
+    #[cfg(feature = "ordinary-http")]
+    let has_cache = has_cache_handlers_kt(&svc.handlers)
+        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+    #[cfg(not(feature = "ordinary-http"))]
+    let has_cache = has_cache_handlers_kt(&svc.handlers);
     let mut emitted = Vec::new();
     collect_type_exports_kt(&svc.handlers, &[], &mut emitted, &mut lines);
     let customs = collect_customs(&svc.handlers);
@@ -1832,6 +1986,15 @@ pub(crate) fn generate_service_kt(
         *last = last.trim_end_matches(',').to_string();
     }
     lines.push(") {".to_string());
+
+    // Static cache (shared across all instances)
+    if has_cache {
+        lines.push("    companion object {".to_string());
+        lines.push("        private val _cache = mutableMapOf<String, Pair<String, Pair<Long, Any?>>>()".to_string());
+        lines.push("    }".to_string());
+        lines.push("".to_string());
+    }
+
     lines.push("    enum class Transport { Http, Ws, Tcp }".to_string());
     lines.push("".to_string());
     #[cfg(feature = "ordinary-http")]
@@ -2179,6 +2342,8 @@ pub(crate) fn generate_service_kt(
                 // parameters, calls the transport, and deserialises the
                 // response.
                 let prefix_str = handler_prefix(&child_path);
+                let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+                let cache_key = cache_key_parts.join(".");
                 if h.meta.is_ordinary {
                     #[cfg(feature = "ordinary-http")]
                     {
@@ -2189,6 +2354,8 @@ pub(crate) fn generate_service_kt(
                             &inner_indent,
                             svc_name,
                             debug,
+                            svc_name,
+                            &cache_key,
                         ));
                     }
                     #[cfg(not(feature = "ordinary-http"))]
@@ -2207,6 +2374,8 @@ pub(crate) fn generate_service_kt(
                         &prefix_str,
                         &inner_indent,
                         svc_name,
+                        svc_name,
+                        &cache_key,
                     ));
                 }
             }

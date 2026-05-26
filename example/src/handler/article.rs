@@ -108,7 +108,7 @@ pub async fn list_articles(
     Ok(ListArticlesResponse { total, items })
 }
 
-#[handler(desc("Get an article by ID"))]
+#[handler(desc("Get an article by ID"), cache(60))]
 pub async fn get_article(
     afast::State(state): afast::State<AppState>,
     afast::Data(req): afast::Data<ArticleIdRequest>,

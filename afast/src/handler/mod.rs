@@ -50,6 +50,8 @@ pub struct HandlerMeta {
     pub method: &'static str,
     /// Route path for ordinary handlers (e.g. `"/users/:id"`). Empty for binary handlers.
     pub path: &'static str,
+    /// Client-side cache duration in seconds. 0 means no caching.
+    pub cache_seconds: u64,
 }
 
 /// Trait for type-erased handler invocation.
@@ -214,6 +216,7 @@ static DUMMY_META: HandlerMeta = HandlerMeta {
     is_ordinary: false,
     method: "",
     path: "",
+    cache_seconds: 0,
 };
 
 /// Placeholder invoker for group (namespace) nodes.

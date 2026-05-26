@@ -83,7 +83,7 @@ pub async fn create_user(
     Ok(CreateUserResponse { id: new_id })
 }
 
-#[handler(desc("List users with pagination (requires auth)"))]
+#[handler(desc("List users with pagination (requires auth)"), cache(60))]
 pub async fn list_users(
     afast::State(state): afast::State<AppState>,
     afast::Custom(auth): afast::Custom<AuthCustom>,

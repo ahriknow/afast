@@ -365,6 +365,19 @@ fn has_ordinary_handlers(handlers: &[Handler]) -> bool {
     false
 }
 
+/// Recursively checks whether any handler in the tree has `cache_seconds > 0`.
+fn has_cache_handlers(handlers: &[Handler]) -> bool {
+    for h in handlers {
+        if h.meta.cache_seconds > 0 {
+            return true;
+        }
+        if has_cache_handlers(&h.children) {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── Type definition generation ─────────────────────────────────
 
 /// Emits an `export type` declaration for a struct or enum using its
@@ -781,7 +794,7 @@ fn generate_return(
         ));
     } else {
         lines.push(format!(
-            "{}{}{} as unknown as {};",
+            "{}{}({}) as unknown as {};",
             indent, ret, expr, resp_type
         ));
     }
@@ -1177,6 +1190,8 @@ fn handler_method(
     prefix: &str,
     base_indent: &str,
     debug: bool,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -1184,6 +1199,7 @@ fn handler_method(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let id = handler.offset;
     let indent = format!("{}    ", base_indent);
 
@@ -1227,6 +1243,11 @@ fn handler_method(
         ));
     }
 
+    // Cache: add force param
+    if cache_seconds > 0 {
+        fn_params.push("force: boolean = false".to_string());
+    }
+
     let params_str = fn_params.join(", ");
 
     // Return type
@@ -1251,6 +1272,28 @@ fn handler_method(
     // Build body
     let ind = format!("{}    ", indent);
     let mut body_lines = Vec::new();
+
+    // Cache check (before serialization, so we skip work on cache hit)
+    if cache_seconds > 0 {
+        let req_vars: Vec<String> = data_params.iter().map(|(v, _)| v.clone()).collect();
+        let req_expr = if req_vars.is_empty() {
+            "\"[]\"".to_string()
+        } else {
+            format!("JSON.stringify([{}])", req_vars.join(", "))
+        };
+        body_lines.push(format!("{}const _cacheKey = \"{}\";", ind, cache_key));
+        body_lines.push(format!("{}const _currentReq = {};", ind, req_expr));
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    const _cached = {client}Client._cache.get(_cacheKey);",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
+            ind
+        ));
+        body_lines.push(format!("{}}}", ind));
+    }
 
     body_lines.push(format!("{}const w=this._writer();", ind));
 
@@ -1382,17 +1425,44 @@ fn handler_method(
         } else if normalized_ret.starts_with("Vec<") {
             resp_type = format!("{}[]", resp_type);
         }
-        generate_return(
-            &mut body_lines,
-            "r",
-            meta.return_type,
-            &resp_type,
-            &ind,
-            meta.return_structure,
-            true,
-            debug,
-            func_name,
-        );
+        if cache_seconds > 0 {
+            generate_return(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &resp_type,
+                &ind,
+                meta.return_structure,
+                false,
+                debug,
+                func_name,
+            );
+            body_lines.push(format!(
+                "{ind}{client}Client._cache.set(_cacheKey, {{ request: _currentReq, response: _result, expiry: Date.now() + {cache_ms} }});",
+                ind = ind,
+                client = class_name,
+                cache_ms = cache_seconds * 1000,
+            ));
+            if debug {
+                body_lines.push(format!(
+                    "{}if (this._debug) console.log('[afast:debug] ← {}', JSON.stringify(_result));",
+                    ind, func_name
+                ));
+            }
+            body_lines.push(format!("{}return _result;", ind));
+        } else {
+            generate_return(
+                &mut body_lines,
+                "r",
+                meta.return_type,
+                &resp_type,
+                &ind,
+                meta.return_structure,
+                true,
+                debug,
+                func_name,
+            );
+        }
     }
 
     let body = body_lines.join("\n");
@@ -1422,6 +1492,8 @@ fn ordinary_handler_method_ts(
     base_indent: &str,
     header_count: usize,
     debug: bool,
+    class_name: &str,
+    cache_key: &str,
 ) -> String {
     let meta = handler.meta;
     let func_name = if !meta.api_name.is_empty() {
@@ -1429,6 +1501,7 @@ fn ordinary_handler_method_ts(
     } else {
         meta.name
     };
+    let cache_seconds = meta.cache_seconds;
     let method = if meta.method.is_empty() {
         "GET"
     } else {
@@ -1473,11 +1546,14 @@ fn ordinary_handler_method_ts(
     }
 
     // Function params string
-    let params_str = if data_type_fields.is_empty() {
-        String::new()
-    } else {
-        format!("request: {{ {} }}", data_type_fields.join("; "))
-    };
+    let mut params_parts: Vec<String> = Vec::new();
+    if !data_type_fields.is_empty() {
+        params_parts.push(format!("request: {{ {} }}", data_type_fields.join("; ")));
+    }
+    if cache_seconds > 0 {
+        params_parts.push("force: boolean = false".to_string());
+    }
+    let params_str = params_parts.join(", ");
 
     // Return type
     let return_type = ordinary_return_ts(meta, prefix);
@@ -1550,6 +1626,29 @@ fn ordinary_handler_method_ts(
             "{}if (qs.toString()) url += '?' + qs.toString();",
             ind
         ));
+    }
+
+    // Cache check (after URL/query construction, before fetch)
+    if cache_seconds > 0 {
+        body_lines.push(format!("{}const _cacheKey = \"{}\";", ind, cache_key));
+        if body_param.is_some() {
+            body_lines.push(format!(
+                "{}const _currentReq = url + ':' + JSON.stringify(request.body);",
+                ind
+            ));
+        } else {
+            body_lines.push(format!("{}const _currentReq = url;", ind));
+        }
+        body_lines.push(format!("{}if (!force) {{", ind));
+        body_lines.push(format!(
+            "{}    const _cached = {client}Client._cache.get(_cacheKey);",
+            ind, client = class_name
+        ));
+        body_lines.push(format!(
+            "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
+            ind
+        ));
+        body_lines.push(format!("{}}}", ind));
     }
 
     // Build fetch options
@@ -1629,6 +1728,16 @@ fn ordinary_handler_method_ts(
         ));
     }
 
+    // Cache store (before debug log)
+    if cache_seconds > 0 {
+        body_lines.push(format!(
+            "{ind}{client}Client._cache.set(_cacheKey, {{ request: _currentReq, response: data, expiry: Date.now() + {cache_ms} }});",
+            ind = ind,
+            client = class_name,
+            cache_ms = cache_seconds * 1000,
+        ));
+    }
+
     // Debug: log response
     if debug {
         body_lines.push(format!(
@@ -1702,6 +1811,7 @@ fn generate_handler_object(
     seq64: bool,
     header_count: usize,
     debug: bool,
+    class_name: &str,
 ) -> String {
     let mut lines = Vec::new();
     let inner_indent = format!("{}    ", indent);
@@ -1724,6 +1834,7 @@ fn generate_handler_object(
                 seq64,
                 header_count,
                 debug,
+                class_name,
             );
             lines.push(format!(
                 "{}{}: {{",
@@ -1735,6 +1846,8 @@ fn generate_handler_object(
         } else {
             // Leaf handler — generate method
             let prefix_str = handler_prefix(&child_path);
+            let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+            let cache_key = cache_key_parts.join(".");
 
             if h.meta.is_ordinary {
                 // Ordinary HTTP handler
@@ -1782,6 +1895,8 @@ fn generate_handler_object(
                         indent,
                         header_count,
                         debug,
+                        class_name,
+                        &cache_key,
                     ));
                 }
                 #[cfg(not(feature = "ordinary-http"))]
@@ -1837,7 +1952,7 @@ fn generate_handler_object(
 
                 lines.push(format!("{} */", inner_indent));
 
-                lines.push(handler_method(h, all_handlers, &prefix_str, indent, debug));
+                lines.push(handler_method(h, all_handlers, &prefix_str, indent, debug, class_name, &cache_key));
             }
         }
     }
@@ -1999,7 +2114,20 @@ pub(crate) fn generate_service_ts(
 
     // Client class
     let class_name = to_pascal_case(&svc.name);
+    #[cfg(feature = "ordinary-http")]
+    let has_cache = has_cache_handlers(&svc.handlers)
+        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+    #[cfg(not(feature = "ordinary-http"))]
+    let has_cache = has_cache_handlers(&svc.handlers);
     lines.push(format!("export class {class_name}Client {{"));
+
+    // Static cache (shared across all instances)
+    if has_cache {
+        lines.push(
+            "    private static _cache = new Map<string, { request: string; response: any; expiry: number }>();"
+                .to_string(),
+        );
+    }
 
     // Fields
     lines.push(format!("    private _transport: {transport_union};"));
@@ -3103,6 +3231,7 @@ pub(crate) fn generate_service_ts(
         seq64,
         headers.len(),
         debug,
+        &class_name,
     );
     lines.push(handler_obj);
 
