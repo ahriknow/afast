@@ -1,10 +1,12 @@
 # Changelog
 
-## [0.1.2] — Unreleased
+## [0.1.3] — Unreleased
+
+## [0.1.2]
 
 ### Added
 
-- `cache(seconds)` attribute for `#[handler]` and ordinary HTTP macros (`#[get]`, `#[post]`, etc.). When `cache_seconds > 0`, generated client methods accept a `force = false` parameter. Cache is stored at class level (shared across all instances), keyed by method name and serialized parameters. TypeScript, JavaScript, and Kotlin clients all support this feature.
+- `cache(seconds)` attribute for `#[handler]` and ordinary HTTP macros (`#[get]`, `#[post]`, etc.). When `cache_seconds > 0`, generated client methods accept a `force = false` parameter. Cache is stored at class level (shared across all instances). TypeScript, JavaScript, and Kotlin clients all support this feature.
 
 ## [0.1.1]
 
