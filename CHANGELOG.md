@@ -2,6 +2,10 @@
 
 ## [0.1.3] — Unreleased
 
+### Added
+
+- HTTP/1.1 + HTTP/2 dual support with automatic protocol detection. The server auto-negotiates the protocol by sniffing the connection preface (h2c for cleartext HTTP/2, standard HTTP/1.1 otherwise). WebSocket upgrades continue to work via HTTP/1.1.
+
 ## [0.1.2]
 
 ### Added
@@ -50,4 +54,3 @@ Rewrite of 0.0.x — first public release.
 
 - Middleware support
 - TLS / HTTPS (rustls)
-- HTTP/2

@@ -9,7 +9,7 @@ use proc_macro::TokenStream;
 /// Expands to produce the handler metadata (`__META_<name>`), invoker struct
 /// (`__Invoker_<name>`), invoker const (`__INVOKER_<name>`), and a
 /// registration entry function named after the handler.
-/// 
+///
 /// `desc`: A required string literal describing the handler's purpose, used in documentation and metadata.
 /// `name`: An optional string literal specifying the handler's name. If omitted, the function name is used.
 /// `cache`: An optional integer literal specifying the cache duration in seconds.

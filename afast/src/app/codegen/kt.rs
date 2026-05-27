@@ -1347,7 +1347,8 @@ fn handler_method_kt(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    val _cached = {client}Client._cache[_cacheKey]",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached != null && _currentReq == _cached.first && System.currentTimeMillis() < _cached.second.first) {{",
@@ -1600,9 +1601,15 @@ fn ordinary_handler_method_kt(
     // Cache check (before I/O dispatch)
     if cache_seconds > 0 {
         let mut req_var_names: Vec<String> = Vec::new();
-        if param_param.is_some() { req_var_names.push("params".to_string()); }
-        if query_param.is_some() { req_var_names.push("queries".to_string()); }
-        if body_param.is_some() { req_var_names.push("body".to_string()); }
+        if param_param.is_some() {
+            req_var_names.push("params".to_string());
+        }
+        if query_param.is_some() {
+            req_var_names.push("queries".to_string());
+        }
+        if body_param.is_some() {
+            req_var_names.push("body".to_string());
+        }
         let req_expr = if req_var_names.is_empty() {
             "\"[]\"".to_string()
         } else if req_var_names.len() == 1 {
@@ -1615,7 +1622,8 @@ fn ordinary_handler_method_kt(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    val _cached = {client}Client._cache[_cacheKey]",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached != null && _currentReq == _cached.first && System.currentTimeMillis() < _cached.second.first) {{",
@@ -1634,7 +1642,10 @@ fn ordinary_handler_method_kt(
     }
 
     if cache_seconds > 0 {
-        body_lines.push(format!("{}val _result = withContext(Dispatchers.IO) {{", ind));
+        body_lines.push(format!(
+            "{}val _result = withContext(Dispatchers.IO) {{",
+            ind
+        ));
     } else {
         body_lines.push(format!("{}return withContext(Dispatchers.IO) {{", ind));
     }
@@ -1947,7 +1958,10 @@ pub(crate) fn generate_service_kt(
     let class_name = to_pascal_case(&svc.name);
     #[cfg(feature = "ordinary-http")]
     let has_cache = has_cache_handlers_kt(&svc.handlers)
-        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+        || svc
+            .ordinary_routes
+            .iter()
+            .any(|r| r.handler_entry.meta.cache_seconds > 0);
     #[cfg(not(feature = "ordinary-http"))]
     let has_cache = has_cache_handlers_kt(&svc.handlers);
     let mut emitted = Vec::new();
@@ -1990,7 +2004,10 @@ pub(crate) fn generate_service_kt(
     // Static cache (shared across all instances)
     if has_cache {
         lines.push("    companion object {".to_string());
-        lines.push("        private val _cache = mutableMapOf<String, Pair<String, Pair<Long, Any?>>>()".to_string());
+        lines.push(
+            "        private val _cache = mutableMapOf<String, Pair<String, Pair<Long, Any?>>>()"
+                .to_string(),
+        );
         lines.push("    }".to_string());
         lines.push("".to_string());
     }
@@ -2342,7 +2359,11 @@ pub(crate) fn generate_service_kt(
                 // parameters, calls the transport, and deserialises the
                 // response.
                 let prefix_str = handler_prefix(&child_path);
-                let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+                let cache_key_parts: Vec<&str> = path
+                    .iter()
+                    .chain(std::iter::once(&h.name))
+                    .copied()
+                    .collect();
                 let cache_key = cache_key_parts.join(".");
                 if h.meta.is_ordinary {
                     #[cfg(feature = "ordinary-http")]

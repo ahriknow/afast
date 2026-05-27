@@ -14,7 +14,7 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 - **Compact Binary Protocol** — Smaller and faster than JSON, designed for internal communication
 - **Auto Code Generation** — TypeScript / JavaScript / Kotlin clients with full type definitions
 - **Interactive API Docs** — Built-in Web docs with dark/light theme and online API testing
-- **Multiple Transports** — WebSocket, HTTP, and TCP, mix and match as needed
+- **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
 - **HTTP + WS Port Merging** — Same port serves both HTTP and WebSocket simultaneously
 - **RESTful Endpoints** — Standard HTTP methods with Query/Param/Body/Header extractors
 - **Long Connections** — Bidirectional persistent communication via Receiver/Sender over WS/TCP
@@ -730,7 +730,6 @@ cargo run -p example
 
 - **Middleware** — Planned support for generic middleware before/after handler execution (auth, logging, rate limiting, etc.)
 - **TLS / HTTPS** — Planned integration with rustls for HTTPS support
-- **HTTP/2** — Planned HTTP/2 protocol support
 
 ## License
 

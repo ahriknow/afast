@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use http_body_util::Full;
 use hyper::body::Bytes;
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
+use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -42,7 +42,7 @@ use crate::service::OrdinaryRouteInfo;
 ///
 /// This function binds a TCP listener, compiles ordinary HTTP routes
 /// (if enabled), and enters an accept loop that spawns a task per
-/// connection. Each connection is served via hyper's HTTP/1.1 server
+/// connection. Each connection is auto-negotiated (HTTP/1.1 or HTTP/2)
 /// with upgrade support (for merged WebSocket mode).
 pub async fn serve(
     addr: SocketAddr,
@@ -104,13 +104,13 @@ pub async fn serve(
                                     handle_request(req, &shared).await
                                 }
                             });
-                            if let Err(e) = http1::Builder::new()
-                                .serve_connection(io, service)
-                                .with_upgrades()
+                            if let Err(e) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                                .serve_connection_with_upgrades(io, service)
                                 .await
                             {
+                                let msg = e.to_string();
                                 // Incomplete messages are benign (client disconnect).
-                                if !e.is_incomplete_message() {
+                                if !msg.contains("incomplete message") {
                                     eprintln!("afast: http connection error: {}", e);
                                 }
                             }

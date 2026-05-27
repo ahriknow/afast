@@ -877,7 +877,8 @@ fn handler_method_js(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    const _cached = {client}Client._cache.get(_cacheKey);",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
@@ -1214,7 +1215,8 @@ fn ordinary_handler_method_js(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    const _cached = {client}Client._cache.get(_cacheKey);",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
@@ -1357,7 +1359,11 @@ fn generate_handler_object_js(
         } else {
             // Leaf handler — generate JSDoc + method
             let prefix_str = handler_prefix(&child_path);
-            let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+            let cache_key_parts: Vec<&str> = path
+                .iter()
+                .chain(std::iter::once(&h.name))
+                .copied()
+                .collect();
             let cache_key = cache_key_parts.join(".");
             if h.meta.is_ordinary {
                 // Ordinary HTTP handler
@@ -1822,7 +1828,10 @@ pub(crate) fn generate_service_js(
     let class_name = to_pascal_case(&svc.name);
     #[cfg(feature = "ordinary-http")]
     let has_cache = has_cache_handlers_js(&svc.handlers)
-        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+        || svc
+            .ordinary_routes
+            .iter()
+            .any(|r| r.handler_entry.meta.cache_seconds > 0);
     #[cfg(not(feature = "ordinary-http"))]
     let has_cache = has_cache_handlers_js(&svc.handlers);
     lines.push(format!("export class {}Client {{", class_name));
@@ -1830,7 +1839,8 @@ pub(crate) fn generate_service_js(
     // Static cache (shared across all instances)
     if has_cache {
         lines.push(
-            "    /** @type {Map<string, { request: string, response: any, expiry: number }>} */".to_string(),
+            "    /** @type {Map<string, { request: string, response: any, expiry: number }>} */"
+                .to_string(),
         );
         lines.push("    static _cache = new Map();".to_string());
     }

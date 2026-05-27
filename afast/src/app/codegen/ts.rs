@@ -1286,7 +1286,8 @@ fn handler_method(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    const _cached = {client}Client._cache.get(_cacheKey);",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
@@ -1642,7 +1643,8 @@ fn ordinary_handler_method_ts(
         body_lines.push(format!("{}if (!force) {{", ind));
         body_lines.push(format!(
             "{}    const _cached = {client}Client._cache.get(_cacheKey);",
-            ind, client = class_name
+            ind,
+            client = class_name
         ));
         body_lines.push(format!(
             "{}    if (_cached && Date.now() < _cached.expiry && _currentReq === _cached.request) return _cached.response;",
@@ -1846,7 +1848,11 @@ fn generate_handler_object(
         } else {
             // Leaf handler — generate method
             let prefix_str = handler_prefix(&child_path);
-            let cache_key_parts: Vec<&str> = path.iter().chain(std::iter::once(&h.name)).copied().collect();
+            let cache_key_parts: Vec<&str> = path
+                .iter()
+                .chain(std::iter::once(&h.name))
+                .copied()
+                .collect();
             let cache_key = cache_key_parts.join(".");
 
             if h.meta.is_ordinary {
@@ -1952,7 +1958,15 @@ fn generate_handler_object(
 
                 lines.push(format!("{} */", inner_indent));
 
-                lines.push(handler_method(h, all_handlers, &prefix_str, indent, debug, class_name, &cache_key));
+                lines.push(handler_method(
+                    h,
+                    all_handlers,
+                    &prefix_str,
+                    indent,
+                    debug,
+                    class_name,
+                    &cache_key,
+                ));
             }
         }
     }
@@ -2116,7 +2130,10 @@ pub(crate) fn generate_service_ts(
     let class_name = to_pascal_case(&svc.name);
     #[cfg(feature = "ordinary-http")]
     let has_cache = has_cache_handlers(&svc.handlers)
-        || svc.ordinary_routes.iter().any(|r| r.handler_entry.meta.cache_seconds > 0);
+        || svc
+            .ordinary_routes
+            .iter()
+            .any(|r| r.handler_entry.meta.cache_seconds > 0);
     #[cfg(not(feature = "ordinary-http"))]
     let has_cache = has_cache_handlers(&svc.handlers);
     lines.push(format!("export class {class_name}Client {{"));
