@@ -188,6 +188,19 @@ impl Default for DocConfig {
     }
 }
 
+/// TLS configuration for HTTPS server.
+///
+/// Passed to [`AFast::https`] to enable TLS on the HTTP server.
+/// Supports PEM-encoded certificate chains and private keys.
+#[cfg(feature = "tls")]
+#[derive(Clone)]
+pub struct TlsConfig {
+    /// Path to the PEM-encoded certificate chain file.
+    pub cert_path: String,
+    /// Path to the PEM-encoded private key file.
+    pub key_path: String,
+}
+
 /// The top-level application builder and runtime.
 ///
 /// `AFast` configures shared state, services, and transport servers, then
@@ -230,6 +243,12 @@ pub struct AFast {
     /// Ordinary (REST-style) HTTP routes extracted from registered services.
     #[cfg(feature = "ordinary-http")]
     ordinary_routes: Vec<OrdinaryRouteInfo>,
+    /// TLS configuration for HTTPS, if enabled.
+    #[cfg(feature = "tls")]
+    tls_config: Option<TlsConfig>,
+    /// HTTPS listen address (`"host:port"`), if bound.
+    #[cfg(feature = "tls")]
+    https_addr: Option<String>,
 }
 
 impl AFast {
@@ -254,6 +273,10 @@ impl AFast {
             code_config: None,
             #[cfg(feature = "ordinary-http")]
             ordinary_routes: Vec::new(),
+            #[cfg(feature = "tls")]
+            tls_config: None,
+            #[cfg(feature = "tls")]
+            https_addr: None,
         }
     }
 
@@ -286,6 +309,21 @@ impl AFast {
     #[cfg(feature = "http")]
     pub fn http(mut self, addr: &str) -> Self {
         self.http_addr = Some(addr.to_string());
+        self
+    }
+
+    /// Binds the HTTP server with TLS to the given address.
+    ///
+    /// Requires the `tls` feature. The server uses `rustls` for TLS and
+    /// supports ALPN negotiation for HTTP/2. The address must use the form
+    /// `"host:port"` (e.g. `"0.0.0.0:443"`).
+    #[cfg(feature = "tls")]
+    pub fn https(mut self, addr: &str, cert_path: &str, key_path: &str) -> Self {
+        self.https_addr = Some(addr.to_string());
+        self.tls_config = Some(TlsConfig {
+            cert_path: cert_path.to_string(),
+            key_path: key_path.to_string(),
+        });
         self
     }
 
@@ -413,6 +451,10 @@ impl AFast {
             if self.tcp_addr.is_some() {
                 has_server = true;
             }
+            #[cfg(feature = "tls")]
+            if self.https_addr.is_some() {
+                has_server = true;
+            }
 
             if has_server {
                 let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
@@ -421,19 +463,26 @@ impl AFast {
 
                 #[cfg(any(feature = "code", feature = "doc"))]
                 let http_services = self.services.clone();
+                #[cfg(all(feature = "tls", any(feature = "code", feature = "doc")))]
+                let https_services = http_services.clone();
 
                 #[cfg(feature = "doc")]
                 let doc_title = self.doc_config.and_then(|c| c.title);
 
                 let mut handles: Vec<tokio::task::JoinHandle<Result<(), Error>>> = Vec::new();
 
-                // Detect if WS and HTTP share the same address
+                // Detect if WS and HTTP/HTTPS share the same address
                 #[cfg(all(feature = "ws", feature = "http"))]
                 let ws_merged = self
                     .ws_addr
                     .as_ref()
-                    .zip(self.http_addr.as_ref())
-                    .map(|(w, h)| w == h)
+                    .map(|w| {
+                        #[cfg(feature = "tls")]
+                        if self.https_addr.as_ref().is_some_and(|h| w == h) {
+                            return true;
+                        }
+                        self.http_addr.as_ref().is_some_and(|h| w == h)
+                    })
                     .unwrap_or(false);
                 #[cfg(all(feature = "ws", not(feature = "http")))]
                 let ws_merged = false;
@@ -479,7 +528,7 @@ impl AFast {
                     } // end else (standalone WS)
                 } // end if let Some(addr)
 
-                // Start HTTP server
+                // Start HTTP server (plain, no TLS)
                 #[cfg(feature = "http")]
                 if let Some(addr) = &self.http_addr {
                     let addr: std::net::SocketAddr = addr.parse().map_err(|e| Error::Http {
@@ -512,6 +561,50 @@ impl AFast {
                             ordinary_routes,
                             #[cfg(feature = "ws")]
                             ws_merged,
+                            #[cfg(feature = "tls")]
+                            None,
+                        )
+                        .await
+                    });
+                    handles.push(server);
+                }
+
+                // Start HTTPS server (TLS)
+                #[cfg(feature = "tls")]
+                if let Some(addr) = &self.https_addr {
+                    let addr: std::net::SocketAddr = addr.parse().map_err(|e| Error::Http {
+                        message: format!("invalid https address: {}", e),
+                    })?;
+
+                    let state_clone = state.clone();
+                    let handlers_clone = handlers.clone();
+                    let shutdown_rx = shutdown_tx.subscribe();
+                    #[cfg(feature = "doc")]
+                    let doc_title_clone = doc_title.clone();
+                    #[cfg(feature = "doc")]
+                    let ws_addr_clone = self.ws_addr.clone();
+                    #[cfg(feature = "ordinary-http")]
+                    let ordinary_routes = self.ordinary_routes.clone();
+                    let tls_config = self.tls_config.clone();
+
+                    let server = tokio::spawn(async move {
+                        crate::app::transport::serve(
+                            addr,
+                            state_clone,
+                            handlers_clone,
+                            #[cfg(any(feature = "code", feature = "doc"))]
+                            https_services,
+                            shutdown_rx,
+                            #[cfg(feature = "doc")]
+                            doc_title_clone,
+                            #[cfg(feature = "doc")]
+                            ws_addr_clone,
+                            #[cfg(feature = "ordinary-http")]
+                            ordinary_routes,
+                            #[cfg(feature = "ws")]
+                            ws_merged,
+                            #[cfg(feature = "tls")]
+                            tls_config,
                         )
                         .await
                     });

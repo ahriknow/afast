@@ -14,6 +14,7 @@ Kotlin 客户端代码，内置交互式 API 文档。
 - **自动代码生成** — 生成 TypeScript / JavaScript / Kotlin 客户端，含完整类型定义
 - **交互式 API 文档** — 内置带深色/浅色主题的 Web 文档页面，支持在线测试
 - **多传输层** — 同时支持 WebSocket、HTTP/1.1、HTTP/2 和 TCP，可按需组合
+- **TLS / HTTPS** — 基于 rustls，支持 ALPN 协商 HTTP/2，HTTP 和 HTTPS 可同时运行
 - **HTTP + WS 端口合并** — 同一端口可同时提供 HTTP 和 WebSocket 服务
 - **RESTful 端点** — 支持标准 HTTP 方法（GET/POST/PUT/PATCH/DELETE），含 Query/Param/Body/Header 提取器
 - **长连接** — 通过 Receiver/Sender 支持 WebSocket/TCP 双向持久通信
@@ -717,11 +718,6 @@ example/         — 示例项目（含 HTTP、WS、TCP、文档等完整用法�
 # 启动示例服务器
 cargo run -p example
 ```
-
-## 路线图
-
-- **Middleware** — 计划支持 handler 执行前后的通用中间件（auth、日志、限流等）
-- **TLS / HTTPS** — 计划集成 rustls 以支持 HTTPS
 
 ## License
 

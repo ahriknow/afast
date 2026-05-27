@@ -2,3 +2,4 @@
 /Cargo.lock
 /client
 /example/client
+*.pem

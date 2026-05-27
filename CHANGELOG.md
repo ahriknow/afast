@@ -5,6 +5,7 @@
 ### Added
 
 - HTTP/1.1 + HTTP/2 dual support with automatic protocol detection. The server auto-negotiates the protocol by sniffing the connection preface (h2c for cleartext HTTP/2, standard HTTP/1.1 otherwise). WebSocket upgrades continue to work via HTTP/1.1.
+- TLS/HTTPS support via `rustls` with ALPN negotiation for HTTP/2. Feature-gated behind `tls`. Supports running HTTP and HTTPS simultaneously on different ports.
 
 ## [0.1.2]
 
@@ -49,8 +50,3 @@ Rewrite of 0.0.x — first public release.
 - **Type tags** — `#[derive(Tag)]` for automatic client-side type definitions and validation.
 - **Multiple transport protocols** — Fetch, WebSocket, and TCP clients for multiple platforms (browser, Node.js, Bun, UniApp, WeChat Mini Program).
 - **Port merging** — HTTP and WebSocket can share the same port.
-
-### Planned
-
-- Middleware support
-- TLS / HTTPS (rustls)

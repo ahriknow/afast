@@ -43,7 +43,9 @@ use crate::service::OrdinaryRouteInfo;
 /// This function binds a TCP listener, compiles ordinary HTTP routes
 /// (if enabled), and enters an accept loop that spawns a task per
 /// connection. Each connection is auto-negotiated (HTTP/1.1 or HTTP/2)
-/// with upgrade support (for merged WebSocket mode).
+/// with upgrade support (for merged WebSocket mode). When TLS is
+/// enabled via the `tls` feature, connections are wrapped with TLS
+/// and support ALPN negotiation for HTTP/2.
 pub async fn serve(
     addr: SocketAddr,
     state: Arc<StateMap>,
@@ -54,6 +56,7 @@ pub async fn serve(
     #[cfg(feature = "doc")] ws_addr_str: Option<String>,
     #[cfg(feature = "ordinary-http")] ordinary_routes: Vec<OrdinaryRouteInfo>,
     #[cfg(feature = "ws")] enable_ws_upgrade: bool,
+    #[cfg(feature = "tls")] tls_config: Option<crate::app::TlsConfig>,
 ) -> Result<(), Error> {
     let listener = TcpListener::bind(addr).await.map_err(|e| Error::Http {
         message: e.to_string(),
@@ -90,29 +93,56 @@ pub async fn serve(
         enable_ws_upgrade,
     });
 
+    // Set up TLS acceptor if TLS config is provided.
+    #[cfg(feature = "tls")]
+    let tls_acceptor = if let Some(ref cfg) = tls_config {
+        // Install the ring crypto provider (idempotent — safe to call multiple times).
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certs = load_certs(&cfg.cert_path)?;
+        let key = load_key(&cfg.key_path)?;
+        let mut server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| Error::Http {
+                message: e.to_string(),
+            })?;
+        server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Some(tokio_rustls::TlsAcceptor::from(Arc::new(server_config)))
+    } else {
+        None
+    };
+
     loop {
         tokio::select! {
             accept = listener.accept() => {
                 match accept {
                     Ok((stream, _)) => {
                         let shared = shared.clone();
+                        #[cfg(feature = "tls")]
+                        let tls = tls_acceptor.clone();
                         tokio::spawn(async move {
-                            let io = hyper_util::rt::TokioIo::new(stream);
-                            let service = service_fn(move |req| {
-                                let shared = shared.clone();
-                                async move {
-                                    handle_request(req, &shared).await
+                            #[cfg(feature = "tls")]
+                            match tls {
+                                Some(ref acceptor) => {
+                                    match acceptor.accept(stream).await {
+                                        Ok(tls_stream) => {
+                                            let io = hyper_util::rt::TokioIo::new(tls_stream);
+                                            serve_connection(io, shared).await;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("afast: tls handshake error: {}", e);
+                                        }
+                                    }
                                 }
-                            });
-                            if let Err(e) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-                                .serve_connection_with_upgrades(io, service)
-                                .await
+                                None => {
+                                    let io = hyper_util::rt::TokioIo::new(stream);
+                                    serve_connection(io, shared).await;
+                                }
+                            };
+                            #[cfg(not(feature = "tls"))]
                             {
-                                let msg = e.to_string();
-                                // Incomplete messages are benign (client disconnect).
-                                if !msg.contains("incomplete message") {
-                                    eprintln!("afast: http connection error: {}", e);
-                                }
+                                let io = hyper_util::rt::TokioIo::new(stream);
+                                serve_connection(io, shared).await;
                             }
                         });
                     }
@@ -124,6 +154,28 @@ pub async fn serve(
     }
 
     Ok(())
+}
+
+/// Serves a single HTTP connection with auto-detected protocol.
+///
+/// Generic over the IO type to support both plain TCP and TLS streams.
+async fn serve_connection<S>(io: hyper_util::rt::TokioIo<S>, shared: Arc<SharedState>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let service = service_fn(move |req| {
+        let shared = shared.clone();
+        async move { handle_request(req, &shared).await }
+    });
+    if let Err(e) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+        .serve_connection_with_upgrades(io, service)
+        .await
+    {
+        let msg = e.to_string();
+        if !msg.contains("incomplete message") {
+            eprintln!("afast: http connection error: {}", e);
+        }
+    }
 }
 
 /// Immutable shared state for all HTTP request handlers.
@@ -580,4 +632,34 @@ fn error_response(
         .header("content-type", "application/octet-stream")
         .body(Full::new(Bytes::from(resp)))
         .unwrap())
+}
+
+/// Loads PEM-encoded certificates from a file.
+#[cfg(feature = "tls")]
+fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, Error> {
+    let file = std::fs::File::open(path).map_err(|e| Error::Http {
+        message: format!("failed to open cert file '{}': {}", path, e),
+    })?;
+    let mut reader = std::io::BufReader::new(file);
+    rustls_pemfile::certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| Error::Http {
+            message: format!("failed to parse cert file: {}", e),
+        })
+}
+
+/// Loads a PEM-encoded private key from a file.
+#[cfg(feature = "tls")]
+fn load_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>, Error> {
+    let file = std::fs::File::open(path).map_err(|e| Error::Http {
+        message: format!("failed to open key file '{}': {}", path, e),
+    })?;
+    let mut reader = std::io::BufReader::new(file);
+    rustls_pemfile::private_key(&mut reader)
+        .map_err(|e| Error::Http {
+            message: format!("failed to parse key file: {}", e),
+        })?
+        .ok_or_else(|| Error::Http {
+            message: "no private key found in key file".into(),
+        })
 }

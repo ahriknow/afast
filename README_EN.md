@@ -15,6 +15,7 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 - **Auto Code Generation** — TypeScript / JavaScript / Kotlin clients with full type definitions
 - **Interactive API Docs** — Built-in Web docs with dark/light theme and online API testing
 - **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
+- **TLS / HTTPS** — Based on rustls with ALPN for HTTP/2 negotiation. HTTP and HTTPS can run simultaneously
 - **HTTP + WS Port Merging** — Same port serves both HTTP and WebSocket simultaneously
 - **RESTful Endpoints** — Standard HTTP methods with Query/Param/Body/Header extractors
 - **Long Connections** — Bidirectional persistent communication via Receiver/Sender over WS/TCP
@@ -725,11 +726,6 @@ example/         — Example project (full usage including HTTP, WS, TCP, docs)
 # Start the example server
 cargo run -p example
 ```
-
-## Roadmap
-
-- **Middleware** — Planned support for generic middleware before/after handler execution (auth, logging, rate limiting, etc.)
-- **TLS / HTTPS** — Planned integration with rustls for HTTPS support
 
 ## License
 

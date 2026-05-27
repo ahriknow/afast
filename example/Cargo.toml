@@ -12,6 +12,7 @@ categories.workspace = true
 [features]
 default = ["ordinary-http"]
 ordinary-http = ["afast/ordinary-http"]
+tls = ["afast/tls"]
 
 [dependencies]
 afast = { path = "../afast", features = [

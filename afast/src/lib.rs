@@ -57,6 +57,7 @@
 //! | `code` | HTTP endpoint for on-demand client code generation |
 //! | `doc` | Interactive API documentation page |
 //! | `ordinary-http` | REST-style endpoints with JSON request/response bodies |
+//! | `tls` | HTTPS support via rustls with ALPN for HTTP/2 |
 //! | `seq64` | Use `i64` for WebSocket request IDs (default `i32`) |
 //! | `len64` | Use `u64` for WebSocket payload lengths (default `u32`) |
 
@@ -616,6 +617,8 @@ pub use app::AFast;
 pub use app::DocConfig;
 #[cfg(feature = "kt")]
 pub use app::KtCallType;
+#[cfg(feature = "tls")]
+pub use app::TlsConfig;
 #[cfg(feature = "ordinary-http")]
 pub use app::ordinary;
 pub use app::{GenerateTarget, JsTsCallType, Lang};

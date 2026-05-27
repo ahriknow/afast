@@ -106,5 +106,8 @@ async fn main() {
         .http("[::]:5000")
         .tcp("[::]:4000");
 
+    #[cfg(feature = "tls")]
+    let app = app.https("[::]:5443", "./cert.pem", "./key.pem");
+
     app.run().await.unwrap();
 }

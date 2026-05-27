@@ -24,3 +24,6 @@ futures-util = { version = "0.3" }
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
 http-body-util = { version = "0.1" }
+tokio-rustls = { version = "0.26" }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = { version = "2" }
