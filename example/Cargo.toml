@@ -19,7 +19,6 @@ afast = { path = "../afast", features = [
     "tcp",
     "http",
     "ws",
-    "ordinary-http",
     "js",
     "ts",
     "kt",

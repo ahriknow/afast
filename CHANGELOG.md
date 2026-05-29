@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.5]
+
+### Fixed
+
+- **`service!` macro ordinary-http feature gate**: Removed `#[cfg(feature = "ordinary-http")]` checks from inside the `service!` macro, which incorrectly evaluated against the caller's crate features instead of afast's. The macro now delegates directly to `ordinary_route` / `ordinary_leaf` methods whose cfg gates correctly evaluate within the afast library.
+
 ## [0.1.4]
 
 ### Added

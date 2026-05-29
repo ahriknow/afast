@@ -472,56 +472,31 @@ macro_rules! service {
     // Ordinary HTTP routes at service level
     (@svc $svc:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $svc.ordinary_route("GET", $path, $crate::register_ordinary!($($fn)+)) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $svc.ordinary_route("GET", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
     (@svc $svc:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $svc.ordinary_route("POST", $path, $crate::register_ordinary!($($fn)+)) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $svc.ordinary_route("POST", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
     (@svc $svc:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $svc.ordinary_route("PUT", $path, $crate::register_ordinary!($($fn)+)) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $svc.ordinary_route("PUT", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
     (@svc $svc:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $svc.ordinary_route("PATCH", $path, $crate::register_ordinary!($($fn)+)) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $svc.ordinary_route("PATCH", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
     (@svc $svc:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $svc.ordinary_route("DELETE", $path, $crate::register_ordinary!($($fn)+)) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $svc.ordinary_route("DELETE", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
@@ -552,56 +527,31 @@ macro_rules! service {
     // Ordinary HTTP routes inside a group
     (@group_chain $grp:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@group_chain
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $grp.handler($crate::Handler::ordinary_leaf($path, "GET", $crate::register_ordinary!($($fn)+))) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $grp.handler($crate::Handler::ordinary_leaf($path, "GET", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
     (@group_chain $grp:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@group_chain
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $grp.handler($crate::Handler::ordinary_leaf($path, "POST", $crate::register_ordinary!($($fn)+))) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $grp.handler($crate::Handler::ordinary_leaf($path, "POST", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
     (@group_chain $grp:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@group_chain
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $grp.handler($crate::Handler::ordinary_leaf($path, "PUT", $crate::register_ordinary!($($fn)+))) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $grp.handler($crate::Handler::ordinary_leaf($path, "PUT", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
     (@group_chain $grp:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@group_chain
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $grp.handler($crate::Handler::ordinary_leaf($path, "PATCH", $crate::register_ordinary!($($fn)+))) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $grp.handler($crate::Handler::ordinary_leaf($path, "PATCH", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
     (@group_chain $grp:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@group_chain
-            {
-                #[cfg(feature = "ordinary-http")]
-                { $grp.handler($crate::Handler::ordinary_leaf($path, "DELETE", $crate::register_ordinary!($($fn)+))) }
-                #[cfg(not(feature = "ordinary-http"))]
-                { ::core::compile_error!("ordinary HTTP routes require the `ordinary-http` feature; enable it in Cargo.toml") }
-            }
+            $grp.handler($crate::Handler::ordinary_leaf($path, "DELETE", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
