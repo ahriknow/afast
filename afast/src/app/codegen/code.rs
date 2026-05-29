@@ -12,6 +12,9 @@ pub fn generate_code(
     service_name: &str,
     lang: &Lang,
 ) -> Result<String, CodeError> {
+    if service_name.is_empty() {
+        return Err(CodeError::ServiceNotFound(service_name.to_string()));
+    }
     let svc = services
         .iter()
         .find(|s| s.name == service_name)

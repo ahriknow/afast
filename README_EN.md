@@ -26,6 +26,8 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 - **Recursive Type Discovery** — `#[derive(Tag)]` with function pointers, no global registry
 - **Client Strategy Pattern** — Transport chosen at construction, immutable thereafter, zero overhead
 - **Client-Side Caching** — `cache(seconds)` attribute, class-level static cache, returns cached data for identical params
+- **Service Merge on Duplicate Name** — Same-name services auto-merge handlers and routes, no duplicate registration issues
+- **Empty-Name Service** — Services with empty name are callable via binary protocol but excluded from client code and API docs
 
 ## Quick Start
 
@@ -33,7 +35,7 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 
 ```toml
 [dependencies]
-afast = { version = "0.1.3", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.4", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -274,6 +276,47 @@ group("user" => {
     post("", create_user),       // POST /user
     delete(":id", delete_user),  // DELETE /user/:id
 }),
+```
+
+#### Service Merge on Duplicate Name
+
+Registering multiple services with the same name automatically merges the later
+handlers and routes into the first service — no duplicates are created. This is
+useful for splitting handlers across modules:
+
+```rust
+let user_svc = service!("api", "User API" => {
+    h(list_users),
+    h(create_user),
+});
+
+// Handlers from this second "api" service merge into user_svc
+let user_extra_svc = service!("api" => {
+    h(delete_user),
+    get(":id", get_user_http),
+});
+
+let app = AFast::new()
+    .service(user_svc)
+    .service(user_extra_svc);  // delete_user and get_user_http merge into "api"
+```
+
+#### Empty-Name Service
+
+A service with an empty string name (`""`) still registers its handlers into the
+global handler table and they remain fully callable via binary protocol
+(HTTP/WS/TCP), but they are excluded from client code generation and API
+documentation. Useful for internal or debug-only endpoints:
+
+```rust
+let internal_svc = service!("", "Internal" => {
+    h(debug_info),
+    get("ping", ping),
+});
+
+let app = AFast::new()
+    .service(api_svc)
+    .service(internal_svc);  // debug_info and ping are callable but hidden from clients and docs
 ```
 
 ### Type Tags

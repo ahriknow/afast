@@ -3320,6 +3320,9 @@ impl AFast {
     pub fn get_js_code(&self) -> String {
         let mut parts = Vec::new();
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             parts.push(generate_service_js(
                 svc,
                 &[crate::JsTsCallType::Fetch, crate::JsTsCallType::Ws],
@@ -3347,6 +3350,9 @@ impl AFast {
         })?;
 
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             write_service_js(svc, dir, calls, debug)?;
         }
 

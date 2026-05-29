@@ -25,6 +25,8 @@ Kotlin 客户端代码，内置交互式 API 文档。
 - **递归类型发现** — `#[derive(Tag)]` 通过函数指针递归发现嵌套类型，无需全局注册表
 - **客户端策略模式** — 构造时选择 WS/HTTP，之后不可切换，运行时零分支开销
 - **客户端缓存** — `cache(seconds)` 属性，生成类级别静态缓存，相同参数请求直接返回缓存数据
+- **服务自动合并** — 同名 Service 自动合并 handlers 和路由，无需担心重复注册
+- **空名称服务** — Service 名称为空时，handlers 仍可通过二进制协议调用，但不出现在客户端代码和 API 文档中
 
 ## 快速开始
 
@@ -32,7 +34,7 @@ Kotlin 客户端代码，内置交互式 API 文档。
 
 ```toml
 [dependencies]
-afast = { version = "0.1.3", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.4", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -270,6 +272,45 @@ group("user" => {
     post("", create_user),       // POST /user
     delete(":id", delete_user),  // DELETE /user/:id
 }),
+```
+
+#### 同名 Service 自动合并
+
+多次注册同名 Service 时，后续注册的 handlers 和路由会自动合并到第一个同名
+Service 中，不会产生重复。适合将不同模块的 handlers 分散定义后统一注册：
+
+```rust
+let user_svc = service!("api", "用户 API" => {
+    h(list_users),
+    h(create_user),
+});
+
+// 第二个 "api" 服务的 handlers 会合并到上面的 user_svc 中
+let user_extra_svc = service!("api" => {
+    h(delete_user),
+    get(":id", get_user_http),
+});
+
+let app = AFast::new()
+    .service(user_svc)
+    .service(user_extra_svc);  // delete_user 和 get_user_http 合并到 "api"
+```
+
+#### 空名称 Service
+
+Service 名称为空字符串 `""` 时，其 handlers 仍会注册到全局 handler 表中，
+可通过二进制协议（HTTP/WS/TCP）正常调用，但不会出现在客户端代码生成和
+API 文档中。适合内部接口或调试用端点：
+
+```rust
+let internal_svc = service!("", "内部服务" => {
+    h(debug_info),
+    get("ping", ping),
+});
+
+let app = AFast::new()
+    .service(api_svc)
+    .service(internal_svc);  // debug_info 和 ping 可调用，但不出现在客户端代码和文档中
 ```
 
 ### 类型标签（Tag）

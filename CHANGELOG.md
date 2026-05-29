@@ -1,6 +1,13 @@
 # Changelog
 
-## [0.1.3] — Unreleased
+## [0.1.4]
+
+### Added
+
+- **Service merge on duplicate name**: When registering a service with a name that already exists, the new service's handlers and ordinary routes are automatically merged into the existing one instead of creating a duplicate. Handler offsets continue from the previous service, and the description is preserved from the first registration.
+- **Empty-name service support**: Services with an empty string name (`""`) are now fully supported. Their handlers are registered and callable via the binary protocol (HTTP/WS/TCP), but are excluded from client code generation (TS/JS/KT) and API documentation (`/doc`). This is useful for internal-only endpoints that should not be exposed to clients.
+
+## [0.1.3]
 
 ### Added
 

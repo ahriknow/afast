@@ -211,6 +211,9 @@ fn generate_common_kt(services: &[Service], _seq64: bool, _has_ws: bool, _has_tc
     // the common file can emit all shared type definitions once.
     let mut all_customs = Vec::new();
     for svc in services {
+        if svc.name.is_empty() {
+            continue;
+        }
         let customs = collect_customs(&svc.handlers);
         for ci in customs {
             if !all_customs.iter().any(|c: &CustomInfo| c.ty == ci.ty) {
@@ -224,6 +227,9 @@ fn generate_common_kt(services: &[Service], _seq64: bool, _has_ws: bool, _has_tc
         // Custom type, recursively discovering nested types.
         let mut emitted = Vec::new();
         for svc in services {
+            if svc.name.is_empty() {
+                continue;
+            }
             collect_custom_type_exports(&svc.handlers, &[], &mut emitted, &mut lines);
         }
         lines.push("".to_string());
@@ -240,6 +246,9 @@ fn generate_common_kt(services: &[Service], _seq64: bool, _has_ws: bool, _has_tc
         // Collect all headers across all services (ordinary HTTP only)
         let mut all_headers = Vec::new();
         for svc in services {
+            if svc.name.is_empty() {
+                continue;
+            }
             let headers = collect_headers(&svc.handlers);
             for ci in headers {
                 if !all_headers.iter().any(|c: &CustomInfo| c.ty == ci.ty) {
@@ -253,6 +262,9 @@ fn generate_common_kt(services: &[Service], _seq64: bool, _has_ws: bool, _has_tc
             // Header type, recursively discovering nested types.
             let mut emitted = Vec::new();
             for svc in services {
+                if svc.name.is_empty() {
+                    continue;
+                }
                 collect_header_type_exports(&svc.handlers, &[], &mut emitted, &mut lines);
             }
             lines.push("".to_string());
@@ -2477,6 +2489,9 @@ impl AFast {
         let common = generate_common_kt(&self.services, seq64, has_ws, has_tcp);
         let mut parts = vec![common];
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             parts.push(generate_service_kt(
                 svc,
                 &[
@@ -2516,6 +2531,9 @@ impl AFast {
         })?;
 
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             write_service_kt(svc, dir, calls, debug)?;
         }
 

@@ -3268,6 +3268,9 @@ pub(crate) fn generate_index_html(services: &[Service], doc_title: Option<&str>)
     let h1_title = doc_title.unwrap_or("afast API Documentation");
     let mut cards = String::new();
     for svc in services {
+        if svc.name.is_empty() {
+            continue;
+        }
         let count = crate::service::count_handlers(&svc.handlers);
         let desc_html = if svc.desc.is_empty() {
             String::new()
@@ -3517,6 +3520,9 @@ pub(crate) fn write_docs(
     // Generate and write one page per service with its full endpoint
     // explorer UI.
     for svc in services {
+        if svc.name.is_empty() {
+            continue;
+        }
         let html = generate_service_html(services, &svc.name, doc_title, "", None)?;
         fs::write(dir.join(format!("{}.html", svc.name)), html)
             .map_err(|e| DocError::ServiceNotFound(e.to_string()))?;

@@ -3,7 +3,8 @@ pub mod article;
 pub mod auth;
 pub mod chat;
 
-use afast::{AFastDeserialize, AFastSerialize, Tag, handler};
+use afast::{AFastDeserialize, AFastSerialize, Tag, get, handler};
+use serde::Serialize;
 
 #[derive(AFastSerialize, Tag)]
 #[tag("Health check result")]
@@ -46,4 +47,16 @@ pub async fn info(
     Ok(InfoResponst {
         message: "message".to_string(),
     })
+}
+
+#[derive(Serialize, Tag)]
+#[tag("Pong response")]
+pub struct PongResponse {
+    #[tag("Whether the server is alive")]
+    pong: bool,
+}
+
+#[get(desc("Simple ping endpoint"))]
+pub async fn ping() -> afast::HttpResult<afast::Json<PongResponse>> {
+    Ok(afast::Json(PongResponse { pong: true }))
 }

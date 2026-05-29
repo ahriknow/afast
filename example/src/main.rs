@@ -12,7 +12,7 @@ use handler::article::{
 };
 use handler::auth::{create_token, get_user_id, login, register};
 use handler::chat::chat_echo;
-use handler::{health, info};
+use handler::{health, info, ping};
 use state::AppState;
 
 // ─── Entry Point ──────────────────────────────────────────────────
@@ -59,6 +59,18 @@ async fn main() {
         h(chat_echo),
     });
 
+    // Duplicate service name: handlers will be merged into the first "admin" service
+    let admin_extra_svc = service!("admin", "Admin Extra" => {
+        h(health),
+    });
+
+    // Empty service name: handlers are registered and callable via binary protocol,
+    // but excluded from client code generation and API documentation.
+    let internal_svc = service!("", "Internal" => {
+        h(info),
+        get("ping", ping),
+    });
+
     let app = AFast::new()
         .state(AppState::new())
         .document(DocConfig::with("Blog API Docs", "./client/doc"))
@@ -102,9 +114,11 @@ async fn main() {
         .service(auth_svc)
         .service(article_svc)
         .service(chat_svc)
-        .ws("[::]:3000")
-        .http("[::]:5000")
-        .tcp("[::]:4000");
+        .service(admin_extra_svc) // merges into "admin"
+        .service(internal_svc) // empty name: excluded from codegen/docs
+        .ws("[::]:3001")
+        .http("[::]:5001")
+        .tcp("[::]:4001");
 
     #[cfg(feature = "tls")]
     let app = app.https("[::]:5443", "./cert.pem", "./key.pem");

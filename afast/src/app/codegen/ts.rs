@@ -3316,6 +3316,9 @@ impl AFast {
     pub fn get_ts_code(&self) -> String {
         let mut parts = Vec::new();
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             parts.push(generate_service_ts(
                 svc,
                 &[crate::JsTsCallType::Fetch, crate::JsTsCallType::Ws],
@@ -3343,6 +3346,9 @@ impl AFast {
         })?;
 
         for svc in &self.services {
+            if svc.name.is_empty() {
+                continue;
+            }
             write_service_ts(svc, dir, calls, debug)?;
         }
 

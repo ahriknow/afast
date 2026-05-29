@@ -352,7 +352,45 @@ impl AFast {
     /// Handler offsets are assigned automatically, continuing from the
     /// highest offset of previously registered services. Ordinary HTTP
     /// routes are extracted and stored separately for the HTTP server.
+    ///
+    /// If a service with the same name already exists (and the name is
+    /// non-empty), the new service's handlers and ordinary routes are
+    /// merged into the existing one instead of adding a duplicate.
     pub fn service(mut self, mut service: Service) -> Self {
+        // Check for duplicate service name — merge if found.
+        if !service.name.is_empty() {
+            if let Some(existing) = self.services.iter_mut().find(|s| s.name == service.name) {
+                // Merge handlers: assign offsets for new handlers continuing
+                // from the existing handler_table length.
+                #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+                build_handler_table(&mut service.handlers, &mut self.handler_table);
+                #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
+                build_handler_table(&mut service.handlers, &mut 0);
+
+                #[cfg(feature = "ordinary-http")]
+                {
+                    // Add routes to the global HTTP dispatch table
+                    for route in &service.ordinary_routes {
+                        self.ordinary_routes.push(route.clone());
+                    }
+                    collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
+                    // Also add to the existing service for code generation
+                    existing
+                        .ordinary_routes
+                        .append(&mut service.ordinary_routes);
+                }
+
+                existing.handlers.append(&mut service.handlers);
+
+                // Update description only if the existing one is empty
+                if existing.desc.is_empty() && !service.desc.is_empty() {
+                    existing.desc = service.desc;
+                }
+
+                return self;
+            }
+        }
+
         #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
         build_handler_table(&mut service.handlers, &mut self.handler_table);
         #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
