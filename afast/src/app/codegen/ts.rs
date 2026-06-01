@@ -10,6 +10,16 @@
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
+/// Returns an iterator over fields that should be included in generated code,
+/// filtering out `skip` fields and `skip_with` fields whose marker matches.
+fn included(
+    fields: &[crate::handler::FieldMeta],
+) -> impl Iterator<Item = &crate::handler::FieldMeta> {
+    fields
+        .iter()
+        .filter(|f| crate::marker::should_include_field(f))
+}
+
 // ─── Enum tag size (must match afastdata feature) ─────────────
 
 /// Returns the TypeScript writer method name for the enum tag integer,
@@ -387,7 +397,7 @@ fn type_def_for(meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
             let mut field_lines = Vec::new();
-            for field in fields {
+            for field in included(fields) {
                 let ts_ty = rust_type_to_ts(field.ty);
                 field_lines.push(format!("    {}: {};", field.name, ts_ty));
             }
@@ -410,7 +420,7 @@ fn type_def_for(meta: &TagMeta) -> String {
                     ));
                 } else {
                     let mut field_entries = Vec::new();
-                    for field in variant.fields {
+                    for field in included(variant.fields) {
                         let ts_ty = rust_type_to_ts(field.ty);
                         field_entries.push(format!("        {}: {};", field.name, ts_ty));
                     }
@@ -438,7 +448,7 @@ fn type_def_for_header(meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
             let mut field_lines = Vec::new();
-            for field in fields {
+            for field in included(fields) {
                 if crate::is_standard_header(&field.name.replace('_', "-")) {
                     continue;
                 }
@@ -463,7 +473,7 @@ fn type_def_for_named(type_name: &str, meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
             let mut field_lines = Vec::new();
-            for field in fields {
+            for field in included(fields) {
                 let ts_ty = rust_type_to_ts(field.ty);
                 field_lines.push(format!("    {}: {};", field.name, ts_ty));
             }
@@ -486,7 +496,7 @@ fn type_def_for_named(type_name: &str, meta: &TagMeta) -> String {
                     ));
                 } else {
                     let mut field_entries = Vec::new();
-                    for field in variant.fields {
+                    for field in included(variant.fields) {
                         let ts_ty = rust_type_to_ts(field.ty);
                         field_entries.push(format!("        {}: {};", field.name, ts_ty));
                     }
@@ -606,7 +616,7 @@ fn extract_nested_types(
     }
     match meta.kind {
         TagKind::Struct(fields) => {
-            for field in fields {
+            for field in included(fields) {
                 if let Some(structure_fn) = field.structure {
                     extract_nested_types(structure_fn(), lines, emitted);
                 }
@@ -614,7 +624,7 @@ fn extract_nested_types(
         }
         TagKind::Enum(variants) => {
             for variant in variants {
-                for field in variant.fields {
+                for field in included(variant.fields) {
                     if let Some(structure_fn) = field.structure {
                         extract_nested_types(structure_fn(), lines, emitted);
                     }
@@ -671,8 +681,7 @@ fn response_expr(
                 match meta.kind {
                     TagKind::Struct(fields) => {
                         let inner_indent = format!("{}    ", indent);
-                        let field_lines: Vec<String> = fields
-                            .iter()
+                        let field_lines: Vec<String> = included(fields)
                             .map(|f| {
                                 let expr = response_expr(reader, f.ty, &inner_indent, f.structure);
                                 format!("{}{}: {},", inner_indent, f.name, expr)
@@ -706,7 +715,7 @@ fn response_expr(
                                 ));
                             } else {
                                 let mut field_entries = Vec::new();
-                                for field in variant.fields {
+                                for field in included(variant.fields) {
                                     let expr = response_expr(
                                         reader,
                                         field.ty,
@@ -850,7 +859,7 @@ fn generate_request_serialize(
                 let meta = s();
                 match meta.kind {
                     TagKind::Struct(fields) => {
-                        for field in fields {
+                        for field in included(fields) {
                             let field_var = format!("{}.{}", var, field.name);
                             generate_request_serialize(
                                 lines,
@@ -889,7 +898,7 @@ fn generate_request_serialize(
                             } else {
                                 lines.push(format!("{}case '{}': {{", deep_indent, variant.name));
                                 lines.push(format!("{}w.{}({});", deep_indent, tw, i));
-                                for field in variant.fields {
+                                for field in included(variant.fields) {
                                     let field_var = format!("{}.data.{}", var, field.name);
                                     generate_request_serialize(
                                         lines,
@@ -925,7 +934,7 @@ fn generate_validation(
     fields: &[crate::handler::FieldMeta],
     indent: &str,
 ) {
-    for field in fields {
+    for field in included(fields) {
         let is_option = field.ty.starts_with("Option<");
         let field_path = format!("{}.{}", var_prefix, field.name);
 
@@ -1364,7 +1373,7 @@ fn handler_method(
             let meta = structure_fn();
             match meta.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         let field_var = format!("{}.{}", var, field.name);
                         generate_request_serialize(
                             &mut body_lines,
@@ -1583,7 +1592,7 @@ fn ordinary_handler_method_ts(
             let structure = s();
             match structure.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         body_lines.push(format!(
                             "{}url = url.replace(':' + '{}', encodeURIComponent(String(request.params.{})));",
                             ind, field.name, field.name
@@ -1608,7 +1617,7 @@ fn ordinary_handler_method_ts(
             let structure = s();
             match structure.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         body_lines.push(format!(
                             "{}if (request.queries.{} != null) qs.append('{}', String(request.queries.{}));",
                             ind, field.name, field.name, field.name

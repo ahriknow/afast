@@ -63,6 +63,7 @@
 
 pub mod error;
 pub mod handler;
+pub mod marker;
 pub mod service;
 pub mod state;
 

@@ -132,6 +132,7 @@ cargo run --features "http,ws,ts"
 | `tag-u8` | 枚举标签使用 `u8`（默认） | afastdata/tag-u8 |
 | `tag-u16` | 枚举标签使用 `u16` | afastdata/tag-u16 |
 | `tag-u32` | 枚举标签使用 `u32` | afastdata/tag-u32 |
+| `marker` | 启用基于 marker 的条件序列化，通过 `AFast::marker()` 设置标记字符串（默认 `"afast"`） | — |
 
 **注意**：如果服务器端启用了 `seq64` 或 `len64`，生成的客户端代码也必须使用
 相同的 feature，否则协议不匹配。
@@ -351,6 +352,41 @@ struct User {
 | `lte(value, code, "msg")` | `#[afast(lte(99, 400, "必须 <= 99"))]` | 小于等于 |
 | `len(min, max, code, "msg")` | `#[afast(len(1, 20, 400, "长度 1-20"))]` | 长度限制 |
 | `of(["a","b"], code, "msg")` | `#[afast(of(["a","b"], 400, "须为 a 或 b"))]` | 枚举值 |
+
+## 条件序列化（marker）
+
+启用 `marker` feature 后，可通过 `AFast::marker()` 设置一个全局标记字符串
+（默认 `"afast"`）。标记会传递给 afastdata 的 `to_bytes_with` / `from_bytes_with`，
+使标记了 `#[afast(skip_with("marker"))]` 的字段在序列化/反序列化时被条件跳过。
+
+支持两种跳过方式：
+
+- **`#[afast(skip)]`** — 字段始终跳过，不参与序列化/反序列化，必须提供 `Default` 实现或初始化函数
+- **`#[afast(skip_with("marker"))]`** — 当 marker 匹配时跳过，不匹配时正常序列化
+
+marker 会递归传播到嵌套类型（`Vec<T>`、`Option<T>` 等容器内的类型也会被正确处理）。
+
+生成的客户端代码（TS/JS/KT/RS）和 API 文档会自动排除被跳过的字段。
+
+```rust
+#[derive(AFastSerialize, AFastDeserialize, Tag)]
+#[tag("用户信息")]
+struct User {
+    name: String,
+    #[afast(skip)]
+    internal_secret: String,        // 始终跳过
+    #[afast(skip_with("afast"))]
+    internal_note: String,          // marker 为 "afast" 时跳过
+}
+
+let app = AFast::new()
+    .marker("afast")  // 设置标记，默认值即为 "afast"
+    .service(svc)
+    .http("0.0.0.0:5000");
+```
+
+不启用 `marker` feature 时，`serialize` / `deserialize` 使用普通的 `to_bytes` / `from_bytes`，
+所有字段始终参与序列化。但 `#[afast(skip)]` 的字段仍会被生成的客户端代码排除。
 
 ## 传输层
 

@@ -125,6 +125,7 @@ async fn main() {
         .service(chat_svc)
         .service(admin_extra_svc) // merges into "admin"
         .service(internal_svc) // empty name: excluded from codegen/docs
+        .marker("afast") // marker for conditional field skipping (afastdata 0.0.7+)
         .ws("[::]:3001")
         .http("[::]:5001")
         .tcp("[::]:4001");

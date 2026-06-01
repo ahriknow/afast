@@ -811,7 +811,7 @@ fn build_call_invoker_impl(
             "Custom" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::AFastDeserialize::from_bytes(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
                         Ok((__custom_val, __consumed)) => {
                             _off += __consumed;
                             afast::Custom(__custom_val)
@@ -825,7 +825,7 @@ fn build_call_invoker_impl(
             "Data" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::AFastDeserialize::from_bytes(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
                         Ok((__data_val, __consumed)) => {
                             _off += __consumed;
                             afast::Data(__data_val)
@@ -871,7 +871,7 @@ fn build_call_invoker_impl(
                 #( #sync_extractions )*
                 Box::pin(async move {
                     let result = #fn_name( #( #call_args ),* ).await?;
-                    Ok(afast::AFastSerialize::to_bytes(&result))
+                    Ok(afast::marker::serialize(&result))
                 })
             }
         }
@@ -917,7 +917,7 @@ fn build_stream_invoker_impl(
             "Custom" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::AFastDeserialize::from_bytes(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
                         Ok((__custom_val, __consumed)) => {
                             _off += __consumed;
                             afast::Custom(__custom_val)
@@ -931,7 +931,7 @@ fn build_stream_invoker_impl(
             "Data" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::AFastDeserialize::from_bytes(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
                         Ok((__data_val, __consumed)) => {
                             _off += __consumed;
                             afast::Data(__data_val)

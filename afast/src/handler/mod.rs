@@ -457,6 +457,13 @@ pub struct FieldMeta {
     pub structure: Option<fn() -> &'static TagMeta>,
     /// Client-side validation rules from `#[afast(...)]` attributes.
     pub validations: &'static [ValidateRule],
+    /// If `true`, this field is always skipped during serialization
+    /// (`#[afast(skip)]`). Client code generators exclude it entirely.
+    pub skip: bool,
+    /// If non-empty, this field is skipped when the server marker matches
+    /// this value (`#[afast(skip_with("marker"))]`). Client code generators
+    /// exclude it when the active marker equals this string.
+    pub skip_with: &'static str,
 }
 
 /// Metadata for a single variant in a [`TagKind::Enum`].

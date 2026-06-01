@@ -28,6 +28,7 @@ ordinary-http = ["http", "dep:serde", "dep:serde_json"]
 tag-u8 = ["afastdata/tag-u8"]
 tag-u16 = ["afastdata/tag-u16"]
 tag-u32 = ["afastdata/tag-u32"]
+marker = []
 
 [dependencies]
 afast-macros.workspace = true

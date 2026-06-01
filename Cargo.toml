@@ -15,7 +15,7 @@ categories = ["web-programming", "asynchronous"]
 [workspace.dependencies]
 afast = { version = "0.1.5", path = "afast", features = ["ts"] }
 afast-macros = { version = "0.1.5", path = "afast-macros" }
-afastdata = { version = "0.0.7" }
+afastdata = { version = "0.0.8" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 tokio = { version = "1", features=["full"] }

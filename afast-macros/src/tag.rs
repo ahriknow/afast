@@ -62,8 +62,14 @@ enum Validation {
 /// Each call must match one of the recognized rule functions: `gt`, `gte`,
 /// `lt`, `lte`, `len`, or `of`. Unrecognized calls are silently skipped,
 /// allowing forward-compatible attribute content.
-fn parse_validations(attrs: &[syn::Attribute]) -> Vec<Validation> {
+///
+/// Also detects `#[afast(skip)]` and `#[afast(skip_with("marker"))]` which
+/// are stored separately (not as validation rules) and returned via the
+/// `skip` and `skip_with` out-parameters.
+fn parse_validations(attrs: &[syn::Attribute]) -> (Vec<Validation>, bool, Option<String>) {
     let mut rules = Vec::new();
+    let mut is_skip = false;
+    let mut skip_with: Option<String> = None;
     for attr in attrs {
         if !attr.path().is_ident("afast") {
             continue;
@@ -95,6 +101,20 @@ fn parse_validations(attrs: &[syn::Attribute]) -> Vec<Validation> {
                 _ => continue,
             };
             match name.as_str() {
+                "skip" => {
+                    is_skip = true;
+                }
+                "skip_with" => {
+                    // Parse skip_with("marker") or skip_with("marker", "default_fn")
+                    if let Some(first) = args.first() {
+                        if let syn::Expr::Lit(syn::ExprLit {
+                            lit: Lit::Str(s), ..
+                        }) = first
+                        {
+                            skip_with = Some(s.value());
+                        }
+                    }
+                }
                 "gt" | "gte" | "lt" | "lte" => {
                     if let Some((val, code, msg)) = parse_range_args(&args) {
                         let rule = match name.as_str() {
@@ -148,7 +168,7 @@ fn parse_validations(attrs: &[syn::Attribute]) -> Vec<Validation> {
             }
         }
     }
-    rules
+    (rules, is_skip, skip_with)
 }
 
 /// Parses the three arguments of a numeric comparison validation: the threshold
@@ -415,8 +435,9 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                 } else {
                     quote! { None }
                 };
-                let validations = parse_validations(&field.attrs);
+                let (validations, skip, skip_with_val) = parse_validations(&field.attrs);
                 let validations_expr = validations_expr(&validations);
+                let skip_with_str = skip_with_val.as_deref().unwrap_or("");
                 field_meta_entries.push(quote! {
                     afast::FieldMeta {
                         name: #field_name,
@@ -424,6 +445,8 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                         desc: #field_desc,
                         structure: #structure,
                         validations: #validations_expr,
+                        skip: #skip,
+                        skip_with: #skip_with_str,
                     }
                 });
             }
@@ -446,8 +469,9 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                             } else {
                                 quote! { None }
                             };
-                            let validations = parse_validations(&f.attrs);
+                            let (validations, skip, skip_with_val) = parse_validations(&f.attrs);
                             let validations_expr = validations_expr(&validations);
+                            let skip_with_str = skip_with_val.as_deref().unwrap_or("");
                             field_metas.push(quote! {
                                 afast::FieldMeta {
                                     name: #fname,
@@ -455,6 +479,8 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                                     desc: #fdesc,
                                     structure: #structure,
                                     validations: #validations_expr,
+                                    skip: #skip,
+                                    skip_with: #skip_with_str,
                                 }
                             });
                         }
@@ -474,8 +500,9 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                             } else {
                                 quote! { None }
                             };
-                            let validations = parse_validations(&f.attrs);
+                            let (validations, skip, skip_with_val) = parse_validations(&f.attrs);
                             let validations_expr = validations_expr(&validations);
+                            let skip_with_str = skip_with_val.as_deref().unwrap_or("");
                             field_metas.push(quote! {
                                 afast::FieldMeta {
                                     name: #fname,
@@ -483,6 +510,8 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
                                     desc: #fdesc,
                                     structure: #structure,
                                     validations: #validations_expr,
+                                    skip: #skip,
+                                    skip_with: #skip_with_str,
                                 }
                             });
                         }

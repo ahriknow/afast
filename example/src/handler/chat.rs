@@ -47,7 +47,7 @@ pub async fn chat_echo(
                 text,
                 ts,
             };
-            afast::AFastSerialize::to_bytes(&msg)
+            afast::marker::serialize(&msg)
         } else {
             // Binary data: echo as-is
             data

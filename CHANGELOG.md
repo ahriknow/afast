@@ -6,8 +6,13 @@
 
 - **Rust client code generator** (`rs` feature): New Rust TCP client code generation supporting `RsCallType::TcpAsync` (tokio) and `RsCallType::TcpSync` (std). Generates complete struct/enum definitions, `Option<T>`/`Vec<T>` handling, `Custom` extractors with `pub` visibility, and `AfastSocket` long-connection handle with `Debug` derive. Available via `Lang::RS(vec![RsCallType::TcpAsync])` in `GenerateTarget` or `/code/{service}/rs` HTTP endpoint.
 - **`service!` macro group nesting**: Handlers can now be organized into nested `group` blocks for hierarchical API namespacing.
+- **Marker-based conditional serialization** (`marker` feature): When enabled, `AFast::marker("name")` sets a global marker string (default `"afast"`) used by `to_bytes_with` / `from_bytes_with` from afastdata 0.0.7+. Fields annotated with `#[afast(skip_with("marker"))]` are conditionally skipped during serialization/deserialization based on the active marker.
+- **Codegen `skip` / `skip_with` support**: Generated client code (TS/JS/KT/RS) and API documentation now respect `#[afast(skip)]` (always excluded) and `#[afast(skip_with("marker"))]` (excluded when marker matches) attributes. Skipped fields are omitted from type definitions, serialization, deserialization, and validation code.
+- **`FieldMeta` extended with `skip` / `skip_with`**: The `#[derive(Tag)]` proc macro now parses `#[afast(skip)]` and `#[afast(skip_with("marker"))]` on struct fields, exposing them in `FieldMeta` for code generators.
 
 ### Fixed
+
+- **Container type marker propagation** (afastdata): `Vec<T>`, `Option<T>`, `[T; N]`, tuples, and `Box<T>` now correctly propagate the marker through `to_bytes_with` / `from_bytes_with`, fixing nested type serialization with `skip_with`.
 
 - **Codegen `Option<T>` return type**: Generated client methods now correctly wrap `Option<T>` return types (e.g. `Result<Option<GetArticle>, AfastError>`) instead of always using the inner type.
 - **Codegen `Option<T>` deserialization**: The code generator now correctly propagates override type names through `Option<T>` wrappers during deserialization code generation.
@@ -15,7 +20,7 @@
 
 ### Changed
 
-- Upgraded `afastdata` from 0.0.6 to 0.0.7 (adds `to_bytes_with`/`from_bytes_with` for marker-based conditional serialization).
+- Upgraded `afastdata` from 0.0.6 to 0.0.8 (adds `to_bytes_with`/`from_bytes_with` for marker-based conditional serialization, and propagates marker through `Vec`/`Option`/`Array`/`Tuple`/`Box` container types).
 - Upgraded `tokio-tungstenite` from 0.26 to 0.29.
 
 ## [0.1.5]

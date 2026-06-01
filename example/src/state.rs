@@ -254,6 +254,7 @@ fn rand_id() -> String {
 pub struct User {
     pub id: i64,
     pub username: String,
+    #[afast(skip_with("afast"))]
     pub password: String,
     pub name: String,
     pub age: i32,
@@ -261,6 +262,7 @@ pub struct User {
     pub balance: f32,
     pub active: bool,
     pub tags: Vec<String>,
+    #[afast(skip_with("afast"))]
     pub metadata: Option<String>,
     pub role: Role,
     pub status: Status,

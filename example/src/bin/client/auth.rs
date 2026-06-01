@@ -22,14 +22,12 @@ pub struct RegisterResponse {
 pub struct User {
     pub id: i64,
     pub username: String,
-    pub password: String,
     pub name: String,
     pub age: i32,
     pub score: f64,
     pub balance: f32,
     pub active: bool,
     pub tags: Vec<String>,
-    pub metadata: Option<String>,
     pub role: Role,
     pub status: Status,
     pub profile: Profile,
@@ -201,7 +199,6 @@ impl AuthClient {
             user: User {
                 id: r.read_i64(),
                 username: r.read_str(),
-                password: r.read_str(),
                 name: r.read_str(),
                 age: r.read_i32(),
                 score: r.read_f64(),
@@ -210,11 +207,6 @@ impl AuthClient {
                 tags: {
                     let _count = r.read_u32() as usize;
                     (0.._count).map(|_| r.read_str()).collect::<Vec<_>>()
-                },
-                metadata: if r.read_u8() == 1 {
-                    Some(r.read_str())
-                } else {
-                    None
                 },
                 role: match r.read_u8() {
                     0 => Role::Admin,
@@ -332,7 +324,6 @@ impl AuthClient {
             user: User {
                 id: r.read_i64(),
                 username: r.read_str(),
-                password: r.read_str(),
                 name: r.read_str(),
                 age: r.read_i32(),
                 score: r.read_f64(),
@@ -341,11 +332,6 @@ impl AuthClient {
                 tags: {
                     let _count = r.read_u32() as usize;
                     (0.._count).map(|_| r.read_str()).collect::<Vec<_>>()
-                },
-                metadata: if r.read_u8() == 1 {
-                    Some(r.read_str())
-                } else {
-                    None
                 },
                 role: match r.read_u8() {
                     0 => Role::Admin,

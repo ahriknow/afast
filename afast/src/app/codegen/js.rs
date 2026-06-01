@@ -10,6 +10,16 @@
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
+/// Returns an iterator over fields that should be included in generated code,
+/// filtering out `skip` fields and `skip_with` fields whose marker matches.
+fn included(
+    fields: &[crate::handler::FieldMeta],
+) -> impl Iterator<Item = &crate::handler::FieldMeta> {
+    fields
+        .iter()
+        .filter(|f| crate::marker::should_include_field(f))
+}
+
 // ─── Enum tag size (must match afastdata feature) ─────────────
 
 /// Returns the JavaScript writer method name for the enum tag integer,
@@ -257,7 +267,7 @@ fn jsdoc_typedef_header(meta: &TagMeta) -> String {
                 lines.push(format!(" * @description {}", meta.desc));
             }
             lines.push(format!(" * @typedef {{Object}} {}", meta.name));
-            for field in fields {
+            for field in included(fields) {
                 if crate::is_standard_header(&field.name.replace('_', "-")) {
                     continue;
                 }
@@ -289,7 +299,7 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
             if !desc.is_empty() && desc != meta.name {
                 lines.push(format!(" * @description {}", desc));
             }
-            for field in fields {
+            for field in included(fields) {
                 let js_ty = rust_type_to_js(field.ty);
                 lines.push(format!(" * @property {{{}}} {}", js_ty, field.name));
             }
@@ -313,7 +323,7 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
                     lines.push(format!(" * @property {{{}}} data", js_ty));
                 } else {
                     lines.push(" * @property {Object} data".to_string());
-                    for field in variant.fields {
+                    for field in included(variant.fields) {
                         let js_ty = rust_type_to_js(field.ty);
                         lines.push(format!(" * @property {{{}}} data.{}", js_ty, field.name));
                     }
@@ -354,7 +364,7 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
             if !meta.desc.is_empty() {
                 lines.push(format!(" * @description {}", meta.desc));
             }
-            for field in fields {
+            for field in included(fields) {
                 let js_ty = rust_type_to_js(field.ty);
                 lines.push(format!(" * @property {{{}}} {}", js_ty, field.name));
             }
@@ -378,7 +388,7 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
                     lines.push(format!(" * @property {{{}}} data", js_ty));
                 } else {
                     lines.push(" * @property {Object} data".to_string());
-                    for field in variant.fields {
+                    for field in included(variant.fields) {
                         let js_ty = rust_type_to_js(field.ty);
                         lines.push(format!(" * @property {{{}}} data.{}", js_ty, field.name));
                     }
@@ -497,7 +507,7 @@ fn extract_nested_types_js(
     }
     match meta.kind {
         TagKind::Struct(fields) => {
-            for field in fields {
+            for field in included(fields) {
                 if let Some(structure_fn) = field.structure {
                     extract_nested_types_js(structure_fn(), lines, emitted);
                 }
@@ -505,7 +515,7 @@ fn extract_nested_types_js(
         }
         TagKind::Enum(variants) => {
             for variant in variants {
-                for field in variant.fields {
+                for field in included(variant.fields) {
                     if let Some(structure_fn) = field.structure {
                         extract_nested_types_js(structure_fn(), lines, emitted);
                     }
@@ -571,7 +581,7 @@ fn generate_request_serialize_js(
                 let meta = s();
                 match meta.kind {
                     TagKind::Struct(fields) => {
-                        for field in fields {
+                        for field in included(fields) {
                             let field_var = format!("{}.{}", var, field.name);
                             generate_request_serialize_js(
                                 lines,
@@ -610,7 +620,7 @@ fn generate_request_serialize_js(
                             } else {
                                 lines.push(format!("{}case '{}': {{", deep_indent, variant.name));
                                 lines.push(format!("{}w.{}({});", deep_indent, tw, i));
-                                for field in variant.fields {
+                                for field in included(variant.fields) {
                                     let field_var = format!("{}.data.{}", var, field.name);
                                     generate_request_serialize_js(
                                         lines,
@@ -681,8 +691,7 @@ fn response_expr_js(
                 match meta.kind {
                     TagKind::Struct(fields) => {
                         let inner_indent = format!("{}    ", indent);
-                        let field_lines: Vec<String> = fields
-                            .iter()
+                        let field_lines: Vec<String> = included(fields)
                             .map(|f| {
                                 let expr =
                                     response_expr_js(reader, f.ty, &inner_indent, f.structure);
@@ -717,7 +726,7 @@ fn response_expr_js(
                                 ));
                             } else {
                                 let mut field_entries = Vec::new();
-                                for field in variant.fields {
+                                for field in included(variant.fields) {
                                     let expr = response_expr_js(
                                         reader,
                                         field.ty,
@@ -955,7 +964,7 @@ fn handler_method_js(
             let meta = structure_fn();
             match meta.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         let field_var = format!("{}.{}", var, field.name);
                         generate_request_serialize_js(
                             &mut body_lines,
@@ -1149,7 +1158,7 @@ fn ordinary_handler_method_js(
             let structure = s();
             match structure.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         body_lines.push(format!(
                             "{}url = url.replace(':' + '{}', encodeURIComponent(String(request.params.{})));",
                             ind, field.name, field.name
@@ -1173,7 +1182,7 @@ fn ordinary_handler_method_js(
             let structure = s();
             match structure.kind {
                 TagKind::Struct(fields) => {
-                    for field in fields {
+                    for field in included(fields) {
                         body_lines.push(format!(
                             "{}if (request.queries.{} != null) qs.append('{}', String(request.queries.{}));",
                             ind, field.name, field.name, field.name
@@ -3043,7 +3052,7 @@ fn generate_validation_js(
     fields: &[crate::handler::FieldMeta],
     indent: &str,
 ) {
-    for field in fields {
+    for field in included(fields) {
         let is_option = field.ty.starts_with("Option<");
         let field_path = format!("{}.{}", var_prefix, field.name);
 

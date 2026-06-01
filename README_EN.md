@@ -133,6 +133,7 @@ cargo run --features "http,ws,ts"
 | `tag-u8` | Enum tag uses `u8` (default) | afastdata/tag-u8 |
 | `tag-u16` | Enum tag uses `u16` | afastdata/tag-u16 |
 | `tag-u32` | Enum tag uses `u32` | afastdata/tag-u32 |
+| `marker` | Enable marker-based conditional serialization; set marker via `AFast::marker()` (default `"afast"`) | — |
 
 **Note**: If the server uses `seq64` or `len64`, generated client code must use
 the same feature, otherwise protocol mismatch will occur.
@@ -358,6 +359,43 @@ Validation rules via `#[afast(...)]`, generating client-side preflight checks:
 | `lte(value, code, "msg")` | `#[afast(lte(99, 400, "must <= 99"))]` | Less or equal |
 | `len(min, max, code, "msg")` | `#[afast(len(1, 20, 400, "len 1-20"))]` | Length constraint |
 | `of(["a","b"], code, "msg")` | `#[afast(of(["a","b"], 400, "a or b"))]` | Enum of values |
+
+## Conditional Serialization (Marker)
+
+When the `marker` feature is enabled, `AFast::marker()` sets a global marker
+string (default `"afast"`) passed to afastdata's `to_bytes_with` / `from_bytes_with`.
+Fields annotated with `#[afast(skip_with("marker"))]` are conditionally skipped
+during serialization/deserialization based on the active marker.
+
+Two skip modes are supported:
+
+- **`#[afast(skip)]`** — Field is always skipped, never serialized/deserialized. Must have a `Default` impl or initialization function.
+- **`#[afast(skip_with("marker"))]`** — Skipped when the marker matches; serialized normally otherwise.
+
+The marker propagates recursively into nested types (`Vec<T>`, `Option<T>`, etc.).
+
+Generated client code (TS/JS/KT/RS) and API docs automatically exclude skipped fields.
+
+```rust
+#[derive(AFastSerialize, AFastDeserialize, Tag)]
+#[tag("User info")]
+struct User {
+    name: String,
+    #[afast(skip)]
+    internal_secret: String,        // always skipped
+    #[afast(skip_with("afast"))]
+    internal_note: String,          // skipped when marker is "afast"
+}
+
+let app = AFast::new()
+    .marker("afast")  // set marker; default is already "afast"
+    .service(svc)
+    .http("0.0.0.0:5000");
+```
+
+Without the `marker` feature, `serialize` / `deserialize` use plain
+`to_bytes` / `from_bytes` and all fields are always included.
+However, `#[afast(skip)]` fields are still excluded from generated client code.
 
 ## Transport Layer
 

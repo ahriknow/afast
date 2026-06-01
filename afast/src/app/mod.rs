@@ -322,6 +322,19 @@ impl AFast {
         }
     }
 
+    /// Sets the marker string used for conditional serialization.
+    ///
+    /// When the `marker` feature is enabled, the marker is passed to
+    /// `to_bytes_with(marker)` / `from_bytes_with(data, marker)`, allowing
+    /// `#[afast(skip_with("marker"))]` fields to be conditionally skipped.
+    ///
+    /// Defaults to `"afast"` if never called.
+    #[cfg(feature = "marker")]
+    pub fn marker(self, marker: &str) -> Self {
+        crate::marker::set_marker(marker);
+        self
+    }
+
     /// Registers a shared application state value.
     ///
     /// Each Rust type may have at most one value in the state map. A later

@@ -1,6 +1,16 @@
 use crate::{Handler, Service, TagKind};
 use std::collections::HashMap;
 
+/// Returns an iterator over fields that should be included in generated code,
+/// filtering out `skip` fields and `skip_with` fields whose marker matches.
+fn included(
+    fields: &[crate::handler::FieldMeta],
+) -> impl Iterator<Item = &crate::handler::FieldMeta> {
+    fields
+        .iter()
+        .filter(|f| crate::marker::should_include_field(f))
+}
+
 // ─── JsonBuilder ──────────────────────────────────────────────────
 // Minimal JSON serializer used to build the schema data embedded in
 // the generated HTML page.  Avoids pulling in a full JSON library
@@ -356,7 +366,7 @@ fn emit_type_to_map(meta: &'static crate::TagMeta, types: &mut HashMap<String, S
             jb.comma();
             jb.key("fields");
             jb.array_start();
-            for (i, f) in fields.iter().enumerate() {
+            for (i, f) in included(fields).enumerate() {
                 if i > 0 {
                     jb.comma();
                 }
@@ -403,7 +413,7 @@ fn emit_type_to_map(meta: &'static crate::TagMeta, types: &mut HashMap<String, S
                 jb.comma();
                 jb.key("fields");
                 jb.array_start();
-                for (j, f) in v.fields.iter().enumerate() {
+                for (j, f) in included(v.fields).enumerate() {
                     if j > 0 {
                         jb.comma();
                     }
