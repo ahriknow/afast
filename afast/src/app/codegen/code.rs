@@ -24,15 +24,19 @@ pub fn generate_code(
         #[cfg(feature = "ts")]
         Lang::TS(calls) => Ok(super::ts::generate_service_ts(svc, calls, false)),
         #[cfg(not(feature = "ts"))]
-        Lang::TS(_) => Err(CodeError::LangNotEnabled("ts".to_string())),
+        Lang::TS => Err(CodeError::LangNotEnabled("ts".to_string())),
         #[cfg(feature = "js")]
         Lang::JS(calls) => Ok(super::js::generate_service_js(svc, calls, false)),
         #[cfg(not(feature = "js"))]
-        Lang::JS(_) => Err(CodeError::LangNotEnabled("js".to_string())),
+        Lang::JS => Err(CodeError::LangNotEnabled("js".to_string())),
         #[cfg(feature = "kt")]
         Lang::KT(calls) => Ok(super::kt::generate_service_kt(svc, calls, false)),
         #[cfg(not(feature = "kt"))]
         Lang::KT => Err(CodeError::LangNotEnabled("kt".to_string())),
+        #[cfg(feature = "rs")]
+        Lang::RS(calls) => Ok(super::rs::generate_service_rs(svc, calls, false)),
+        #[cfg(not(feature = "rs"))]
+        Lang::RS => Err(CodeError::LangNotEnabled("rs".to_string())),
     }
 }
 
@@ -42,7 +46,7 @@ pub enum CodeError {
     /// The requested service name was not found in the registered services.
     ServiceNotFound(String),
     /// The requested language feature is not enabled at compile time.
-    #[cfg(not(all(feature = "ts", feature = "js", feature = "kt")))]
+    #[cfg(not(all(feature = "ts", feature = "js", feature = "kt", feature = "rs")))]
     LangNotEnabled(String),
 }
 
@@ -51,7 +55,7 @@ impl std::fmt::Display for CodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CodeError::ServiceNotFound(name) => write!(f, "service '{}' not found", name),
-            #[cfg(not(all(feature = "ts", feature = "js", feature = "kt")))]
+            #[cfg(not(all(feature = "ts", feature = "js", feature = "kt", feature = "rs")))]
             CodeError::LangNotEnabled(lang) => {
                 write!(f, "language '{}' generation is not enabled", lang)
             }

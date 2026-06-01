@@ -22,12 +22,17 @@ afast = { path = "../afast", features = [
     "js",
     "ts",
     "kt",
+    "rs",
     "doc"
 ] }
 afast-macros.workspace = true
 afastdata.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 hyper.workspace = true
 http-body-util.workspace = true
-tokio.workspace = true
+
+[[bin]]
+name = "test_client"
+path = "src/bin/test_client.rs"

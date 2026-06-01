@@ -373,6 +373,7 @@ async fn handle_api(
 /// (comma-separated: `fetch,ws,nodetcp,buntcp,unirequest,uniws,wxrequest,wxws`).
 /// If omitted, defaults to `fetch,ws` for TS/JS and `http,ws,tcp` for Kotlin.
 #[cfg(feature = "code")]
+#[allow(unreachable_code, unused_variables)]
 fn handle_code(
     segments: &[&str],
     query: Option<&str>,
@@ -383,7 +384,7 @@ fn handle_code(
         return error_response(
             StatusCode::BAD_REQUEST,
             CODE_HTTP,
-            "usage: /code/{service}/{lang} where lang is 'ts', 'js', or 'kt'",
+            "usage: /code/{service}/{lang} where lang is 'ts', 'js', 'kt', or 'rs'",
         );
     }
 
@@ -411,7 +412,8 @@ fn handle_code(
         Vec::new()
     };
 
-    let (lang, content_type) = match lang_str {
+    let result: Option<(crate::Lang, &str)> = match lang_str {
+        #[cfg(feature = "ts")]
         "ts" => {
             let calls: Vec<crate::JsTsCallType> = raw_calls
                 .iter()
@@ -422,8 +424,17 @@ fn handle_code(
             } else {
                 calls
             };
-            (crate::Lang::TS(calls), "text/typescript; charset=utf-8")
+            Some((crate::Lang::TS(calls), "text/typescript; charset=utf-8"))
         }
+        #[cfg(not(feature = "ts"))]
+        "ts" => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                CODE_HTTP,
+                "typescript code generation is not enabled (rebuild with the 'ts' feature)",
+            );
+        }
+        #[cfg(feature = "js")]
         "js" => {
             let calls: Vec<crate::JsTsCallType> = raw_calls
                 .iter()
@@ -434,10 +445,18 @@ fn handle_code(
             } else {
                 calls
             };
-            (
+            Some((
                 crate::Lang::JS(calls),
                 "application/javascript; charset=utf-8",
-            )
+            ))
+        }
+        #[cfg(not(feature = "js"))]
+        "js" => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                CODE_HTTP,
+                "javascript code generation is not enabled (rebuild with the 'js' feature)",
+            );
         }
         #[cfg(feature = "kt")]
         "kt" => {
@@ -454,7 +473,7 @@ fn handle_code(
             } else {
                 calls
             };
-            (crate::Lang::KT(calls), "text/x-kotlin; charset=utf-8")
+            Some((crate::Lang::KT(calls), "text/x-kotlin; charset=utf-8"))
         }
         #[cfg(not(feature = "kt"))]
         "kt" => {
@@ -464,17 +483,40 @@ fn handle_code(
                 "kotlin code generation is not enabled (rebuild with the 'kt' feature)",
             );
         }
+        #[cfg(feature = "rs")]
+        "rs" => {
+            let calls: Vec<crate::RsCallType> = raw_calls
+                .iter()
+                .filter_map(|s| crate::RsCallType::from_str(s))
+                .collect();
+            let calls = if calls.is_empty() {
+                vec![crate::RsCallType::TcpAsync]
+            } else {
+                calls
+            };
+            Some((crate::Lang::RS(calls), "text/x-rust; charset=utf-8"))
+        }
+        #[cfg(not(feature = "rs"))]
+        "rs" => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                CODE_HTTP,
+                "rust code generation is not enabled (rebuild with the 'rs' feature)",
+            );
+        }
         _ => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 CODE_HTTP,
                 &format!(
-                    "unsupported lang '{}', expected 'ts', 'js', or 'kt'",
+                    "unsupported lang '{}', expected 'ts', 'js', 'kt', or 'rs'",
                     lang_str
                 ),
             );
         }
     };
+
+    let (lang, content_type) = result.unwrap();
 
     match crate::app::codegen::code::generate_code(&shared.services, service_name, &lang) {
         Ok(code) => Ok(Response::builder()

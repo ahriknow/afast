@@ -4,14 +4,14 @@
 
 AFast 是一个高性能 Rust Web 后端框架。它消除了手工定义路由的工作——
 只需用 `#[handler]` 标注函数，框架即自动注册和分发请求。数据传输采用紧凑的
-二进制协议，比 JSON 更小、更快。同时支持一键生成 TypeScript、JavaScript 和
-Kotlin 客户端代码，内置交互式 API 文档。
+二进制协议，比 JSON 更小、更快。同时支持一键生成 TypeScript、JavaScript、
+Kotlin 和 Rust 客户端代码，内置交互式 API 文档。
 
 ## 特性
 
 - **零路由定义** — `#[handler]` 标注函数即可，无需手动编写路由表
 - **紧凑二进制协议** — 专为内部通信设计，比 JSON 体积更小、解析更快
-- **自动代码生成** — 生成 TypeScript / JavaScript / Kotlin 客户端，含完整类型定义
+- **自动代码生成** — 生成 TypeScript / JavaScript / Kotlin / Rust 客户端，含完整类型定义
 - **交互式 API 文档** — 内置带深色/浅色主题的 Web 文档页面，支持在线测试
 - **多传输层** — 同时支持 WebSocket、HTTP/1.1、HTTP/2 和 TCP，可按需组合
 - **TLS / HTTPS** — 基于 rustls，支持 ALPN 协商 HTTP/2，HTTP 和 HTTPS 可同时运行
@@ -34,7 +34,7 @@ Kotlin 客户端代码，内置交互式 API 文档。
 
 ```toml
 [dependencies]
-afast = { version = "0.1.5", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.6", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -123,6 +123,7 @@ cargo run --features "http,ws,ts"
 | `ts` | 生成 TypeScript 客户端（ESM + 完整类型） | — |
 | `js` | 生成 JavaScript 客户端（ESM + JSDoc） | — |
 | `kt` | 生成 Kotlin 客户端 | — |
+| `rs` | 生成 Rust 客户端（Tokio async / std sync TCP） | — |
 | `code` | HTTP `/code/{service}/{lang}` 按需生成端点 | `http` |
 | `doc` | 交互式 API 文档（`/doc` 端点） | `http`, `js` |
 | `ordinary-http` | RESTful JSON 端点（GET/POST/PUT/DELETE） | `http`, serde, serde_json |
@@ -534,7 +535,7 @@ return Err(afast::Error::custom(400, "请求参数无效"));
 ### 静态生成（编译时写文件）
 
 ```rust
-use afast::{GenerateTarget, Lang, JsTsCallType};
+use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType};
 
 let app = AFast::new()
     .service(api_svc)
@@ -549,6 +550,11 @@ let app = AFast::new()
             path: "./code".into(),
             debug: true,
         },
+        GenerateTarget {
+            lang: Lang::RS(vec![RsCallType::TcpAsync]),
+            path: "./src/bin/client".into(),
+            debug: true,
+        },
     ]);
 ```
 
@@ -558,6 +564,7 @@ let app = AFast::new()
 GET /code/api/ts?call=fetch,ws
 GET /code/api/js?call=fetch,ws
 GET /code/pay/kt?call=http,ws,tcp
+GET /code/api/rs?call=tcp-async
 ```
 
 ### 支持的传输类型
@@ -582,6 +589,13 @@ GET /code/pay/kt?call=http,ws,tcp
 | `http` / `fetch` | `java.net.HttpURLConnection` |
 | `ws` | `java.net.http.WebSocket` |
 | `tcp` | `java.net.Socket` |
+
+**Rust：**
+
+| 值 | 对应 API |
+|----|----------|
+| `tcp-async` | `tokio::net::TcpStream`（异步） |
+| `tcp-sync` | `std::net::TcpStream`（同步） |
 
 ### 客户端使用方法
 
@@ -656,7 +670,7 @@ const fresh = await client.apis.admin.listUsers({ page: 1, size: 20 }, true);
 - **类级别** — 缓存存储在类的 `static _cache` 上，所有实例共享
 - **参数感知** — 缓存键由方法名 + 序列化的参数组成，参数变化自动重新请求
 - **惰性缓存** — `force = false` 且缓存未过期时直接返回；`force = true` 忽略缓存
-- **多语言一致** — TypeScript、JavaScript、Kotlin 客户端使用相同的缓存策略
+- **多语言一致** — TypeScript、JavaScript、Kotlin、Rust 客户端使用相同的缓存策略
 
 TS 客户端缓存存储结构：
 

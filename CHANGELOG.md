@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.6]
+
+### Added
+
+- **Rust client code generator** (`rs` feature): New Rust TCP client code generation supporting `RsCallType::TcpAsync` (tokio) and `RsCallType::TcpSync` (std). Generates complete struct/enum definitions, `Option<T>`/`Vec<T>` handling, `Custom` extractors with `pub` visibility, and `AfastSocket` long-connection handle with `Debug` derive. Available via `Lang::RS(vec![RsCallType::TcpAsync])` in `GenerateTarget` or `/code/{service}/rs` HTTP endpoint.
+- **`service!` macro group nesting**: Handlers can now be organized into nested `group` blocks for hierarchical API namespacing.
+
+### Fixed
+
+- **Codegen `Option<T>` return type**: Generated client methods now correctly wrap `Option<T>` return types (e.g. `Result<Option<GetArticle>, AfastError>`) instead of always using the inner type.
+- **Codegen `Option<T>` deserialization**: The code generator now correctly propagates override type names through `Option<T>` wrappers during deserialization code generation.
+- **Codegen `customs` field visibility**: Generated client structs now expose `pub customs` field, allowing external auth token injection.
+
+### Changed
+
+- Upgraded `afastdata` from 0.0.6 to 0.0.7 (adds `to_bytes_with`/`from_bytes_with` for marker-based conditional serialization).
+- Upgraded `tokio-tungstenite` from 0.26 to 0.29.
+
 ## [0.1.5]
 
 ### Fixed

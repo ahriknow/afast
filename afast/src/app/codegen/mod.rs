@@ -1,4 +1,4 @@
-// Client code generation for TypeScript, JavaScript, Kotlin, API docs, and the
+// Client code generation for TypeScript, JavaScript, Kotlin, Rust, API docs, and the
 // on-demand /code endpoint. Each module is gated by a Cargo feature so unused
 // generators are not compiled.
 
@@ -10,5 +10,7 @@ pub mod doc;
 pub mod js;
 #[cfg(feature = "kt")]
 pub mod kt;
+#[cfg(feature = "rs")]
+pub mod rs;
 #[cfg(feature = "ts")]
 pub mod ts;

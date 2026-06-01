@@ -97,19 +97,61 @@ impl KtCallType {
     }
 }
 
+/// Transport protocol variant for Rust generated clients.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RsCallType {
+    /// Async TCP via `tokio::net::TcpStream` (requires tokio runtime).
+    TcpAsync,
+    /// Synchronous TCP via `std::net::TcpStream`.
+    TcpSync,
+}
+
+impl RsCallType {
+    /// Parses a call-type string from the `?call=` query parameter.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "tcp-async" | "tcp_async" => Some(RsCallType::TcpAsync),
+            "tcp-sync" | "tcp_sync" => Some(RsCallType::TcpSync),
+            "tcp" => Some(RsCallType::TcpAsync), // default to async
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical string representation for use in query parameters.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RsCallType::TcpAsync => "tcp-async",
+            RsCallType::TcpSync => "tcp-sync",
+        }
+    }
+}
+
 /// Target language for client code generation.
 pub enum Lang {
     /// TypeScript (`.ts` files with full type annotations).
+    #[cfg(feature = "ts")]
     TS(Vec<JsTsCallType>),
+    /// Stub variant when the `ts` feature is disabled.
+    #[cfg(not(feature = "ts"))]
+    TS,
     /// JavaScript (`.js` files with JSDoc type annotations).
+    #[cfg(feature = "js")]
     JS(Vec<JsTsCallType>),
+    /// Stub variant when the `js` feature is disabled.
+    #[cfg(not(feature = "js"))]
+    JS,
     /// Kotlin (`.kt` files with full type annotations).
     #[cfg(feature = "kt")]
     KT(Vec<KtCallType>),
     /// Stub variant when the `kt` feature is disabled.
-    /// Construction of this variant will panic; rebuild with `--features kt`.
     #[cfg(not(feature = "kt"))]
     KT,
+    /// Rust (`.rs` files with full type annotations).
+    #[cfg(feature = "rs")]
+    RS(Vec<RsCallType>),
+    /// Stub variant when the `rs` feature is disabled.
+    #[cfg(not(feature = "rs"))]
+    RS,
 }
 
 /// Specifies a code generation output target.
@@ -238,7 +280,7 @@ pub struct AFast {
     #[cfg(feature = "doc")]
     doc_config: Option<DocConfig>,
     /// Client code generation targets, if any.
-    #[cfg(any(feature = "ts", feature = "js", feature = "kt"))]
+    #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
     code_config: Option<Vec<GenerateTarget>>,
     /// Ordinary (REST-style) HTTP routes extracted from registered services.
     #[cfg(feature = "ordinary-http")]
@@ -269,7 +311,7 @@ impl AFast {
             tcp_addr: None,
             #[cfg(feature = "doc")]
             doc_config: None,
-            #[cfg(any(feature = "ts", feature = "js", feature = "kt"))]
+            #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
             code_config: None,
             #[cfg(feature = "ordinary-http")]
             ordinary_routes: Vec::new(),
@@ -410,9 +452,9 @@ impl AFast {
 
     /// Sets the client code generation targets.
     ///
-    /// Requires at least one of the `ts`, `js`, or `kt` features. Code is
+    /// Requires at least one of the `ts`, `js`, `kt`, or `rs` features. Code is
     /// generated when [`run`](AFast::run) is called.
-    #[cfg(any(feature = "ts", feature = "js", feature = "kt"))]
+    #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
     pub fn generate(mut self, targets: Vec<GenerateTarget>) -> Self {
         self.code_config = Some(targets);
         self
@@ -458,7 +500,7 @@ impl AFast {
             }
         }
 
-        #[cfg(any(feature = "ts", feature = "js", feature = "kt"))]
+        #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
         if let Some(code_config) = &self.code_config {
             for target in code_config {
                 match &target.lang {
@@ -468,6 +510,8 @@ impl AFast {
                     Lang::JS(calls) => self.generate_js(&target.path, calls, target.debug)?,
                     #[cfg(feature = "kt")]
                     Lang::KT(calls) => self.generate_kt(&target.path, calls, target.debug)?,
+                    #[cfg(feature = "rs")]
+                    Lang::RS(calls) => self.generate_rs(&target.path, calls, target.debug)?,
                     #[allow(unreachable_patterns)]
                     _ => panic!("warning: language generation not enabled"),
                 }

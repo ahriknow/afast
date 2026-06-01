@@ -6,13 +6,13 @@ AFast is a high-performance Rust web backend framework. It eliminates manual rou
 definitions — annotate functions with `#[handler]` and the framework auto-registers
 and dispatches requests. Data transport uses a compact binary protocol that is
 smaller and faster than JSON. It supports one-click generation of TypeScript,
-JavaScript, and Kotlin client code, with built-in interactive API documentation.
+JavaScript, Kotlin, and Rust client code, with built-in interactive API documentation.
 
 ## Features
 
 - **Zero Route Definitions** — `#[handler]` annotation, no manual routing table
 - **Compact Binary Protocol** — Smaller and faster than JSON, designed for internal communication
-- **Auto Code Generation** — TypeScript / JavaScript / Kotlin clients with full type definitions
+- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients with full type definitions
 - **Interactive API Docs** — Built-in Web docs with dark/light theme and online API testing
 - **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
 - **TLS / HTTPS** — Based on rustls with ALPN for HTTP/2 negotiation. HTTP and HTTPS can run simultaneously
@@ -35,7 +35,7 @@ JavaScript, and Kotlin client code, with built-in interactive API documentation.
 
 ```toml
 [dependencies]
-afast = { version = "0.1.5", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.6", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -124,6 +124,7 @@ cargo run --features "http,ws,ts"
 | `ts` | TypeScript client generation (ESM + full types) | — |
 | `js` | JavaScript client generation (ESM + JSDoc) | — |
 | `kt` | Kotlin client generation | — |
+| `rs` | Rust client generation (Tokio async / std sync TCP) | — |
 | `code` | On-demand code generation at `/code/{service}/{lang}` | `http` |
 | `doc` | Interactive API docs at `/doc` endpoint | `http`, `js` |
 | `ordinary-http` | RESTful JSON endpoints (GET/POST/PUT/DELETE) | `http`, serde, serde_json |
@@ -543,7 +544,7 @@ return Err(afast::Error::custom(400, "invalid request parameter"));
 ### Static Generation (compile-time file output)
 
 ```rust
-use afast::{GenerateTarget, Lang, JsTsCallType};
+use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType};
 
 let app = AFast::new()
     .service(api_svc)
@@ -558,6 +559,11 @@ let app = AFast::new()
             path: "./code".into(),
             debug: true,
         },
+        GenerateTarget {
+            lang: Lang::RS(vec![RsCallType::TcpAsync]),
+            path: "./src/bin/client".into(),
+            debug: true,
+        },
     ]);
 ```
 
@@ -567,6 +573,7 @@ let app = AFast::new()
 GET /code/api/ts?call=fetch,ws
 GET /code/api/js?call=fetch,ws
 GET /code/pay/kt?call=http,ws,tcp
+GET /code/api/rs?call=tcp-async
 ```
 
 ### Supported Transport Types
@@ -591,6 +598,13 @@ GET /code/pay/kt?call=http,ws,tcp
 | `http` / `fetch` | `java.net.HttpURLConnection` |
 | `ws` | `java.net.http.WebSocket` |
 | `tcp` | `java.net.Socket` |
+
+**Rust:**
+
+| Value | API |
+|-------|-----|
+| `tcp-async` | `tokio::net::TcpStream` (async) |
+| `tcp-sync` | `std::net::TcpStream` (sync) |
 
 ### Client Usage
 
@@ -666,7 +680,7 @@ const fresh = await client.apis.admin.listUsers({ page: 1, size: 20 }, true);
 - **Class-level** — Cache is stored on the class `static _cache`, shared across all instances
 - **Param-aware** — Cache key is composed of method name + serialized params; changed params trigger a fresh request
 - **Lazy caching** — `force = false` with valid cache returns immediately; `force = true` bypasses cache
-- **Cross-language** — TypeScript, JavaScript, and Kotlin clients use the same caching strategy
+- **Cross-language** — TypeScript, JavaScript, Kotlin, and Rust clients use the same caching strategy
 
 TS client cache structure:
 

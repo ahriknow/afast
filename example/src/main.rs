@@ -1,4 +1,6 @@
-use afast::{AFast, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, register, service};
+use afast::{
+    AFast, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, RsCallType, register, service,
+};
 
 mod handler;
 mod state;
@@ -21,7 +23,9 @@ use state::AppState;
 async fn main() {
     let check_svc = service!("check", "Check Service" => {
         h(health),
-        h(info)
+        group("inner" => {
+            h(info),
+        })
     });
 
     let admin_svc = service!("admin", "Admin Service" => {
@@ -107,6 +111,11 @@ async fn main() {
                 debug: true,
                 lang: Lang::KT(vec![KtCallType::Http, KtCallType::Ws, KtCallType::Tcp]),
                 path: "./client".into(),
+            },
+            GenerateTarget {
+                debug: true,
+                lang: Lang::RS(vec![RsCallType::TcpAsync]),
+                path: "./example/src/bin/client".into(),
             },
         ])
         .service(check_svc)

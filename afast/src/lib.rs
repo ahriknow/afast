@@ -567,6 +567,8 @@ pub use app::AFast;
 pub use app::DocConfig;
 #[cfg(feature = "kt")]
 pub use app::KtCallType;
+#[cfg(feature = "rs")]
+pub use app::RsCallType;
 #[cfg(feature = "tls")]
 pub use app::TlsConfig;
 #[cfg(feature = "ordinary-http")]

@@ -15,11 +15,11 @@ categories = ["web-programming", "asynchronous"]
 [workspace.dependencies]
 afast = { version = "0.1.5", path = "afast", features = ["ts"] }
 afast-macros = { version = "0.1.5", path = "afast-macros" }
-afastdata = { version = "0.0.6" }
+afastdata = { version = "0.0.7" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 tokio = { version = "1", features=["full"] }
-tokio-tungstenite = { version = "0.26" }
+tokio-tungstenite = { version = "0.29" }
 futures-util = { version = "0.3" }
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
