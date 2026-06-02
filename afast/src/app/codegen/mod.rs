@@ -2,6 +2,7 @@
 // on-demand /code endpoint. Each module is gated by a Cargo feature so unused
 // generators are not compiled.
 
+pub(crate) mod buf;
 #[cfg(feature = "code")]
 pub mod code;
 #[cfg(feature = "doc")]

@@ -7,6 +7,13 @@
 //! All Rust types referenced by handlers are emitted as `export type`
 //! declarations so that the module is self-contained and type-safe.
 
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::only_used_in_recursion
+)]
+
+use super::buf::CodeBuf;
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
@@ -114,7 +121,7 @@ fn rust_type_to_ts(ty: &str) -> String {
 /// `send`, `close`, and internal `_onMessage` methods for bidirectional
 /// push communication over the afast binary protocol.
 fn types_header(seq64: bool, has_ws: bool, has_tcp: bool) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
 
     if has_ws || has_tcp {
         // seq_id bytes: 4 for i32, 8 for i64
@@ -225,7 +232,7 @@ fn types_header(seq64: bool, has_ws: bool, has_tcp: bool) -> String {
         lines.push("    }".into());
         lines.push("}".into());
     } // end if has_ws || has_tcp
-    lines.join("\n")
+    lines.build()
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -531,7 +538,7 @@ fn type_name_for(prefix: &str, meta: &TagMeta) -> String {
 /// by the `emitted` set). Nested structures are recursively expanded by
 /// `extract_nested_types`.
 fn handler_type_exports(prefix: &str, meta: &HandlerMeta, emitted: &mut Vec<String>) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
 
     let mut data_idx = 0;
     for param in meta.params {
@@ -580,24 +587,24 @@ fn handler_type_exports(prefix: &str, meta: &HandlerMeta, emitted: &mut Vec<Stri
         }
     }
 
-    if meta.return_type != "()" {
-        if let Some(structure_fn) = meta.return_structure {
-            let structure = structure_fn();
-            let type_name = if meta.is_ordinary {
-                format!("{}Response", prefix)
-            } else {
-                prefixed_type(prefix, structure.name)
-            };
-            if !emitted.contains(&type_name) {
-                lines.push(type_def_for_named(&type_name, structure));
-                emitted.push(type_name.clone());
-                emitted.push(structure.name.to_string());
-                extract_nested_types(structure, &mut lines, emitted);
-            }
+    if meta.return_type != "()"
+        && let Some(structure_fn) = meta.return_structure
+    {
+        let structure = structure_fn();
+        let type_name = if meta.is_ordinary {
+            format!("{}Response", prefix)
+        } else {
+            prefixed_type(prefix, structure.name)
+        };
+        if !emitted.contains(&type_name) {
+            lines.push(type_def_for_named(&type_name, structure));
+            emitted.push(type_name.clone());
+            emitted.push(structure.name.to_string());
+            extract_nested_types(structure, &mut lines, emitted);
         }
     }
 
-    lines.join("\n")
+    lines.build()
 }
 
 /// Depth-first traversal of nested struct/enum types reachable from a
@@ -605,11 +612,7 @@ fn handler_type_exports(prefix: &str, meta: &HandlerMeta, emitted: &mut Vec<Stri
 /// `export type` declaration and recurses into its children. This ensures
 /// every referenced complex type appears in the generated output exactly
 /// once.
-fn extract_nested_types(
-    meta: &'static TagMeta,
-    lines: &mut Vec<String>,
-    emitted: &mut Vec<String>,
-) {
+fn extract_nested_types(meta: &'static TagMeta, lines: &mut CodeBuf, emitted: &mut Vec<String>) {
     if !emitted.contains(&meta.name.to_string()) {
         emitted.push(meta.name.to_string());
         lines.push(type_def_for(meta));
@@ -761,7 +764,7 @@ fn response_expr(
 /// returned. Unit type `()` produces `{} as unknown as Record<string,
 /// never>`.
 fn generate_return(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     reader: &str,
     ty: &str,
     resp_type: &str,
@@ -777,17 +780,10 @@ fn generate_return(
         "const _result = "
     };
     if ty == "()" {
-        if debug {
-            lines.push(format!(
-                "{}{}{{}} as unknown as Record<string, never>;",
-                indent, ret
-            ));
-        } else {
-            lines.push(format!(
-                "{}{}{{}} as unknown as Record<string, never>;",
-                indent, ret
-            ));
-        }
+        lines.push(format!(
+            "{}{}{{}} as unknown as Record<string, never>;",
+            indent, ret
+        ));
         return;
     }
     let expr = response_expr(reader, ty, indent, structure);
@@ -817,7 +813,7 @@ fn generate_return(
 /// property). When no `structure` metadata is available the value is
 /// serialised as raw bytes via `wBytes`.
 fn generate_request_serialize(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var: &str,
     ty: &str,
     indent: &str,
@@ -929,7 +925,7 @@ fn generate_request_serialize(
 /// Nested structs and enums are recursed into. All validation failures
 /// throw `AFastError` with the rule's code and message.
 fn generate_validation(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var_prefix: &str,
     fields: &[crate::handler::FieldMeta],
     indent: &str,
@@ -1003,7 +999,7 @@ fn generate_validation(
 /// for a single field as TypeScript `if` statements. Each check calls
 /// `this._onError` (if set) and throws `AFastError` on failure.
 fn emit_validation_checks(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     field_path: &str,
     validations: &[crate::handler::ValidateRule],
     indent: &str,
@@ -1101,7 +1097,7 @@ fn emit_validation_checks(
 /// Tuple variants (single unnamed field) access data directly; named
 /// variants access fields through `data.fieldName`.
 fn generate_enum_validation(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var_prefix: &str,
     variants: &[crate::handler::EnumVariantMeta],
     indent: &str,
@@ -1179,7 +1175,7 @@ fn generate_enum_validation(
                 variant_tag = variant_tag,
             ));
             let inner_indent = format!("{}    ", indent);
-            generate_validation(lines, &data_prefix, &variant.fields, &inner_indent);
+            generate_validation(lines, &data_prefix, variant.fields, &inner_indent);
             lines.push(format!("{indent}}}"));
         }
     }
@@ -1247,9 +1243,10 @@ fn handler_method(
 
     // For long connections, add callback parameter
     if meta.long_connection {
-        fn_params.push(format!(
+        fn_params.push(
             "callback: (data: Uint8Array, send: (data: string | Uint8Array | any) => void) => void"
-        ));
+                .to_string(),
+        );
     }
 
     // Cache: add force param
@@ -1280,7 +1277,7 @@ fn handler_method(
 
     // Build body
     let ind = format!("{}    ", indent);
-    let mut body_lines = Vec::new();
+    let mut body_lines = CodeBuf::new();
 
     // Cache check (before serialization, so we skip work on cache hit)
     if cache_seconds > 0 {
@@ -1344,11 +1341,8 @@ fn handler_method(
         let var = format!("_c{}", ci);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
-            match meta.kind {
-                TagKind::Struct(fields) => {
-                    generate_validation(&mut body_lines, &var, fields, &ind);
-                }
-                _ => {}
+            if let TagKind::Struct(fields) = meta.kind {
+                generate_validation(&mut body_lines, &var, fields, &ind);
             }
         }
     }
@@ -1357,11 +1351,8 @@ fn handler_method(
     for &(ref var, param) in &data_params {
         if let Some(structure_fn) = param.structure {
             let structure = structure_fn();
-            match structure.kind {
-                TagKind::Struct(fields) => {
-                    generate_validation(&mut body_lines, var, fields, &ind);
-                }
-                _ => {}
+            if let TagKind::Struct(fields) = structure.kind {
+                generate_validation(&mut body_lines, var, fields, &ind);
             }
         }
     }
@@ -1371,20 +1362,17 @@ fn handler_method(
         let var = format!("_c{}", ci);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
-            match meta.kind {
-                TagKind::Struct(fields) => {
-                    for field in included(fields) {
-                        let field_var = format!("{}.{}", var, field.name);
-                        generate_request_serialize(
-                            &mut body_lines,
-                            &field_var,
-                            field.ty,
-                            &ind,
-                            field.structure,
-                        );
-                    }
+            if let TagKind::Struct(fields) = meta.kind {
+                for field in included(fields) {
+                    let field_var = format!("{}.{}", var, field.name);
+                    generate_request_serialize(
+                        &mut body_lines,
+                        &field_var,
+                        field.ty,
+                        &ind,
+                        field.structure,
+                    );
                 }
-                _ => {}
             }
         }
     }
@@ -1475,7 +1463,7 @@ fn handler_method(
         }
     }
 
-    let body = body_lines.join("\n");
+    let body = body_lines.build();
 
     format!(
         "{indent}{func_name}:async({params_str}):{return_type}=>{{\n{body}\n{indent}}},\n",
@@ -1569,7 +1557,7 @@ fn ordinary_handler_method_ts(
     let return_type = ordinary_return_ts(meta, prefix);
 
     // Build method body
-    let mut body_lines = Vec::new();
+    let mut body_lines = CodeBuf::new();
 
     // Build URL path: join group path + handler route path
     let group_prefix = group_path.join("/");
@@ -1587,25 +1575,25 @@ fn ordinary_handler_method_ts(
     body_lines.push(format!("{}let url = `${{this._url}}{}`;", ind, full_path));
 
     // Substitute path params
-    if let Some(p) = param_param {
-        if let Some(s) = p.structure {
-            let structure = s();
-            match structure.kind {
-                TagKind::Struct(fields) => {
-                    for field in included(fields) {
-                        body_lines.push(format!(
+    if let Some(p) = param_param
+        && let Some(s) = p.structure
+    {
+        let structure = s();
+        match structure.kind {
+            TagKind::Struct(fields) => {
+                for field in included(fields) {
+                    body_lines.push(format!(
                             "{}url = url.replace(':' + '{}', encodeURIComponent(String(request.params.{})));",
                             ind, field.name, field.name
                         ));
-                    }
                 }
-                _ => {
-                    // Primitive path param — replace the first :param placeholder
-                    body_lines.push(format!(
+            }
+            _ => {
+                // Primitive path param — replace the first :param placeholder
+                body_lines.push(format!(
                         "{}url = url.replace(/:([^/]+)/, () => encodeURIComponent(String(request.params)));",
                         ind
                     ));
-                }
             }
         }
     }
@@ -1761,7 +1749,7 @@ fn ordinary_handler_method_ts(
         body_lines.push(format!("{}return data;", ind));
     }
 
-    let body = body_lines.join("\n");
+    let body = body_lines.build();
 
     format!(
         "{indent}{func_name}:async({params_str}):{return_type}=>{{\n{body}\n{indent}}},\n",
@@ -1824,7 +1812,7 @@ fn generate_handler_object(
     debug: bool,
     class_name: &str,
 ) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
     let inner_indent = format!("{}    ", indent);
 
     for h in handlers {
@@ -1891,12 +1879,12 @@ fn generate_handler_object(
                         _ => {}
                     }
                 }
-                if h.meta.return_type != "()" {
-                    if let Some(structure_fn) = h.meta.return_structure {
-                        let structure = structure_fn();
-                        if !structure.desc.is_empty() {
-                            lines.push(format!("{} * @returns {}", inner_indent, structure.desc));
-                        }
+                if h.meta.return_type != "()"
+                    && let Some(structure_fn) = h.meta.return_structure
+                {
+                    let structure = structure_fn();
+                    if !structure.desc.is_empty() {
+                        lines.push(format!("{} * @returns {}", inner_indent, structure.desc));
                     }
                 }
                 lines.push(format!("{} */", inner_indent));
@@ -1956,12 +1944,12 @@ fn generate_handler_object(
                     }
                 }
 
-                if h.meta.return_type != "()" {
-                    if let Some(structure_fn) = h.meta.return_structure {
-                        let structure = structure_fn();
-                        if !structure.desc.is_empty() {
-                            lines.push(format!("{} * @returns {}", inner_indent, structure.desc));
-                        }
+                if h.meta.return_type != "()"
+                    && let Some(structure_fn) = h.meta.return_structure
+                {
+                    let structure = structure_fn();
+                    if !structure.desc.is_empty() {
+                        lines.push(format!("{} * @returns {}", inner_indent, structure.desc));
                     }
                 }
 
@@ -1980,7 +1968,7 @@ fn generate_handler_object(
         }
     }
 
-    lines.join("\n")
+    lines.build()
 }
 
 // ─── Service-level code generation ──────────────────────────────
@@ -1998,10 +1986,10 @@ pub(crate) fn generate_service_ts(
     calls: &[crate::JsTsCallType],
     debug: bool,
 ) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
 
     lines.push("// Auto-generated by afast. DO NOT EDIT.".to_string());
-    lines.push("".to_string());
+    lines.b();
 
     let seq64 = cfg!(feature = "seq64");
     let len64 = cfg!(feature = "len64");
@@ -2079,7 +2067,7 @@ pub(crate) fn generate_service_ts(
         lines.push(
             "import { createConnection, type Socket as NodeSocket } from 'node:net';".to_string(),
         );
-        lines.push("".to_string());
+        lines.b();
     }
 
     lines.push(types_header(seq64, has_any_ws, has_tcp));
@@ -2105,7 +2093,7 @@ pub(crate) fn generate_service_ts(
         }
     }
     if !customs.is_empty() {
-        lines.push("".to_string());
+        lines.b();
         for ci in &customs {
             lines.push(format!(
                 "export type CustomFn_{} = () => Promise<{}>;",
@@ -2114,7 +2102,7 @@ pub(crate) fn generate_service_ts(
         }
     }
     if !headers.is_empty() {
-        lines.push("".to_string());
+        lines.b();
         for hi in &headers {
             lines.push(format!(
                 "export type HeaderFn_{} = () => Promise<{}>;",
@@ -2122,7 +2110,7 @@ pub(crate) fn generate_service_ts(
             ));
         }
     }
-    lines.push("".to_string());
+    lines.b();
 
     // AFastError class
     lines.push("export class AFastError extends Error {".to_string());
@@ -2133,7 +2121,7 @@ pub(crate) fn generate_service_ts(
     lines.push("        this.code = code;".to_string());
     lines.push("    }".to_string());
     lines.push("}".to_string());
-    lines.push("".to_string());
+    lines.b();
 
     // Client class
     let class_name = to_pascal_case(&svc.name);
@@ -2227,7 +2215,7 @@ pub(crate) fn generate_service_ts(
     }
 
     // Constructor
-    lines.push("".to_string());
+    lines.b();
     {
         // Build constructor parameter — single options object
         let mut opt_fields: Vec<String> = vec![
@@ -2534,7 +2522,7 @@ pub(crate) fn generate_service_ts(
 
     // _handleMessage — WS, UniApp WS, or TCP
     if has_any_ws || has_tcp {
-        lines.push("".to_string());
+        lines.b();
         lines.push("    private _handleMessage(raw: Uint8Array) {".into());
         if seq64 {
             lines.push(format!("        if (raw.length < {sid}) return;"));
@@ -2888,14 +2876,9 @@ pub(crate) fn generate_service_ts(
                     lines.push("        } else if (this._transport === 'wxws') {".into());
                 }
                 lines.push("            this._wxSocketTask.send({ data });".into());
-                first = false;
             }
             if has_tcp {
-                if first {
-                    lines.push("        } else {".into());
-                } else {
-                    lines.push("        } else {".into());
-                }
+                lines.push("        } else {".into());
                 lines.push(format!(
                     "            const buf = new ArrayBuffer({len_bytes} + data.length);"
                 ));
@@ -2911,7 +2894,7 @@ pub(crate) fn generate_service_ts(
                 lines.push(
                     "            new Uint8Array(buf).set(data, ".to_string()
                         + &len_bytes.to_string()
-                        + ");".into(),
+                        + ");",
                 );
                 lines.push("            this._tcpSocket.write(new Uint8Array(buf));".into());
             }
@@ -2941,7 +2924,7 @@ pub(crate) fn generate_service_ts(
             lines.push(
                 "        new Uint8Array(buf).set(data, ".to_string()
                     + &len_bytes.to_string()
-                    + ");".into(),
+                    + ");",
             );
             lines.push("        this._tcpSocket.write(new Uint8Array(buf));".into());
             lines.push("    }".into());
@@ -2964,7 +2947,7 @@ pub(crate) fn generate_service_ts(
             lines.push("        v.setUint32(0, 0xFFFFFFFF, true);".into());
         }
         if len64 {
-            lines.push(format!("        const len = ids.length * 4;"));
+            lines.push("        const len = ids.length * 4;".to_string());
             lines.push(format!(
                 "        v.setUint32({sid}, len & 0xFFFFFFFF, true);"
             ));
@@ -3192,7 +3175,7 @@ pub(crate) fn generate_service_ts(
     }
 
     // _writer / _reader — always
-    lines.push("".to_string());
+    lines.b();
     lines.push("    private _writer() {".to_string());
     lines.push(
         "        const b: number[] = []; const v = new DataView(new ArrayBuffer(8));".to_string(),
@@ -3218,7 +3201,7 @@ pub(crate) fn generate_service_ts(
     lines.push("        };".to_string());
     lines.push("    }".to_string());
 
-    lines.push("".to_string());
+    lines.b();
     lines.push("    private _reader(data: Uint8Array) {".to_string());
     lines.push("        const d = Array.from(data); let o = 0;".to_string());
     lines.push("        return {".to_string());
@@ -3245,7 +3228,7 @@ pub(crate) fn generate_service_ts(
     lines.push("    }".to_string());
 
     // apis wrapper
-    lines.push("".to_string());
+    lines.b();
     lines.push("    apis = {".to_string());
 
     let handler_obj = generate_handler_object(
@@ -3264,7 +3247,7 @@ pub(crate) fn generate_service_ts(
     lines.push("    };".to_string());
     lines.push("}".to_string());
 
-    lines.join("\n")
+    lines.build()
 }
 
 /// Recursively collect type exports from handler tree.
@@ -3272,7 +3255,7 @@ fn collect_type_exports(
     handlers: &[Handler],
     path: &[&str],
     emitted: &mut Vec<String>,
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
 ) {
     for h in handlers {
         let child_path = {

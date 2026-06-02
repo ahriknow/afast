@@ -164,29 +164,29 @@ pub fn expand(
                 }
                 // Double-wrapped containers (e.g. Vec<Option<User>>,
                 // Option<Vec<User>>) need one more level of unwrapping.
-                if inner_ident.as_deref() == Some("Vec") || inner_ident.as_deref() == Some("Option")
+                if (inner_ident.as_deref() == Some("Vec")
+                    || inner_ident.as_deref() == Some("Option"))
+                    && let Ok(nested) = extract_generic_inner(&inner_ty)
                 {
-                    if let Ok(nested) = extract_generic_inner(&inner_ty) {
-                        let nested_ident = extract_outermost_ident(&nested);
-                        let nested_is_primitive = matches!(
-                            nested_ident.as_deref(),
-                            Some(
-                                "i8" | "i16"
-                                    | "i32"
-                                    | "i64"
-                                    | "u8"
-                                    | "u16"
-                                    | "u32"
-                                    | "u64"
-                                    | "f32"
-                                    | "f64"
-                                    | "bool"
-                                    | "String"
-                            )
-                        );
-                        if !nested_is_primitive {
-                            return Some(quote! { || <#nested as afast::Structure>::structure() });
-                        }
+                    let nested_ident = extract_outermost_ident(&nested);
+                    let nested_is_primitive = matches!(
+                        nested_ident.as_deref(),
+                        Some(
+                            "i8" | "i16"
+                                | "i32"
+                                | "i64"
+                                | "u8"
+                                | "u16"
+                                | "u32"
+                                | "u64"
+                                | "f32"
+                                | "f64"
+                                | "bool"
+                                | "String"
+                        )
+                    );
+                    if !nested_is_primitive {
+                        return Some(quote! { || <#nested as afast::Structure>::structure() });
                     }
                 }
             }
@@ -195,11 +195,39 @@ pub fn expand(
             // For response wrappers like Json<T>, extract the inner type's
             // structure. Only Json<T> carries user-defined types; Text, Html,
             // File, Status, and Redirect are opaque wrappers.
-            if ident.as_deref() == Some("Json") {
-                if let Ok(inner_ty) = extract_generic_inner(ty) {
-                    let inner_ident = extract_outermost_ident(&inner_ty);
-                    let inner_is_primitive = matches!(
-                        inner_ident.as_deref(),
+            if ident.as_deref() == Some("Json")
+                && let Ok(inner_ty) = extract_generic_inner(ty)
+            {
+                let inner_ident = extract_outermost_ident(&inner_ty);
+                let inner_is_primitive = matches!(
+                    inner_ident.as_deref(),
+                    Some(
+                        "i8" | "i16"
+                            | "i32"
+                            | "i64"
+                            | "u8"
+                            | "u16"
+                            | "u32"
+                            | "u64"
+                            | "f32"
+                            | "f64"
+                            | "bool"
+                            | "String"
+                            | "Vec"
+                            | "Option"
+                    )
+                );
+                if !inner_is_primitive {
+                    return Some(quote! { || <#inner_ty as afast::Structure>::structure() });
+                }
+                // Handle double-wrapped Json<Vec<User>> and Json<Option<User>>.
+                if (inner_ident.as_deref() == Some("Vec")
+                    || inner_ident.as_deref() == Some("Option"))
+                    && let Ok(nested) = extract_generic_inner(&inner_ty)
+                {
+                    let nested_ident = extract_outermost_ident(&nested);
+                    let nested_is_primitive = matches!(
+                        nested_ident.as_deref(),
                         Some(
                             "i8" | "i16"
                                 | "i32"
@@ -216,39 +244,8 @@ pub fn expand(
                                 | "Option"
                         )
                     );
-                    if !inner_is_primitive {
-                        return Some(quote! { || <#inner_ty as afast::Structure>::structure() });
-                    }
-                    // Handle double-wrapped Json<Vec<User>> and Json<Option<User>>.
-                    if inner_ident.as_deref() == Some("Vec")
-                        || inner_ident.as_deref() == Some("Option")
-                    {
-                        if let Ok(nested) = extract_generic_inner(&inner_ty) {
-                            let nested_ident = extract_outermost_ident(&nested);
-                            let nested_is_primitive = matches!(
-                                nested_ident.as_deref(),
-                                Some(
-                                    "i8" | "i16"
-                                        | "i32"
-                                        | "i64"
-                                        | "u8"
-                                        | "u16"
-                                        | "u32"
-                                        | "u64"
-                                        | "f32"
-                                        | "f64"
-                                        | "bool"
-                                        | "String"
-                                        | "Vec"
-                                        | "Option"
-                                )
-                            );
-                            if !nested_is_primitive {
-                                return Some(
-                                    quote! { || <#nested as afast::Structure>::structure() },
-                                );
-                            }
-                        }
+                    if !nested_is_primitive {
+                        return Some(quote! { || <#nested as afast::Structure>::structure() });
                     }
                 }
             }
@@ -260,18 +257,18 @@ pub fn expand(
     });
 
     let param_meta_entries = build_param_meta_entries(&params);
-    let meta_tokens = build_handler_meta(
-        &fn_name_str,
-        &desc,
-        &api_name,
-        &return_type_str,
+    let meta_tokens = build_handler_meta(&HandlerMetaParams {
+        fn_name_str: &fn_name_str,
+        desc: &desc,
+        api_name: &api_name,
+        return_type_str: &return_type_str,
         return_structure,
         long_connection,
-        method.unwrap_or(""),
-        method.is_some(),
-        &param_meta_entries,
+        method: method.unwrap_or(""),
+        is_ordinary: method.is_some(),
+        param_meta_entries: &param_meta_entries,
         cache_seconds,
-    );
+    });
 
     let invoker_ident = syn::Ident::new(&format!("__Invoker_{}", fn_name_str), Span::call_site());
     let invoker_const = syn::Ident::new(&format!("__INVOKER_{}", fn_name_str), Span::call_site());
@@ -342,7 +339,12 @@ pub fn expand(
         // implementation that deserializes payload bytes and calls the user
         // function.
 
-        let invoker_impl = build_invoker_impl(&invoker_ident, &impl_fn_name, &params);
+        let invoker_impl = build_invoker_impl(
+            &invoker_ident,
+            &impl_fn_name,
+            &params,
+            return_type_str.starts_with("Result"),
+        );
 
         Ok(quote! {
             #impl_fn
@@ -411,13 +413,12 @@ fn parse_handler_attrs_from_tokens(
                     {
                         api_name = s.value();
                     }
-                } else if nv.path.is_ident("cache") {
-                    if let Expr::Lit(ExprLit {
+                } else if nv.path.is_ident("cache")
+                    && let Expr::Lit(ExprLit {
                         lit: Lit::Int(n), ..
                     }) = nv.value
-                    {
-                        cache_seconds = n.base10_parse()?;
-                    }
+                {
+                    cache_seconds = n.base10_parse()?;
                 }
             }
             Meta::List(list) => {
@@ -546,17 +547,17 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
 
 /// Returns true when the outermost identifier of the type is `State`.
 fn is_state_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "State")
+    extract_outermost_ident(ty).is_some_and(|s| s == "State")
 }
 
 /// Returns true when the outermost identifier of the type is `Custom`.
 fn is_custom_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Custom")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Custom")
 }
 
 /// Returns true when the outermost identifier of the type is `Data`.
 fn is_data_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Data")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Data")
 }
 
 /// Returns true when the type string contains `Receiver`, matching either
@@ -573,22 +574,22 @@ fn is_sender_type(ty: &Type) -> bool {
 
 /// Returns true when the outermost identifier of the type is `Query`.
 fn is_query_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Query")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Query")
 }
 
 /// Returns true when the outermost identifier of the type is `Param`.
 fn is_param_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Param")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Param")
 }
 
 /// Returns true when the outermost identifier of the type is `Body`.
 fn is_body_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Body")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Body")
 }
 
 /// Returns true when the outermost identifier of the type is `Header`.
 fn is_header_type(ty: &Type) -> bool {
-    extract_outermost_ident(ty).map_or(false, |s| s == "Header")
+    extract_outermost_ident(ty).is_some_and(|s| s == "Header")
 }
 
 /// Extracts the last path segment identifier from a `Type::Path`, if any.
@@ -596,10 +597,10 @@ fn is_header_type(ty: &Type) -> bool {
 /// Returns `None` for types that are not simple path expressions (e.g.
 /// references, tuples, trait objects).
 fn extract_outermost_ident(ty: &Type) -> Option<String> {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            return Some(segment.ident.to_string());
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return Some(segment.ident.to_string());
     }
     None
 }
@@ -607,10 +608,10 @@ fn extract_outermost_ident(ty: &Type) -> Option<String> {
 /// Returns the last path segment identifier as a string, falling back to the
 /// full type string for non-path types.
 fn extract_ident_name(ty: &Type) -> String {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            return segment.ident.to_string();
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident.to_string();
     }
     type_to_string(ty)
 }
@@ -620,14 +621,12 @@ fn extract_ident_name(ty: &Type) -> String {
 /// For `Custom<User>`, returns `User`. Errors if the type is not a generic path
 /// with angle-bracketed arguments.
 fn extract_generic_inner(ty: &Type) -> syn::Result<Type> {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                    return Ok(inner_ty.clone());
-                }
-            }
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+    {
+        return Ok(inner_ty.clone());
     }
     Err(syn::Error::new(
         Span::call_site(),
@@ -648,16 +647,13 @@ fn extract_return_type(input_fn: &ItemFn) -> syn::Result<String> {
     match &input_fn.sig.output {
         syn::ReturnType::Default => Ok("()".to_string()),
         syn::ReturnType::Type(_, ty) => {
-            if let Type::Path(type_path) = ty.as_ref() {
-                if let Some(segment) = type_path.path.segments.last() {
-                    if is_result_ident(&segment.ident) {
-                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                                return Ok(type_to_string(inner_ty));
-                            }
-                        }
-                    }
-                }
+            if let Type::Path(type_path) = ty.as_ref()
+                && let Some(segment) = type_path.path.segments.last()
+                && is_result_ident(&segment.ident)
+                && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+            {
+                return Ok(type_to_string(inner_ty));
             }
             Ok(type_to_string(ty))
         }
@@ -673,16 +669,13 @@ fn extract_return_type_syn(input_fn: &ItemFn) -> Option<Type> {
     match &input_fn.sig.output {
         syn::ReturnType::Default => None,
         syn::ReturnType::Type(_, ty) => {
-            if let Type::Path(type_path) = ty.as_ref() {
-                if let Some(segment) = type_path.path.segments.last() {
-                    if is_result_ident(&segment.ident) {
-                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                                return Some(inner_ty.clone());
-                            }
-                        }
-                    }
-                }
+            if let Type::Path(type_path) = ty.as_ref()
+                && let Some(segment) = type_path.path.segments.last()
+                && is_result_ident(&segment.ident)
+                && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+            {
+                return Some(inner_ty.clone());
             }
             Some(ty.as_ref().clone())
         }
@@ -723,23 +716,35 @@ fn build_param_meta_entries(params: &[ParamInfo]) -> Vec<TokenStream> {
 /// Builds the `HandlerMeta` const describing the handler's name, description,
 /// API name, parameter list, return type, transport characteristics, and
 /// client-side cache duration.
-fn build_handler_meta(
-    fn_name_str: &str,
-    desc: &str,
-    api_name: &str,
-    return_type_str: &str,
+/// Parameters for [`build_handler_meta`].
+struct HandlerMetaParams<'a> {
+    fn_name_str: &'a str,
+    desc: &'a str,
+    api_name: &'a str,
+    return_type_str: &'a str,
     return_structure: Option<TokenStream>,
     long_connection: bool,
-    method: &str,
+    method: &'a str,
     is_ordinary: bool,
-    param_meta_entries: &[TokenStream],
+    param_meta_entries: &'a [TokenStream],
     cache_seconds: u64,
-) -> TokenStream {
-    let meta_ident = syn::Ident::new(&format!("__META_{}", fn_name_str), Span::call_site());
-    let ret_struct = match return_structure {
+}
+
+fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
+    let meta_ident = syn::Ident::new(&format!("__META_{}", p.fn_name_str), Span::call_site());
+    let ret_struct = match &p.return_structure {
         Some(expr) => quote! { Some(#expr) },
         None => quote! { afast::no_structure() },
     };
+    let fn_name_str = p.fn_name_str;
+    let desc = p.desc;
+    let api_name = p.api_name;
+    let return_type_str = p.return_type_str;
+    let long_connection = p.long_connection;
+    let method = p.method;
+    let is_ordinary = p.is_ordinary;
+    let param_meta_entries = p.param_meta_entries;
+    let cache_seconds = p.cache_seconds;
     quote! {
         pub const #meta_ident: afast::HandlerMeta = afast::HandlerMeta {
             name: #fn_name_str,
@@ -764,13 +769,14 @@ fn build_invoker_impl(
     invoker_ident: &syn::Ident,
     fn_name: &syn::Ident,
     params: &[ParamInfo],
+    returns_result: bool,
 ) -> TokenStream {
     let long_connection = params
         .iter()
         .any(|p| p.extractor == "Receiver" || p.extractor == "Sender");
 
     if long_connection {
-        return build_stream_invoker_impl(invoker_ident, fn_name, params);
+        return build_stream_invoker_impl(invoker_ident, fn_name, params, returns_result);
     }
 
     build_call_invoker_impl(invoker_ident, fn_name, params)
@@ -811,7 +817,7 @@ fn build_call_invoker_impl(
             "Custom" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..], &__marker) {
                         Ok((__custom_val, __consumed)) => {
                             _off += __consumed;
                             afast::Custom(__custom_val)
@@ -825,7 +831,7 @@ fn build_call_invoker_impl(
             "Data" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..], &__marker) {
                         Ok((__data_val, __consumed)) => {
                             _off += __consumed;
                             afast::Data(__data_val)
@@ -867,11 +873,13 @@ fn build_call_invoker_impl(
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, afast::Error>> + Send + '_>
             > {
+                let __marker = state.get::<std::sync::Arc<String>>().cloned()
+                    .unwrap_or_else(|| std::sync::Arc::new("afast".to_string()));
                 #offset_init
                 #( #sync_extractions )*
                 Box::pin(async move {
                     let result = #fn_name( #( #call_args ),* ).await?;
-                    Ok(afast::marker::serialize(&result))
+                    Ok(afast::marker::serialize(&result, &__marker))
                 })
             }
         }
@@ -890,6 +898,7 @@ fn build_stream_invoker_impl(
     invoker_ident: &syn::Ident,
     fn_name: &syn::Ident,
     params: &[ParamInfo],
+    returns_result: bool,
 ) -> TokenStream {
     let mut sync_extractions: Vec<TokenStream> = Vec::new();
     let mut has_payload_extractor = false;
@@ -917,7 +926,7 @@ fn build_stream_invoker_impl(
             "Custom" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..], &__marker) {
                         Ok((__custom_val, __consumed)) => {
                             _off += __consumed;
                             afast::Custom(__custom_val)
@@ -931,7 +940,7 @@ fn build_stream_invoker_impl(
             "Data" => {
                 has_payload_extractor = true;
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..]) {
+                    let #var_name: #full_type = match afast::marker::deserialize(&payload[_off..], &__marker) {
                         Ok((__data_val, __consumed)) => {
                             _off += __consumed;
                             afast::Data(__data_val)
@@ -971,6 +980,18 @@ fn build_stream_invoker_impl(
     let recv_name = recv_var.expect("persistent handler must have Receiver");
     let send_name = send_var.expect("persistent handler must have Sender");
 
+    let spawn_body = if returns_result {
+        quote! {
+            if let Err(e) = #fn_name( #( #call_args ),* ).await {
+                eprintln!("afast: long-connection handler error: {}", e);
+            }
+        }
+    } else {
+        quote! {
+            #fn_name( #( #call_args ),* ).await;
+        }
+    };
+
     quote! {
         pub struct #invoker_ident;
 
@@ -1002,6 +1023,8 @@ fn build_stream_invoker_impl(
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, afast::Error>> + Send + 'a>
             > {
+                let __marker = state.get::<std::sync::Arc<String>>().cloned()
+                    .unwrap_or_else(|| std::sync::Arc::new("afast".to_string()));
                 #offset_init
                 #( #sync_extractions )*
 
@@ -1010,7 +1033,7 @@ fn build_stream_invoker_impl(
 
                 Box::pin(async move {
                     tokio::spawn(async move {
-                        let _ = #fn_name( #( #call_args ),* ).await;
+                        #spawn_body
                     });
                     Ok(Vec::new())
                 })

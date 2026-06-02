@@ -198,10 +198,10 @@ fn collect_all_types(handlers: &[Handler], types: &mut HashMap<String, String>) 
                 emit_type_to_map(structure_fn(), types);
             }
         }
-        if h.meta.return_type != "()" {
-            if let Some(structure_fn) = h.meta.return_structure {
-                emit_type_to_map(structure_fn(), types);
-            }
+        if h.meta.return_type != "()"
+            && let Some(structure_fn) = h.meta.return_structure
+        {
+            emit_type_to_map(structure_fn(), types);
         }
         collect_all_types(&h.children, types);
     }
@@ -3359,9 +3359,13 @@ pub(crate) fn generate_service_html(
     };
     let http_port = http_addr
         .rsplit(':')
-        .last()
+        .next_back()
         .and_then(|s| s.parse::<u16>().ok());
-    let ws_port = ws_addr.and_then(|a| a.rsplit(':').last().and_then(|s| s.parse::<u16>().ok()));
+    let ws_port = ws_addr.and_then(|a| {
+        a.rsplit(':')
+            .next_back()
+            .and_then(|s| s.parse::<u16>().ok())
+    });
     let theme_icon = "☀️";
     let desc_line = if svc.desc.is_empty() {
         String::new()

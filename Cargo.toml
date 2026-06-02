@@ -3,19 +3,19 @@ resolver = "3"
 members = ["afast", "afast-macros", "example"]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 authors = ["ahriknow <ahriknow@ahriknow.com>"]
 license = "MIT"
-description = "A high-performance web backend framework for Rust. Auto generate client code (js, ts, kt)."
+description = "A high-performance web backend framework for Rust. Auto generate client code (js, ts, kt, rs)."
 repository = "https://github.com/ahriknow/afast"
 keywords = ["web", "framework", "backend", "http", "async"]
 categories = ["web-programming", "asynchronous"]
 
 [workspace.dependencies]
-afast = { version = "0.1.6", path = "afast", features = ["ts"] }
-afast-macros = { version = "0.1.6", path = "afast-macros" }
-afastdata = { version = "0.0.8" }
+afast = { version = "0.1.7", path = "afast", features = ["ts"] }
+afast-macros = { version = "0.1.7", path = "afast-macros" }
+afastdata = { version = "0.0.10" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 tokio = { version = "1", features=["full"] }

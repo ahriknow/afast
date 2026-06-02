@@ -390,7 +390,7 @@ impl<T: IntoResponse> IntoResponse for Result<T> {
             Err(e) => {
                 let code = e.code();
                 let message = e.message();
-                let status = if code >= 400 && code < 600 {
+                let status = if (400..600).contains(&code) {
                     hyper::StatusCode::from_u16(code as u16)
                         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                 } else {

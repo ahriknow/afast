@@ -7,6 +7,13 @@
 //! by handlers are emitted as JSDoc `@typedef` blocks so that editors can
 //! provide type hints without a TypeScript compilation step.
 
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::only_used_in_recursion
+)]
+
+use super::buf::CodeBuf;
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
@@ -261,7 +268,7 @@ fn has_cache_handlers_js(handlers: &[Handler]) -> bool {
 fn jsdoc_typedef_header(meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
-            let mut lines = Vec::new();
+            let mut lines = CodeBuf::new();
             lines.push("/**".to_string());
             if !meta.desc.is_empty() {
                 lines.push(format!(" * @description {}", meta.desc));
@@ -275,7 +282,7 @@ fn jsdoc_typedef_header(meta: &TagMeta) -> String {
                 lines.push(format!(" * @property {{{}}} {}", js_ty, field.name));
             }
             lines.push(" */".to_string());
-            lines.join("\n")
+            lines.build()
         }
         _ => jsdoc_typedef(meta),
     }
@@ -288,7 +295,7 @@ fn jsdoc_typedef_header(meta: &TagMeta) -> String {
 fn jsdoc_typedef(meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
-            let mut lines = Vec::new();
+            let mut lines = CodeBuf::new();
             lines.push("/**".to_string());
             let desc = if meta.desc.is_empty() {
                 meta.name.to_string()
@@ -304,18 +311,15 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
                 lines.push(format!(" * @property {{{}}} {}", js_ty, field.name));
             }
             lines.push(" */".to_string());
-            lines.join("\n")
+            lines.build()
         }
         TagKind::Enum(variants) => {
-            let mut lines = Vec::new();
+            let mut lines = CodeBuf::new();
             for variant in variants {
                 let variant_name = format!("{}_{}", meta.name, variant.name);
                 lines.push("/**".to_string());
                 lines.push(format!(" * @typedef {{Object}} {}", variant_name));
-                lines.push(format!(
-                    " * @property {{{}}} tag",
-                    format!("'{}'", variant.name)
-                ));
+                lines.push(format!(" * @property {{'{}'}} tag", variant.name));
                 if variant.fields.is_empty() {
                     lines.push(" * @property {null} data".to_string());
                 } else if variant.fields.len() == 1 && variant.fields[0].name.starts_with("__") {
@@ -329,7 +333,7 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
                     }
                 }
                 lines.push(" */".to_string());
-                lines.push("".to_string());
+                lines.b();
             }
             // Union type
             let variant_names: Vec<String> = variants
@@ -346,7 +350,7 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
                 lines.push(format!(" * @description {}", meta.desc));
             }
             lines.push(" */".to_string());
-            lines.join("\n")
+            lines.build()
         }
     }
 }
@@ -358,7 +362,7 @@ fn jsdoc_typedef(meta: &TagMeta) -> String {
 fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
     match meta.kind {
         TagKind::Struct(fields) => {
-            let mut lines = Vec::new();
+            let mut lines = CodeBuf::new();
             lines.push("/**".to_string());
             lines.push(format!(" * @typedef {{Object}} {}", type_name));
             if !meta.desc.is_empty() {
@@ -369,18 +373,15 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
                 lines.push(format!(" * @property {{{}}} {}", js_ty, field.name));
             }
             lines.push(" */".to_string());
-            lines.join("\n")
+            lines.build()
         }
         TagKind::Enum(variants) => {
-            let mut lines = Vec::new();
+            let mut lines = CodeBuf::new();
             for variant in variants {
                 let variant_name = format!("{}_{}", type_name, variant.name);
                 lines.push("/**".to_string());
                 lines.push(format!(" * @typedef {{Object}} {}", variant_name));
-                lines.push(format!(
-                    " * @property {{{}}} tag",
-                    format!("'{}'", variant.name)
-                ));
+                lines.push(format!(" * @property {{'{}'}} tag", variant.name));
                 if variant.fields.is_empty() {
                     lines.push(" * @property {null} data".to_string());
                 } else if variant.fields.len() == 1 && variant.fields[0].name.starts_with("__") {
@@ -394,7 +395,7 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
                     }
                 }
                 lines.push(" */".to_string());
-                lines.push("".to_string());
+                lines.b();
             }
             let variant_names: Vec<String> = variants
                 .iter()
@@ -410,7 +411,7 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
                 lines.push(format!(" * @description {}", meta.desc));
             }
             lines.push(" */".to_string());
-            lines.join("\n")
+            lines.build()
         }
     }
 }
@@ -423,7 +424,7 @@ fn jsdoc_typedef_named(type_name: &str, meta: &TagMeta) -> String {
 /// Nested structures discovered through `FieldMeta.structure` pointers are
 /// recursively expanded by `extract_nested_types_js`.
 fn handler_type_exports_js(prefix: &str, meta: &HandlerMeta, emitted: &mut Vec<String>) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
 
     let mut data_idx = 0;
     for param in meta.params {
@@ -472,35 +473,31 @@ fn handler_type_exports_js(prefix: &str, meta: &HandlerMeta, emitted: &mut Vec<S
         }
     }
 
-    if meta.return_type != "()" {
-        if let Some(structure_fn) = meta.return_structure {
-            let structure = structure_fn();
-            let type_name = if meta.is_ordinary {
-                format!("{}Response", prefix)
-            } else {
-                prefixed_type(prefix, structure.name)
-            };
-            if !emitted.contains(&type_name) {
-                lines.push(jsdoc_typedef_named(&type_name, structure));
-                emitted.push(type_name.clone());
-                emitted.push(structure.name.to_string());
-                extract_nested_types_js(structure, &mut lines, emitted);
-            }
+    if meta.return_type != "()"
+        && let Some(structure_fn) = meta.return_structure
+    {
+        let structure = structure_fn();
+        let type_name = if meta.is_ordinary {
+            format!("{}Response", prefix)
+        } else {
+            prefixed_type(prefix, structure.name)
+        };
+        if !emitted.contains(&type_name) {
+            lines.push(jsdoc_typedef_named(&type_name, structure));
+            emitted.push(type_name.clone());
+            emitted.push(structure.name.to_string());
+            extract_nested_types_js(structure, &mut lines, emitted);
         }
     }
 
-    lines.join("\n")
+    lines.build()
 }
 
 /// Depth-first traversal of nested struct/enum types reachable from a
 /// type's fields. For each type not already in `emitted`, emits a JSDoc
 /// typedef and recurses into its children. This ensures that every
 /// referenced complex type appears in the generated output exactly once.
-fn extract_nested_types_js(
-    meta: &'static TagMeta,
-    lines: &mut Vec<String>,
-    emitted: &mut Vec<String>,
-) {
+fn extract_nested_types_js(meta: &'static TagMeta, lines: &mut CodeBuf, emitted: &mut Vec<String>) {
     if !emitted.contains(&meta.name.to_string()) {
         emitted.push(meta.name.to_string());
         lines.push(jsdoc_typedef(meta));
@@ -533,7 +530,7 @@ fn extract_nested_types_js(
 /// property). When no `structure` metadata is available the value is
 /// serialised as raw bytes via `wBytes`.
 fn generate_request_serialize_js(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var: &str,
     ty: &str,
     indent: &str,
@@ -770,7 +767,7 @@ fn response_expr_js(
 /// `console.log`, then returned. Otherwise the expression is returned
 /// directly. Unit type `()` produces an empty object literal.
 fn generate_return_js(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     reader: &str,
     ty: &str,
     indent: &str,
@@ -871,7 +868,7 @@ fn handler_method_js(
 
     // Build body
     let ind = format!("{}    ", indent);
-    let mut body_lines = Vec::new();
+    let mut body_lines = CodeBuf::new();
 
     // Cache check (before serialization, so we skip work on cache hit)
     if cache_seconds > 0 {
@@ -935,11 +932,8 @@ fn handler_method_js(
         let var = format!("_c{}", ci);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
-            match meta.kind {
-                TagKind::Struct(fields) => {
-                    generate_validation_js(&mut body_lines, &var, fields, &ind);
-                }
-                _ => {}
+            if let TagKind::Struct(fields) = meta.kind {
+                generate_validation_js(&mut body_lines, &var, fields, &ind);
             }
         }
     }
@@ -948,11 +942,8 @@ fn handler_method_js(
     for &(ref var, param) in &data_params {
         if let Some(structure_fn) = param.structure {
             let structure = structure_fn();
-            match structure.kind {
-                TagKind::Struct(fields) => {
-                    generate_validation_js(&mut body_lines, var, fields, &ind);
-                }
-                _ => {}
+            if let TagKind::Struct(fields) = structure.kind {
+                generate_validation_js(&mut body_lines, var, fields, &ind);
             }
         }
     }
@@ -962,20 +953,17 @@ fn handler_method_js(
         let var = format!("_c{}", ci);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
-            match meta.kind {
-                TagKind::Struct(fields) => {
-                    for field in included(fields) {
-                        let field_var = format!("{}.{}", var, field.name);
-                        generate_request_serialize_js(
-                            &mut body_lines,
-                            &field_var,
-                            field.ty,
-                            &ind,
-                            field.structure,
-                        );
-                    }
+            if let TagKind::Struct(fields) = meta.kind {
+                for field in included(fields) {
+                    let field_var = format!("{}.{}", var, field.name);
+                    generate_request_serialize_js(
+                        &mut body_lines,
+                        &field_var,
+                        field.ty,
+                        &ind,
+                        field.structure,
+                    );
                 }
-                _ => {}
             }
         }
     }
@@ -1043,7 +1031,7 @@ fn handler_method_js(
         }
     }
 
-    let body = body_lines.join("\n");
+    let body = body_lines.build();
 
     format!(
         "{indent}{func_name}:async({params_str})=>{{\n{body}\n{indent}}},\n",
@@ -1101,21 +1089,21 @@ fn ordinary_handler_method_js(
     let mut data_fields: Vec<String> = Vec::new();
     if let Some(p) = param_param {
         if p.structure.is_some() {
-            data_fields.push(format!("params: {}", format!("{}{}", prefix, "PathParams")));
+            data_fields.push(format!("params: {}{}", prefix, "PathParams"));
         } else {
             data_fields.push(format!("params: {}", rust_type_to_js(p.ty)));
         }
     }
     if let Some(p) = query_param {
         if p.structure.is_some() {
-            data_fields.push(format!("queries: {}", format!("{}{}", prefix, "Query")));
+            data_fields.push(format!("queries: {}{}", prefix, "Query"));
         } else {
             data_fields.push(format!("queries: {}", rust_type_to_js(p.ty)));
         }
     }
     if let Some(p) = body_param {
         if p.structure.is_some() {
-            data_fields.push(format!("body: {}", format!("{}{}", prefix, "Body")));
+            data_fields.push(format!("body: {}{}", prefix, "Body"));
         } else {
             data_fields.push(format!("body: {}", rust_type_to_js(p.ty)));
         }
@@ -1136,7 +1124,7 @@ fn ordinary_handler_method_js(
     };
 
     // Build method body
-    let mut body_lines = Vec::new();
+    let mut body_lines = CodeBuf::new();
 
     let group_prefix = group_path.join("/");
     let normalized_path = if !handler.path.is_empty() && !handler.path.starts_with('/') {
@@ -1153,24 +1141,24 @@ fn ordinary_handler_method_js(
     body_lines.push(format!("{}let url = this._url + '{}';", ind, full_path));
 
     // Substitute path params
-    if let Some(p) = param_param {
-        if let Some(s) = p.structure {
-            let structure = s();
-            match structure.kind {
-                TagKind::Struct(fields) => {
-                    for field in included(fields) {
-                        body_lines.push(format!(
+    if let Some(p) = param_param
+        && let Some(s) = p.structure
+    {
+        let structure = s();
+        match structure.kind {
+            TagKind::Struct(fields) => {
+                for field in included(fields) {
+                    body_lines.push(format!(
                             "{}url = url.replace(':' + '{}', encodeURIComponent(String(request.params.{})));",
                             ind, field.name, field.name
                         ));
-                    }
                 }
-                _ => {
-                    body_lines.push(format!(
+            }
+            _ => {
+                body_lines.push(format!(
                         "{}url = url.replace(/:([^/]+)/, () => encodeURIComponent(String(request.params)));",
                         ind
                     ));
-                }
             }
         }
     }
@@ -1307,10 +1295,7 @@ fn ordinary_handler_method_js(
         body_lines.push(format!("{}return data;", ind));
     }
 
-    let body = body_lines.join(
-        "
-",
-    );
+    let body = body_lines.build();
     format!(
         "{}{} {{
 {}
@@ -1335,7 +1320,7 @@ fn generate_handler_object_js(
     debug: bool,
     class_name: &str,
 ) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
     let inner_indent = format!("{}    ", indent);
 
     for h in handlers {
@@ -1538,7 +1523,7 @@ fn generate_handler_object_js(
         }
     }
 
-    lines.join("\n")
+    lines.build()
 }
 
 // ─── Service-level code generation ────────────────────────────
@@ -1551,7 +1536,7 @@ fn collect_type_exports_js(
     handlers: &[Handler],
     path: &[&str],
     emitted: &mut Vec<String>,
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
 ) {
     for h in handlers {
         let child_path = {
@@ -1583,10 +1568,10 @@ pub(crate) fn generate_service_js(
     calls: &[crate::JsTsCallType],
     debug: bool,
 ) -> String {
-    let mut lines = Vec::new();
+    let mut lines = CodeBuf::new();
 
     lines.push("// Auto-generated by afast. DO NOT EDIT.".to_string());
-    lines.push("".to_string());
+    lines.b();
 
     let seq64 = cfg!(feature = "seq64");
     let len64 = cfg!(feature = "len64");
@@ -1660,7 +1645,7 @@ pub(crate) fn generate_service_js(
     // Node.js TCP import
     if has_nodetcp {
         lines.push("import { createConnection } from 'node:net';".to_string());
-        lines.push("".to_string());
+        lines.b();
     }
 
     // Socket class — WS, UniApp WS, or TCP
@@ -1803,7 +1788,7 @@ pub(crate) fn generate_service_js(
         }
     }
     if !customs.is_empty() {
-        lines.push("".to_string());
+        lines.b();
         for ci in &customs {
             lines.push("/**".to_string());
             lines.push(format!(" * @typedef {{Function}} CustomFn_{}", ci.ty));
@@ -1812,7 +1797,7 @@ pub(crate) fn generate_service_js(
         }
     }
     if !headers_cl.is_empty() {
-        lines.push("".to_string());
+        lines.b();
         for hi in &headers_cl {
             lines.push("/**".to_string());
             lines.push(format!(" * @typedef {{Function}} HeaderFn_{}", hi.ty));
@@ -1820,7 +1805,7 @@ pub(crate) fn generate_service_js(
             lines.push(" */".to_string());
         }
     }
-    lines.push("".to_string());
+    lines.b();
 
     // AFastError class
     lines.push("export class AFastError extends Error {".to_string());
@@ -1831,7 +1816,7 @@ pub(crate) fn generate_service_js(
     lines.push("        this.code = code;".to_string());
     lines.push("    }".to_string());
     lines.push("}".to_string());
-    lines.push("".to_string());
+    lines.b();
 
     // Client class
     let class_name = to_pascal_case(&svc.name);
@@ -2644,14 +2629,9 @@ pub(crate) fn generate_service_js(
                     lines.push("        } else if (this._transport === 'wxws') {".into());
                 }
                 lines.push("            this._wxSocketTask.send({ data });".into());
-                first = false;
             }
             if has_tcp {
-                if first {
-                    lines.push("        } else {".into());
-                } else {
-                    lines.push("        } else {".into());
-                }
+                lines.push("        } else {".into());
                 lines.push(format!(
                     "            const buf = new ArrayBuffer({len_bytes} + data.length);"
                 ));
@@ -2667,7 +2647,7 @@ pub(crate) fn generate_service_js(
                 lines.push(
                     "            new Uint8Array(buf).set(data, ".to_string()
                         + &len_bytes.to_string()
-                        + ");".into(),
+                        + ");",
                 );
                 lines.push("            this._tcpSocket.write(new Uint8Array(buf));".into());
             }
@@ -2695,7 +2675,7 @@ pub(crate) fn generate_service_js(
             lines.push(
                 "        new Uint8Array(buf).set(data, ".to_string()
                     + &len_bytes.to_string()
-                    + ");".into(),
+                    + ");",
             );
             lines.push("        this._tcpSocket.write(new Uint8Array(buf));".into());
             lines.push("    }".into());
@@ -2719,7 +2699,7 @@ pub(crate) fn generate_service_js(
             lines.push("        v.setUint32(0, 0xFFFFFFFF, true);".into());
         }
         if len64 {
-            lines.push(format!("        const len = ids.length * 4;"));
+            lines.push("        const len = ids.length * 4;".to_string());
             lines.push(format!(
                 "        v.setUint32({sid}, len & 0xFFFFFFFF, true);"
             ));
@@ -2889,11 +2869,7 @@ pub(crate) fn generate_service_js(
         lines.push(format!(
             "            new Uint8Array(buf).set(new Uint8Array(frame), {len_bytes});"
         ));
-        if has_nodetcp {
-            lines.push("            this._tcpSocket.write(new Uint8Array(buf));".into());
-        } else {
-            lines.push("            this._tcpSocket.write(new Uint8Array(buf));".into());
-        }
+        lines.push("            this._tcpSocket.write(new Uint8Array(buf));".into());
         lines.push("        });".into());
         lines.push("    }".into());
     }
@@ -3039,7 +3015,7 @@ pub(crate) fn generate_service_js(
     lines.push("    }".into());
     lines.push("}".into());
 
-    lines.join("\n")
+    lines.build()
 }
 
 /// Emits JavaScript validation checks for each field in a struct.
@@ -3047,7 +3023,7 @@ pub(crate) fn generate_service_js(
 /// Nested structs and enums are recursed into. All validation failures
 /// throw `AFastError` with the rule's code and message.
 fn generate_validation_js(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var_prefix: &str,
     fields: &[crate::handler::FieldMeta],
     indent: &str,
@@ -3121,7 +3097,7 @@ fn generate_validation_js(
 /// for a single field as JavaScript `if` statements. Each check calls
 /// `this._onError` (if set) and throws `AFastError` on failure.
 fn emit_validation_checks_js(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     field_path: &str,
     validations: &[crate::handler::ValidateRule],
     indent: &str,
@@ -3219,7 +3195,7 @@ fn emit_validation_checks_js(
 /// Tuple variants (single unnamed field) access data directly; named
 /// variants access fields through `data.fieldName`.
 fn generate_enum_validation_js(
-    lines: &mut Vec<String>,
+    lines: &mut CodeBuf,
     var_prefix: &str,
     variants: &[crate::handler::EnumVariantMeta],
     indent: &str,
@@ -3292,7 +3268,7 @@ fn generate_enum_validation_js(
                 variant_tag = variant_tag,
             ));
             let inner_indent = format!("{}    ", indent);
-            generate_validation_js(lines, &data_prefix, &variant.fields, &inner_indent);
+            generate_validation_js(lines, &data_prefix, variant.fields, &inner_indent);
             lines.push(format!("{indent}}}"));
         }
     }

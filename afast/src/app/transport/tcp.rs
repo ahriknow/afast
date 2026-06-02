@@ -55,6 +55,13 @@ use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
 use crate::handler::HandlerInvoker;
 use crate::state::StateMap;
 
+/// Safely reads N bytes from `data` at `offset` and converts to `[u8; N]`.
+/// Returns `None` if the slice is too short.
+#[inline]
+fn read_array<const N: usize>(data: &[u8], offset: usize) -> Option<[u8; N]> {
+    data.get(offset..offset + N)?.try_into().ok()
+}
+
 #[cfg(feature = "seq64")]
 type SeqId = i64;
 #[cfg(not(feature = "seq64"))]
@@ -218,7 +225,12 @@ pub async fn handle_connection(
                     continue;
                 }
 
-                let req_id = SeqId::from_le_bytes(data[..SEQ_BYTES].try_into().unwrap());
+                let Some(req_id_bytes) = read_array::<SEQ_BYTES>(&data, 0) else {
+                    let resp = make_error(0, CODE_MSG_TOO_SHORT, "frame too short");
+                    let _ = write_frame(&mut writer, &resp).await;
+                    continue;
+                };
+                let req_id = SeqId::from_le_bytes(req_id_bytes);
 
                 if req_id == 0 {
                     // Push message from client: [0 SeqId][conn_id u32][len Len][payload]
@@ -226,8 +238,10 @@ pub async fn handle_connection(
                     if data.len() < push_hdr {
                         continue;
                     }
-                    let conn_id = u32::from_le_bytes(data[SEQ_BYTES..SEQ_BYTES+4].try_into().unwrap());
-                    let len = Len::from_le_bytes(data[SEQ_BYTES+4..push_hdr].try_into().unwrap()) as usize;
+                    let Some(conn_id_bytes) = read_array::<4>(&data, SEQ_BYTES) else { continue; };
+                    let conn_id = u32::from_le_bytes(conn_id_bytes);
+                    let Some(len_bytes) = read_array::<LEN_BYTES>(&data, SEQ_BYTES + 4) else { continue; };
+                    let len = Len::from_le_bytes(len_bytes) as usize;
 
                     if push_hdr + len > data.len() {
                         continue;
@@ -258,12 +272,14 @@ pub async fn handle_connection(
                     // long connections.
                     let hdr = SEQ_BYTES;
                     if data.len() >= hdr + LEN_BYTES {
-                        let len = Len::from_le_bytes(data[hdr..hdr+LEN_BYTES].try_into().unwrap()) as usize;
+                        let Some(len_bytes) = read_array::<LEN_BYTES>(&data, hdr) else { continue; };
+                        let len = Len::from_le_bytes(len_bytes) as usize;
                         if data.len() >= hdr + LEN_BYTES + len {
                             let mut alive = std::collections::HashSet::new();
                             let mut off = hdr + LEN_BYTES;
                             while off + 4 <= hdr + LEN_BYTES + len {
-                                let cid = u32::from_le_bytes(data[off..off+4].try_into().unwrap());
+                                let Some(cid_bytes) = read_array::<4>(&data, off) else { break; };
+                                let cid = u32::from_le_bytes(cid_bytes);
                                 alive.insert(cid);
                                 off += 4;
                             }
@@ -285,8 +301,18 @@ pub async fn handle_connection(
                         continue;
                     }
 
-                    let handler_id = u32::from_le_bytes(data[SEQ_BYTES..SEQ_BYTES+4].try_into().unwrap()) as usize;
-                    let len = Len::from_le_bytes(data[SEQ_BYTES+4..req_hdr].try_into().unwrap()) as usize;
+                    let Some(handler_id_bytes) = read_array::<4>(&data, SEQ_BYTES) else {
+                        let resp = make_error(req_id, CODE_MSG_TOO_SHORT, "frame too short");
+                        let _ = write_frame(&mut writer, &resp).await;
+                        continue;
+                    };
+                    let handler_id = u32::from_le_bytes(handler_id_bytes) as usize;
+                    let Some(len_bytes) = read_array::<LEN_BYTES>(&data, SEQ_BYTES + 4) else {
+                        let resp = make_error(req_id, CODE_MSG_TOO_SHORT, "frame too short");
+                        let _ = write_frame(&mut writer, &resp).await;
+                        continue;
+                    };
+                    let len = Len::from_le_bytes(len_bytes) as usize;
 
                     if req_hdr + len > data.len() {
                         let resp = make_error(req_id, CODE_PAYLOAD_MISMATCH, "payload length mismatch");
@@ -330,6 +356,10 @@ pub async fn handle_connection(
 
                         tokio::spawn(async move {
                             let result = invoker.call_stream(&state, &payload, from_handler_tx, to_handler_rx).await;
+
+                            if let Err(ref e) = result {
+                                eprintln!("afast: stream handler error: {}", e);
+                            }
 
                             // Drain handler output into the push channel so it
                             // is written as a push frame on the TCP stream.

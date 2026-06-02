@@ -98,25 +98,19 @@ pub trait HandlerInvoker: Send + Sync {
 pub trait OrdinaryHandlerInvoker: Send + Sync {
     /// Invoke the ordinary handler with the full HTTP request, extracted path
     /// parameters, the raw query string, and shared application state.
-    #[allow(clippy::type_complexity)]
     fn call_ordinary(
         &self,
         req: hyper::Request<hyper::body::Incoming>,
         path_params: &std::collections::HashMap<String, String>,
         query_string: &str,
         state: &StateMap,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        hyper::Response<http_body_util::Full<hyper::body::Bytes>>,
-                        Error,
-                    >,
-                > + Send
-                + '_,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = OrdinaryResponse> + Send + '_>>;
 }
+
+/// Response type for ordinary HTTP handlers.
+#[cfg(feature = "ordinary-http")]
+pub type OrdinaryResponse =
+    Result<hyper::Response<http_body_util::Full<hyper::body::Bytes>>, Error>;
 
 /// A compiled handler reference, produced by the `register!` macro.
 ///

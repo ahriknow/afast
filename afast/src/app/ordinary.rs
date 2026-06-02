@@ -190,7 +190,7 @@ fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let Ok(hex) = u8::from_str_radix(
-                &std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
                 16,
             ) {
                 result.push(hex as char);
@@ -228,7 +228,7 @@ pub fn parse_query_to_json(query: &str) -> serde_json::Value {
         if !key.is_empty() {
             map.insert(
                 percent_decode(key).to_string(),
-                serde_json::Value::String(percent_decode(&val)),
+                serde_json::Value::String(percent_decode(val)),
             );
         }
     }
@@ -401,7 +401,7 @@ impl<'de, 'v> Deserializer<'de> for LenientValue<'v> {
             }
             serde_json::Value::Number(n) => {
                 // A number coerces to `true` iff it is non-zero.
-                visitor.visit_bool(n.as_f64().map_or(false, |f| f != 0.0))
+                visitor.visit_bool(n.as_f64().is_some_and(|f| f != 0.0))
             }
             _ => Err(de::Error::custom(format_args!(
                 "expected boolean at {:?}",

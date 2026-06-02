@@ -38,6 +38,28 @@ use crate::handler::HandlerInvoker;
 #[cfg(feature = "ordinary-http")]
 use crate::service::OrdinaryRouteInfo;
 
+/// Configuration for the HTTP server.
+///
+/// Aggregates all parameters needed by [`serve`] to avoid excessive
+/// function arguments.
+pub struct HttpConfig {
+    pub addr: SocketAddr,
+    pub state: Arc<StateMap>,
+    pub handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(any(feature = "code", feature = "doc"))]
+    pub services: Vec<Service>,
+    #[cfg(feature = "doc")]
+    pub doc_title: Option<String>,
+    #[cfg(feature = "doc")]
+    pub ws_addr_str: Option<String>,
+    #[cfg(feature = "ordinary-http")]
+    pub ordinary_routes: Vec<OrdinaryRouteInfo>,
+    #[cfg(feature = "ws")]
+    pub enable_ws_upgrade: bool,
+    #[cfg(feature = "tls")]
+    pub tls_config: Option<crate::app::TlsConfig>,
+}
+
 /// Starts the HTTP server and blocks until a shutdown signal is received.
 ///
 /// This function binds a TCP listener, compiles ordinary HTTP routes
@@ -47,55 +69,53 @@ use crate::service::OrdinaryRouteInfo;
 /// enabled via the `tls` feature, connections are wrapped with TLS
 /// and support ALPN negotiation for HTTP/2.
 pub async fn serve(
-    addr: SocketAddr,
-    state: Arc<StateMap>,
-    handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
-    #[cfg(any(feature = "code", feature = "doc"))] services: Vec<Service>,
+    config: HttpConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
-    #[cfg(feature = "doc")] doc_title: Option<String>,
-    #[cfg(feature = "doc")] ws_addr_str: Option<String>,
-    #[cfg(feature = "ordinary-http")] ordinary_routes: Vec<OrdinaryRouteInfo>,
-    #[cfg(feature = "ws")] enable_ws_upgrade: bool,
-    #[cfg(feature = "tls")] tls_config: Option<crate::app::TlsConfig>,
 ) -> Result<(), Error> {
-    let listener = TcpListener::bind(addr).await.map_err(|e| Error::Http {
-        message: e.to_string(),
-    })?;
+    let listener = TcpListener::bind(config.addr)
+        .await
+        .map_err(|e| Error::Http {
+            message: e.to_string(),
+        })?;
 
-    println!("afast: http server listening on {}", addr);
+    println!("afast: http server listening on {}", config.addr);
 
     // Compile ordinary route patterns once at startup to avoid
     // re-parsing on every request.
     #[cfg(feature = "ordinary-http")]
-    let compiled_routes: Vec<CompiledOrdinaryRoute> = ordinary_routes
+    let compiled_routes: Vec<CompiledOrdinaryRoute> = config
+        .ordinary_routes
         .iter()
         .map(|r| CompiledOrdinaryRoute {
             method: r.method,
             pattern: RoutePattern::parse(&r.path),
-            invoker: r.handler_entry.ordinary_invoker.unwrap(),
+            invoker: r
+                .handler_entry
+                .ordinary_invoker
+                .expect("ordinary_invoker must be set for ordinary routes"),
         })
         .collect();
 
     let shared = Arc::new(SharedState {
-        state,
-        handlers,
+        state: config.state,
+        handlers: config.handlers,
         #[cfg(any(feature = "code", feature = "doc"))]
-        services,
+        services: config.services,
         #[cfg(feature = "doc")]
-        doc_title,
+        doc_title: config.doc_title,
         #[cfg(feature = "doc")]
-        http_addr: addr.to_string(),
+        http_addr: config.addr.to_string(),
         #[cfg(feature = "doc")]
-        ws_addr: ws_addr_str,
+        ws_addr: config.ws_addr_str,
         #[cfg(feature = "ordinary-http")]
         ordinary_routes: compiled_routes,
         #[cfg(feature = "ws")]
-        enable_ws_upgrade,
+        enable_ws_upgrade: config.enable_ws_upgrade,
     });
 
     // Set up TLS acceptor if TLS config is provided.
     #[cfg(feature = "tls")]
-    let tls_acceptor = if let Some(ref cfg) = tls_config {
+    let tls_acceptor = if let Some(ref cfg) = config.tls_config {
         // Install the ring crypto provider (idempotent — safe to call multiple times).
         let _ = rustls::crypto::ring::default_provider().install_default();
         let certs = load_certs(&cfg.cert_path)?;
@@ -248,7 +268,7 @@ async fn handle_request(
                         let message = e.message();
                         // Map user error codes in the 4xx–5xx range to HTTP status
                         // codes so the client receives a semantically correct response.
-                        let status = if code >= 400 && code < 600 {
+                        let status = if (400..600).contains(&code) {
                             StatusCode::from_u16(code as u16)
                                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
                         } else {
@@ -259,7 +279,7 @@ async fn handle_request(
                             .status(status)
                             .header("content-type", "application/json; charset=utf-8")
                             .body(Full::new(Bytes::from(body)))
-                            .unwrap())
+                            .expect("valid response builder"))
                     }
                 };
             }
@@ -360,7 +380,7 @@ async fn handle_api(
                 .status(StatusCode::OK)
                 .header("content-type", "application/octet-stream")
                 .body(Full::new(Bytes::from(resp)))
-                .unwrap())
+                .expect("valid response builder"))
         }
         Err(e) => error_response(StatusCode::OK, e.code(), e.message()),
     }
@@ -395,9 +415,8 @@ fn handle_code(
     let raw_calls: Vec<String> = if let Some(q) = query {
         q.split('&')
             .filter_map(|part| {
-                let mut kv = part.splitn(2, '=');
-                let key = kv.next()?;
-                let val = kv.next()?;
+                let (key, val) = part.split_once('=')?;
+
                 if key == "call" { Some(val) } else { None }
             })
             .next()
@@ -417,7 +436,7 @@ fn handle_code(
         "ts" => {
             let calls: Vec<crate::JsTsCallType> = raw_calls
                 .iter()
-                .filter_map(|s| crate::JsTsCallType::from_str(s))
+                .filter_map(|s| crate::JsTsCallType::parse(s))
                 .collect();
             let calls = if calls.is_empty() {
                 vec![crate::JsTsCallType::Fetch, crate::JsTsCallType::Ws]
@@ -438,7 +457,7 @@ fn handle_code(
         "js" => {
             let calls: Vec<crate::JsTsCallType> = raw_calls
                 .iter()
-                .filter_map(|s| crate::JsTsCallType::from_str(s))
+                .filter_map(|s| crate::JsTsCallType::parse(s))
                 .collect();
             let calls = if calls.is_empty() {
                 vec![crate::JsTsCallType::Fetch, crate::JsTsCallType::Ws]
@@ -462,7 +481,7 @@ fn handle_code(
         "kt" => {
             let calls: Vec<crate::KtCallType> = raw_calls
                 .iter()
-                .filter_map(|s| crate::KtCallType::from_str(s))
+                .filter_map(|s| crate::KtCallType::parse(s))
                 .collect();
             let calls = if calls.is_empty() {
                 vec![
@@ -487,7 +506,7 @@ fn handle_code(
         "rs" => {
             let calls: Vec<crate::RsCallType> = raw_calls
                 .iter()
-                .filter_map(|s| crate::RsCallType::from_str(s))
+                .filter_map(|s| crate::RsCallType::parse(s))
                 .collect();
             let calls = if calls.is_empty() {
                 vec![crate::RsCallType::TcpAsync]
@@ -516,14 +535,14 @@ fn handle_code(
         }
     };
 
-    let (lang, content_type) = result.unwrap();
+    let (lang, content_type) = result.expect("lang must be set by match above");
 
     match crate::app::codegen::code::generate_code(&shared.services, service_name, &lang) {
         Ok(code) => Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", content_type)
             .body(Full::new(Bytes::from(code)))
-            .unwrap()),
+            .expect("valid response builder")),
         Err(e) => error_response(StatusCode::NOT_FOUND, CODE_HTTP, &e.to_string()),
     }
 }
@@ -549,7 +568,7 @@ fn handle_doc(
                 .status(StatusCode::OK)
                 .header("content-type", "text/html; charset=utf-8")
                 .body(Full::new(Bytes::from(html)))
-                .unwrap())
+                .expect("valid response builder"))
         }
         2 => {
             let service_name = segments[1];
@@ -564,7 +583,7 @@ fn handle_doc(
                     .status(StatusCode::OK)
                     .header("content-type", "text/html; charset=utf-8")
                     .body(Full::new(Bytes::from(html)))
-                    .unwrap()),
+                    .expect("valid response builder")),
                 Err(e) => error_response(StatusCode::NOT_FOUND, CODE_HTTP, &e.to_string()),
             }
         }
@@ -609,8 +628,9 @@ async fn handle_ws_upgrade(
         );
     }
 
-    let accept_key =
-        tokio_tungstenite::tungstenite::handshake::derive_accept_key(ws_key.unwrap().as_bytes());
+    let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(
+        ws_key.expect("ws_key checked above").as_bytes(),
+    );
 
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
@@ -635,7 +655,7 @@ async fn handle_ws_upgrade(
         .header("connection", "upgrade")
         .header("sec-websocket-accept", accept_key)
         .body(Full::new(Bytes::new()))
-        .unwrap())
+        .expect("valid response builder"))
 }
 
 /// Builds a 405 Method Not Allowed response.
@@ -643,7 +663,7 @@ fn method_not_allowed() -> Result<Response<Full<Bytes>>, hyper::Error> {
     Ok(Response::builder()
         .status(StatusCode::METHOD_NOT_ALLOWED)
         .body(Full::new(Bytes::from("method not allowed")))
-        .unwrap())
+        .expect("valid response builder"))
 }
 
 /// Builds a 404 Not Found response.
@@ -651,7 +671,7 @@ fn not_found() -> Result<Response<Full<Bytes>>, hyper::Error> {
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(Full::new(Bytes::from("not found")))
-        .unwrap())
+        .expect("valid response builder"))
 }
 
 /// Builds a binary-format error response.
@@ -673,7 +693,7 @@ fn error_response(
         .status(status)
         .header("content-type", "application/octet-stream")
         .body(Full::new(Bytes::from(resp)))
-        .unwrap())
+        .expect("valid response builder"))
 }
 
 /// Loads PEM-encoded certificates from a file.

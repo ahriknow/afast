@@ -106,13 +106,12 @@ fn parse_validations(attrs: &[syn::Attribute]) -> (Vec<Validation>, bool, Option
                 }
                 "skip_with" => {
                     // Parse skip_with("marker") or skip_with("marker", "default_fn")
-                    if let Some(first) = args.first() {
-                        if let syn::Expr::Lit(syn::ExprLit {
+                    if let Some(first) = args.first()
+                        && let syn::Expr::Lit(syn::ExprLit {
                             lit: Lit::Str(s), ..
                         }) = first
-                        {
-                            skip_with = Some(s.value());
-                        }
+                    {
+                        skip_with = Some(s.value());
                     }
                 }
                 "gt" | "gte" | "lt" | "lte" => {
@@ -400,12 +399,11 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
         .attrs
         .iter()
         .find_map(|attr| {
-            if attr.path().is_ident("tag") {
-                if let Meta::List(list) = &attr.meta {
-                    if let Ok(lit) = list.parse_args::<LitStr>() {
-                        return Some(lit.value());
-                    }
-                }
+            if attr.path().is_ident("tag")
+                && let Meta::List(list) = &attr.meta
+                && let Ok(lit) = list.parse_args::<LitStr>()
+            {
+                return Some(lit.value());
             }
             None
         })
@@ -563,12 +561,11 @@ fn field_tag_desc(attrs: &[Attribute]) -> String {
     attrs
         .iter()
         .find_map(|attr| {
-            if attr.path().is_ident("tag") {
-                if let Meta::List(list) = &attr.meta {
-                    if let Ok(lit) = list.parse_args::<LitStr>() {
-                        return Some(lit.value());
-                    }
-                }
+            if attr.path().is_ident("tag")
+                && let Meta::List(list) = &attr.meta
+                && let Ok(lit) = list.parse_args::<LitStr>()
+            {
+                return Some(lit.value());
             }
             None
         })

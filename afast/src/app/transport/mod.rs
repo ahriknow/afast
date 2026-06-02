@@ -11,7 +11,7 @@ mod tcp;
 mod ws;
 
 #[cfg(feature = "http")]
-pub use http::serve;
+pub use http::{HttpConfig, serve};
 #[cfg(feature = "tcp")]
 pub use tcp::handle_connection as handle_tcp_connection;
 #[cfg(feature = "ws")]

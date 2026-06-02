@@ -1,85 +1,88 @@
 //! Conditional serialization/deserialization with optional marker support.
 //!
-//! When the `marker` feature is enabled, `__serialize` and `__deserialize` use
+//! When the `marker` feature is enabled, `serialize` and `deserialize` use
 //! `to_bytes_with(marker)` / `from_bytes_with(data, marker)` from afastdata,
 //! which allows `#[afast(skip_with("marker"))]` fields to be conditionally
 //! skipped based on the active marker value.
 //!
-//! When the `marker` feature is disabled, they fall back to plain
-//! `to_bytes()` / `from_bytes()`.
+//! The marker string is passed via `Arc<String>` through the [`StateMap`](crate::StateMap)
+//! and extracted by handler code at runtime. There is no global mutable state.
+//!
+//! For code-generation filtering, a [`OnceLock`] stores the marker set at
+//! application startup. This is read-only after initialization and does not
+//! require a mutex.
 
-// ── Marker-enabled implementation ──────────────────────────────────
-#[cfg(feature = "marker")]
-mod inner {
-    use std::sync::Mutex;
+use std::sync::OnceLock;
 
-    /// Global marker string, lazily initialized to `"afast"`.
-    static MARKER: Mutex<Option<String>> = Mutex::new(None);
+/// Write-once marker for code-generation filtering. Set once at startup
+/// via [`set_codegen_marker`], then read immutably by [`should_include_field`].
+static CODEGEN_MARKER: OnceLock<String> = OnceLock::new();
 
-    /// Sets the global marker. Typically called by [`AFast::marker()`](crate::AFast::marker).
-    pub fn set_marker(marker: &str) {
-        let mut lock = MARKER.lock().unwrap();
-        *lock = Some(marker.to_string());
-    }
-
-    /// Returns the current marker, falling back to `"afast"` if never set.
-    pub fn get_marker() -> String {
-        let lock = MARKER.lock().unwrap();
-        lock.clone().unwrap_or_else(|| "afast".to_string())
-    }
-
-    pub fn serialize<T: afastdata::AFastSerialize>(value: &T) -> Vec<u8> {
-        let marker = get_marker();
-        value.to_bytes_with(&marker)
-    }
-
-    pub fn deserialize<T: afastdata::AFastDeserialize>(
-        data: &[u8],
-    ) -> Result<(T, usize), afastdata::Error> {
-        let marker = get_marker();
-        T::from_bytes_with(data, &marker)
-    }
+/// Sets the code-generation marker. Must be called once at application
+/// startup, before any code generation runs.
+///
+/// # Panics
+///
+/// Panics if called more than once.
+pub fn set_codegen_marker(marker: &str) {
+    CODEGEN_MARKER
+        .set(marker.to_string())
+        .expect("codegen marker already set");
 }
 
-// ── Plain (no-marker) fallback ─────────────────────────────────────
-#[cfg(not(feature = "marker"))]
-mod inner {
-    pub fn serialize<T: afastdata::AFastSerialize>(value: &T) -> Vec<u8> {
+/// Returns the code-generation marker, or `"afast"` if never set.
+fn codegen_marker() -> &'static str {
+    CODEGEN_MARKER.get().map(|s| s.as_str()).unwrap_or("afast")
+}
+
+/// Serializes a value using the given marker string.
+///
+/// When the `marker` feature is enabled, calls `to_bytes_with(marker)`.
+/// Otherwise falls back to plain `to_bytes()`.
+pub fn serialize<T: afastdata::AFastSerialize>(value: &T, _marker: &str) -> Vec<u8> {
+    #[cfg(feature = "marker")]
+    {
+        value.to_bytes_with(_marker)
+    }
+    #[cfg(not(feature = "marker"))]
+    {
+        let _ = _marker;
         value.to_bytes()
     }
+}
 
-    pub fn deserialize<T: afastdata::AFastDeserialize>(
-        data: &[u8],
-    ) -> Result<(T, usize), afastdata::Error> {
-        T::from_bytes(data)
+/// Deserializes a value using the given marker string.
+///
+/// When the `marker` feature is enabled, calls `from_bytes_with(data, marker)`.
+/// Otherwise falls back to plain `from_bytes()`.
+pub fn deserialize<T: afastdata::AFastDeserialize>(
+    data: &[u8],
+    _marker: &str,
+) -> Result<(T, usize), afastdata::Error> {
+    #[cfg(feature = "marker")]
+    {
+        T::from_bytes_with(data, _marker)
     }
-
-    /// Returns the default marker `"afast"` when the marker feature is disabled.
-    pub fn get_marker() -> String {
-        "afast".to_string()
+    #[cfg(not(feature = "marker"))]
+    {
+        let _ = _marker;
+        T::from_bytes(data)
     }
 }
 
-#[cfg(feature = "marker")]
-pub use inner::set_marker;
-pub use inner::{deserialize, get_marker, serialize};
-
 /// Returns `true` if the field should be included in generated client code
-/// given the current marker setting.
+/// given the active marker setting.
 ///
 /// - Fields with `skip == true` are always excluded.
 /// - Fields with a non-empty `skip_with` are excluded when it matches the
-///   active marker.
+///   code-generation marker.
 /// - All other fields are included.
 pub fn should_include_field(field: &crate::handler::FieldMeta) -> bool {
     if field.skip {
         return false;
     }
-    if !field.skip_with.is_empty() {
-        let marker = get_marker();
-        if field.skip_with == marker {
-            return false;
-        }
+    if !field.skip_with.is_empty() && field.skip_with == codegen_marker() {
+        return false;
     }
     true
 }

@@ -33,7 +33,7 @@ const CODE_MAX: i64 = -90000;
 // Check whether a code falls in the reserved range to prevent
 // user-defined errors from colliding with system error codes.
 fn is_reserved_code(code: i64) -> bool {
-    code >= CODE_MIN && code <= CODE_MAX
+    (CODE_MIN..=CODE_MAX).contains(&code)
 }
 
 /// Error type for the afast framework.

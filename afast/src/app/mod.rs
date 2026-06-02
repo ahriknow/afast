@@ -34,7 +34,7 @@ impl JsTsCallType {
     /// Parses a call-type string from the `?call=` query parameter.
     ///
     /// Returns `None` if the string does not match any known transport.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "fetch" => Some(JsTsCallType::Fetch),
             "ws" => Some(JsTsCallType::Ws),
@@ -78,7 +78,7 @@ impl KtCallType {
     /// Parses a call-type string from the `?call=` query parameter.
     ///
     /// Accepts `"http"` and `"fetch"` as aliases for [`KtCallType::Http`].
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "http" | "fetch" => Some(KtCallType::Http),
             "ws" => Some(KtCallType::Ws),
@@ -108,7 +108,7 @@ pub enum RsCallType {
 
 impl RsCallType {
     /// Parses a call-type string from the `?call=` query parameter.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "tcp-async" | "tcp_async" => Some(RsCallType::TcpAsync),
             "tcp-sync" | "tcp_sync" => Some(RsCallType::TcpSync),
@@ -267,6 +267,9 @@ pub struct AFast {
     handler_table: Vec<Option<&'static dyn HandlerInvoker>>,
     /// Typed application state shared across all handlers.
     state: StateMap,
+    /// Marker string for conditional serialization (`skip_with`).
+    /// Stored here and passed to handlers via `Arc<String>` in `StateMap`.
+    marker: String,
     /// WebSocket listen address (`"host:port"`), if bound.
     #[cfg(any(feature = "ws", feature = "doc"))]
     ws_addr: Option<String>,
@@ -303,6 +306,7 @@ impl AFast {
             #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
             handler_table: Vec::new(),
             state: StateMap::new(),
+            marker: "afast".to_string(),
             #[cfg(any(feature = "ws", feature = "doc"))]
             ws_addr: None,
             #[cfg(any(feature = "http", feature = "doc"))]
@@ -324,14 +328,14 @@ impl AFast {
 
     /// Sets the marker string used for conditional serialization.
     ///
-    /// When the `marker` feature is enabled, the marker is passed to
-    /// `to_bytes_with(marker)` / `from_bytes_with(data, marker)`, allowing
-    /// `#[afast(skip_with("marker"))]` fields to be conditionally skipped.
+    /// The marker is stored in the application and passed to handlers via
+    /// `Arc<String>` in the [`StateMap`](crate::StateMap). It controls which
+    /// `#[afast(skip_with("marker"))]` fields are skipped during
+    /// serialization/deserialization.
     ///
     /// Defaults to `"afast"` if never called.
-    #[cfg(feature = "marker")]
-    pub fn marker(self, marker: &str) -> Self {
-        crate::marker::set_marker(marker);
+    pub fn marker(mut self, marker: &str) -> Self {
+        self.marker = marker.to_string();
         self
     }
 
@@ -413,37 +417,37 @@ impl AFast {
     /// merged into the existing one instead of adding a duplicate.
     pub fn service(mut self, mut service: Service) -> Self {
         // Check for duplicate service name — merge if found.
-        if !service.name.is_empty() {
-            if let Some(existing) = self.services.iter_mut().find(|s| s.name == service.name) {
-                // Merge handlers: assign offsets for new handlers continuing
-                // from the existing handler_table length.
-                #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
-                build_handler_table(&mut service.handlers, &mut self.handler_table);
-                #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
-                build_handler_table(&mut service.handlers, &mut 0);
+        if !service.name.is_empty()
+            && let Some(existing) = self.services.iter_mut().find(|s| s.name == service.name)
+        {
+            // Merge handlers: assign offsets for new handlers continuing
+            // from the existing handler_table length.
+            #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+            build_handler_table(&mut service.handlers, &mut self.handler_table);
+            #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
+            build_handler_table(&mut service.handlers, &mut 0);
 
-                #[cfg(feature = "ordinary-http")]
-                {
-                    // Add routes to the global HTTP dispatch table
-                    for route in &service.ordinary_routes {
-                        self.ordinary_routes.push(route.clone());
-                    }
-                    collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
-                    // Also add to the existing service for code generation
-                    existing
-                        .ordinary_routes
-                        .append(&mut service.ordinary_routes);
+            #[cfg(feature = "ordinary-http")]
+            {
+                // Add routes to the global HTTP dispatch table
+                for route in &service.ordinary_routes {
+                    self.ordinary_routes.push(route.clone());
                 }
-
-                existing.handlers.append(&mut service.handlers);
-
-                // Update description only if the existing one is empty
-                if existing.desc.is_empty() && !service.desc.is_empty() {
-                    existing.desc = service.desc;
-                }
-
-                return self;
+                collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
+                // Also add to the existing service for code generation
+                existing
+                    .ordinary_routes
+                    .append(&mut service.ordinary_routes);
             }
+
+            existing.handlers.append(&mut service.handlers);
+
+            // Update description only if the existing one is empty
+            if existing.desc.is_empty() && !service.desc.is_empty() {
+                existing.desc = service.desc;
+            }
+
+            return self;
         }
 
         #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
@@ -499,18 +503,22 @@ impl AFast {
     /// If no transport server is configured (code generation only), the
     /// application waits for Ctrl+C to keep the process alive.
     pub async fn run(self) -> Result<(), Error> {
+        // Set the code-generation marker before any codegen runs.
+        // This is read immutably by should_include_field during code generation.
+        crate::marker::set_codegen_marker(&self.marker);
+
         // Write doc HTML to output directory if configured
         #[cfg(feature = "doc")]
-        if let Some(doc_cfg) = &self.doc_config {
-            if let Some(dir) = &doc_cfg.output {
-                let title = doc_cfg.title.clone();
-                codegen::doc::write_docs(&self.services, dir, title.as_deref()).map_err(|e| {
-                    Error::Io {
-                        message: e.to_string(),
-                    }
-                })?;
-                println!("afast: docs written to {}", dir.display());
-            }
+        if let Some(doc_cfg) = &self.doc_config
+            && let Some(dir) = &doc_cfg.output
+        {
+            let title = doc_cfg.title.clone();
+            codegen::doc::write_docs(&self.services, dir, title.as_deref()).map_err(|e| {
+                Error::Io {
+                    message: e.to_string(),
+                }
+            })?;
+            println!("afast: docs written to {}", dir.display());
         }
 
         #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
@@ -553,7 +561,12 @@ impl AFast {
 
             if has_server {
                 let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
-                let state = std::sync::Arc::new(self.state);
+
+                // Insert marker into state so handlers can access it via Arc<String>
+                let mut state = self.state;
+                state.insert(std::sync::Arc::new(self.marker));
+
+                let state = std::sync::Arc::new(state);
                 let handlers = std::sync::Arc::new(self.handler_table);
 
                 #[cfg(any(feature = "code", feature = "doc"))]
@@ -642,22 +655,24 @@ impl AFast {
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
-                            addr,
-                            state_clone,
-                            handlers_clone,
-                            #[cfg(any(feature = "code", feature = "doc"))]
-                            http_services,
+                            crate::app::transport::HttpConfig {
+                                addr,
+                                state: state_clone,
+                                handlers: handlers_clone,
+                                #[cfg(any(feature = "code", feature = "doc"))]
+                                services: http_services,
+                                #[cfg(feature = "doc")]
+                                doc_title: doc_title_clone,
+                                #[cfg(feature = "doc")]
+                                ws_addr_str: ws_addr_clone,
+                                #[cfg(feature = "ordinary-http")]
+                                ordinary_routes,
+                                #[cfg(feature = "ws")]
+                                enable_ws_upgrade: ws_merged,
+                                #[cfg(feature = "tls")]
+                                tls_config: None,
+                            },
                             shutdown_rx,
-                            #[cfg(feature = "doc")]
-                            doc_title_clone,
-                            #[cfg(feature = "doc")]
-                            ws_addr_clone,
-                            #[cfg(feature = "ordinary-http")]
-                            ordinary_routes,
-                            #[cfg(feature = "ws")]
-                            ws_merged,
-                            #[cfg(feature = "tls")]
-                            None,
                         )
                         .await
                     });
@@ -684,22 +699,24 @@ impl AFast {
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
-                            addr,
-                            state_clone,
-                            handlers_clone,
-                            #[cfg(any(feature = "code", feature = "doc"))]
-                            https_services,
+                            crate::app::transport::HttpConfig {
+                                addr,
+                                state: state_clone,
+                                handlers: handlers_clone,
+                                #[cfg(any(feature = "code", feature = "doc"))]
+                                services: https_services,
+                                #[cfg(feature = "doc")]
+                                doc_title: doc_title_clone,
+                                #[cfg(feature = "doc")]
+                                ws_addr_str: ws_addr_clone,
+                                #[cfg(feature = "ordinary-http")]
+                                ordinary_routes,
+                                #[cfg(feature = "ws")]
+                                enable_ws_upgrade: ws_merged,
+                                #[cfg(feature = "tls")]
+                                tls_config,
+                            },
                             shutdown_rx,
-                            #[cfg(feature = "doc")]
-                            doc_title_clone,
-                            #[cfg(feature = "doc")]
-                            ws_addr_clone,
-                            #[cfg(feature = "ordinary-http")]
-                            ordinary_routes,
-                            #[cfg(feature = "ws")]
-                            ws_merged,
-                            #[cfg(feature = "tls")]
-                            tls_config,
                         )
                         .await
                     });

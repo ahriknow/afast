@@ -1,4 +1,27 @@
-# Changelog
+「方案选单」# Changelog
+
+## [0.1.7]
+
+### Added
+
+- **`CodeBuf` code-builder utility** (`codegen::buf`): New internal `CodeBuf` struct with ergonomic `.l()` / `.f()` / `.b()` shorthand methods, replacing raw `Vec<String>` + `push` patterns in all code generators (TS/JS/KT/RS/doc).
+- **`HttpConfig` struct**: Consolidates all HTTP server parameters (addr, state, handlers, services, TLS config, etc.) into a single configuration struct, replacing 10+ positional arguments in `transport::http::serve()`.
+- **Marker always available**: `AFast::marker()` no longer requires the `marker` feature gate — the marker string is stored in the `AFast` struct and injected into `StateMap` via `Arc<String>` so handlers can access it at runtime.
+
+### Changed
+
+- Upgraded `afastdata` from 0.0.8 to 0.0.10.
+- Updated workspace description to include `rs` (Rust client).
+- `JsTsCallType::from_str()`, `KtCallType::from_str()`, `RsCallType::from_str()` renamed to `.parse()` following Rust naming conventions.
+- Refactored nested `if let` chains to Rust 2024 edition **let-chains** syntax throughout the codebase.
+- HTTP transport: replaced `unwrap()` with `expect()` for better panic context.
+- HTTP transport: replaced `splitn(2, '=')` with `split_once('=')` and range comparisons with `Range::contains()`.
+- Code generators: added `#[allow(clippy::too_many_arguments, clippy::type_complexity)]` attributes to suppress noisy lints.
+- Code generators: refactored to use `CodeBuf` instead of raw `Vec<String>` for line accumulation.
+
+### Fixed
+
+- Various clippy warnings across codegen modules (unnecessary borrows, type complexity, `only_used_in_recursion`).
 
 ## [0.1.6]
 

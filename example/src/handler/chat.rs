@@ -29,6 +29,7 @@ pub struct ChatMessage {
 #[handler(desc("Chat echo — returns a Socket for bidirectional streaming"))]
 pub async fn chat_echo(
     afast::State(_state): afast::State<AppState>,
+    afast::State(marker): afast::State<std::sync::Arc<String>>,
     afast::Data(join): afast::Data<ChatJoin>,
     mut receiver: afast::Receiver,
     sender: afast::Sender,
@@ -47,7 +48,7 @@ pub async fn chat_echo(
                 text,
                 ts,
             };
-            afast::marker::serialize(&msg)
+            afast::marker::serialize(&msg, &marker)
         } else {
             // Binary data: echo as-is
             data
