@@ -98,6 +98,7 @@ pub trait HandlerInvoker: Send + Sync {
 pub trait OrdinaryHandlerInvoker: Send + Sync {
     /// Invoke the ordinary handler with the full HTTP request, extracted path
     /// parameters, the raw query string, and shared application state.
+    #[allow(clippy::type_complexity)]
     fn call_ordinary(
         &self,
         req: hyper::Request<hyper::body::Incoming>,
@@ -362,6 +363,7 @@ impl Receiver {
 /// let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
 /// let sender = Sender::new(tx);
 /// ```
+#[derive(Clone)]
 pub struct Sender {
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
@@ -370,6 +372,12 @@ impl Sender {
     /// Wraps a tokio mpsc sender into an afast [`Sender`].
     pub fn new(tx: tokio::sync::mpsc::Sender<Vec<u8>>) -> Self {
         Self { tx }
+    }
+
+    /// Returns a reference to the underlying tokio mpsc sender,
+    /// allowing it to be cloned for use in push registries.
+    pub fn tx(&self) -> &tokio::sync::mpsc::Sender<Vec<u8>> {
+        &self.tx
     }
 
     /// Creates a placeholder sender for internal use when a handler parameter
