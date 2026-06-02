@@ -2354,13 +2354,14 @@ pub(crate) fn generate_service_kt(
     lines.b();
     // Recursively generate handler methods.  Handler groups become
     // named inner classes; leaf handlers become suspend methods.
+    #[allow(clippy::only_used_in_recursion)]
     fn gen_handler_object(
         handlers: &[Handler],
         all: &[Handler],
         path: &[&str],
         indent: &str,
         svc_name: &str,
-        debug: bool,
+        _debug: bool,
         lines: &mut CodeBuf,
     ) {
         let inner_indent = format!("{}    ", indent);
@@ -2382,7 +2383,7 @@ pub(crate) fn generate_service_kt(
                     &child_path,
                     &inner_indent,
                     svc_name,
-                    debug,
+                    _debug,
                     lines,
                 );
                 lines.push(format!("{}}}", inner_indent));
@@ -2410,7 +2411,7 @@ pub(crate) fn generate_service_kt(
                             path,
                             &inner_indent,
                             svc_name,
-                            debug,
+                            _debug,
                             svc_name,
                             &cache_key,
                         ));

@@ -26,8 +26,10 @@ pub const CODE_HTTP: i64 = -90009;
 pub const CODE_TCP: i64 = -90010;
 /// Long-connection handler used in HTTP mode (not supported).
 pub const CODE_LONG_CONNECTION_NOT_SUPPORTED: i64 = -90011;
+/// Request rejected by rate limiter.
+pub const CODE_RATE_LIMITED: i64 = -90012;
 
-const CODE_MIN: i64 = -90011;
+const CODE_MIN: i64 = -90012;
 const CODE_MAX: i64 = -90000;
 
 // Check whether a code falls in the reserved range to prevent
@@ -63,6 +65,8 @@ pub enum Error {
     /// Long-connection handler used in HTTP mode, which does not support
     /// persistent connections.
     LongConnectionNotSupported,
+    /// Request rejected by rate limiter.
+    RateLimited { message: String },
     /// OS signal received during shutdown.
     Signal { message: String },
     /// User-defined custom error with an arbitrary code and message.
@@ -83,6 +87,7 @@ impl Error {
             Error::Http { .. } => CODE_HTTP,
             Error::Tcp { .. } => CODE_TCP,
             Error::LongConnectionNotSupported => CODE_LONG_CONNECTION_NOT_SUPPORTED,
+            Error::RateLimited { .. } => CODE_RATE_LIMITED,
             Error::Custom { code, .. } => *code,
         }
     }
@@ -101,6 +106,7 @@ impl Error {
             | Error::Tcp { message, .. }
             | Error::Custom { message, .. } => message,
             Error::LongConnectionNotSupported => "long connection not supported in HTTP mode",
+            Error::RateLimited { message, .. } => message,
         }
     }
 

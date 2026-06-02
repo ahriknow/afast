@@ -52,6 +52,8 @@ pub struct HandlerMeta {
     pub path: &'static str,
     /// Client-side cache duration in seconds. 0 means no caching.
     pub cache_seconds: u64,
+    /// Rate-limit policy ID this handler is bound to. Empty means no rate limiting.
+    pub rate_limit_policy: &'static str,
 }
 
 /// Trait for type-erased handler invocation.
@@ -212,6 +214,7 @@ static DUMMY_META: HandlerMeta = HandlerMeta {
     method: "",
     path: "",
     cache_seconds: 0,
+    rate_limit_policy: "",
 };
 
 /// Placeholder invoker for group (namespace) nodes.

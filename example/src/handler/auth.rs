@@ -108,7 +108,7 @@ pub async fn register(
     Ok(RegisterResponse { user, token })
 }
 
-#[handler(desc("Login with username and password"))]
+#[handler(rate_limit("login"), desc("Login with username and password"))]
 pub async fn login(
     afast::State(state): afast::State<AppState>,
     afast::Data(req): afast::Data<LoginRequest>,

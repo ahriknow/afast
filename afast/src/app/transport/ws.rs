@@ -61,6 +61,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
 use crate::handler::HandlerInvoker;
+#[cfg(feature = "rate-limit")]
+use crate::rate_limit::{ConnectionContext, RateLimiter};
 use crate::state::StateMap;
 
 /// Safely reads N bytes from `data` at `offset` and converts to `[u8; N]`.
@@ -159,6 +161,9 @@ pub async fn handle_websocket<S>(
     ws: tokio_tungstenite::WebSocketStream<S>,
     state: Arc<StateMap>,
     handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(feature = "rate-limit")] mut conn_ctx: Option<ConnectionContext>,
+    #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
+    #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -302,6 +307,20 @@ pub async fn handle_websocket<S>(
                                 }
                             };
 
+                            // Rate-limit check.
+                            #[cfg(feature = "rate-limit")]
+                            if let (Some(limiter), Some(ctx)) = (&rate_limiter, &mut conn_ctx) {
+                                let handler_name = handler_names.get(handler_id)
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("");
+                                if !handler_name.is_empty()
+                                    && let Err(e) = limiter.check(handler_name, ctx).await
+                                {
+                                    let _ = sink.send(make_error(req_id, e.code(), e.message())).await;
+                                    continue;
+                                }
+                            }
+
                             if invoker.is_long_connection() {
                                 // Long-connection handler: create a bidirectional
                                 // channel pair, assign a connection ID, and spawn
@@ -388,10 +407,34 @@ pub async fn handle_connection(
     stream: TcpStream,
     state: Arc<StateMap>,
     handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
+    #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
 ) {
+    let peer_ip = stream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
     let ws = match accept_async(stream).await {
         Ok(ws) => ws,
         Err(_) => return,
     };
-    handle_websocket(ws, state, handlers).await;
+
+    #[cfg(feature = "rate-limit")]
+    let conn_ctx = Some(ConnectionContext::new(peer_ip));
+    #[cfg(not(feature = "rate-limit"))]
+    let _ = peer_ip;
+
+    handle_websocket(
+        ws,
+        state,
+        handlers,
+        #[cfg(feature = "rate-limit")]
+        conn_ctx,
+        #[cfg(feature = "rate-limit")]
+        rate_limiter,
+        #[cfg(feature = "rate-limit")]
+        handler_names,
+    )
+    .await;
 }

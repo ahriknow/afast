@@ -53,6 +53,8 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
 use crate::handler::HandlerInvoker;
+#[cfg(feature = "rate-limit")]
+use crate::rate_limit::{ConnectionContext, RateLimiter};
 use crate::state::StateMap;
 
 /// Safely reads N bytes from `data` at `offset` and converts to `[u8; N]`.
@@ -198,7 +200,19 @@ pub async fn handle_connection(
     stream: TcpStream,
     state: Arc<StateMap>,
     handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
+    #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
 ) {
+    let peer_ip = stream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    #[cfg(feature = "rate-limit")]
+    let mut conn_ctx = ConnectionContext::new(peer_ip);
+    #[cfg(not(feature = "rate-limit"))]
+    let _ = peer_ip;
+
     let (mut reader, mut writer) = stream.into_split();
     let connections: Arc<Mutex<HashMap<u32, ConnectionState>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -330,6 +344,21 @@ pub async fn handle_connection(
                             continue;
                         }
                     };
+
+                    // Rate-limit check.
+                    #[cfg(feature = "rate-limit")]
+                    if let Some(ref limiter) = rate_limiter {
+                        let handler_name = handler_names.get(handler_id)
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        if !handler_name.is_empty()
+                            && let Err(e) = limiter.check(handler_name, &mut conn_ctx).await
+                        {
+                            let resp = make_error(req_id, e.code(), e.message());
+                            let _ = write_frame(&mut writer, &resp).await;
+                            continue;
+                        }
+                    }
 
                     if invoker.is_long_connection() {
                         // Long-connection handler: create channels, assign a

@@ -24,7 +24,8 @@ afast = { path = "../afast", features = [
     "kt",
     "rs",
     "doc",
-    "marker"
+    "marker",
+    "rate-limit"
 ] }
 afast-macros.workspace = true
 afastdata.workspace = true

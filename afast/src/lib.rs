@@ -60,10 +60,13 @@
 //! | `tls` | HTTPS support via rustls with ALPN for HTTP/2 |
 //! | `seq64` | Use `i64` for WebSocket request IDs (default `i32`) |
 //! | `len64` | Use `u64` for WebSocket payload lengths (default `u32`) |
+//! | `rate-limit` | Request rate limiting with named policies and pluggable store |
 
 pub mod error;
 pub mod handler;
 pub mod marker;
+#[cfg(feature = "rate-limit")]
+pub mod rate_limit;
 pub mod service;
 pub mod state;
 
@@ -78,6 +81,11 @@ pub use handler::{HandlerEntry, HandlerInvoker, HandlerMeta, ParamMeta};
 pub use handler::{Receiver, Sender};
 pub use service::Service;
 pub use state::StateMap;
+
+#[cfg(feature = "rate-limit")]
+pub use rate_limit::{
+    Algorithm, InMemoryStore, RateLimitConfig, RateLimitKey, RateLimitPolicy, RateLimitStore,
+};
 
 pub use afastdata::{AFastDeserialize, AFastSerialize};
 

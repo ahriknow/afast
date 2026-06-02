@@ -35,6 +35,8 @@ use crate::StateMap;
 use crate::app::ordinary::RoutePattern;
 use crate::error::{CODE_HTTP, CODE_LONG_CONNECTION_NOT_SUPPORTED, Error};
 use crate::handler::HandlerInvoker;
+#[cfg(feature = "rate-limit")]
+use crate::rate_limit::{ConnectionContext, RateLimiter};
 #[cfg(feature = "ordinary-http")]
 use crate::service::OrdinaryRouteInfo;
 
@@ -58,6 +60,11 @@ pub struct HttpConfig {
     pub enable_ws_upgrade: bool,
     #[cfg(feature = "tls")]
     pub tls_config: Option<crate::app::TlsConfig>,
+    #[cfg(feature = "rate-limit")]
+    pub rate_limiter: Option<Arc<RateLimiter>>,
+    /// Handler names indexed by handler ID, for rate-limit lookups.
+    #[cfg(feature = "rate-limit")]
+    pub handler_names: Vec<String>,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -93,6 +100,7 @@ pub async fn serve(
                 .handler_entry
                 .ordinary_invoker
                 .expect("ordinary_invoker must be set for ordinary routes"),
+            handler_name: r.handler_entry.name,
         })
         .collect();
 
@@ -111,6 +119,10 @@ pub async fn serve(
         ordinary_routes: compiled_routes,
         #[cfg(feature = "ws")]
         enable_ws_upgrade: config.enable_ws_upgrade,
+        #[cfg(feature = "rate-limit")]
+        rate_limiter: config.rate_limiter,
+        #[cfg(feature = "rate-limit")]
+        handler_names: config.handler_names,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -141,13 +153,22 @@ pub async fn serve(
                         #[cfg(feature = "tls")]
                         let tls = tls_acceptor.clone();
                         tokio::spawn(async move {
+                            // Extract client IP from the TCP peer address.
+                            let peer_ip = stream.peer_addr()
+                                .map(|a| a.ip().to_string())
+                                .unwrap_or_else(|_| "unknown".to_string());
+
                             #[cfg(feature = "tls")]
                             match tls {
                                 Some(ref acceptor) => {
                                     match acceptor.accept(stream).await {
                                         Ok(tls_stream) => {
+                                            let client_ip = tls_stream.get_ref().0
+                                                .peer_addr()
+                                                .map(|a| a.ip().to_string())
+                                                .unwrap_or(peer_ip);
                                             let io = hyper_util::rt::TokioIo::new(tls_stream);
-                                            serve_connection(io, shared).await;
+                                            serve_connection(io, shared, client_ip).await;
                                         }
                                         Err(e) => {
                                             eprintln!("afast: tls handshake error: {}", e);
@@ -156,13 +177,13 @@ pub async fn serve(
                                 }
                                 None => {
                                     let io = hyper_util::rt::TokioIo::new(stream);
-                                    serve_connection(io, shared).await;
+                                    serve_connection(io, shared, peer_ip).await;
                                 }
                             };
                             #[cfg(not(feature = "tls"))]
                             {
                                 let io = hyper_util::rt::TokioIo::new(stream);
-                                serve_connection(io, shared).await;
+                                serve_connection(io, shared, peer_ip).await;
                             }
                         });
                     }
@@ -179,13 +200,17 @@ pub async fn serve(
 /// Serves a single HTTP connection with auto-detected protocol.
 ///
 /// Generic over the IO type to support both plain TCP and TLS streams.
-async fn serve_connection<S>(io: hyper_util::rt::TokioIo<S>, shared: Arc<SharedState>)
-where
+async fn serve_connection<S>(
+    io: hyper_util::rt::TokioIo<S>,
+    shared: Arc<SharedState>,
+    client_ip: String,
+) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     let service = service_fn(move |req| {
         let shared = shared.clone();
-        async move { handle_request(req, &shared).await }
+        let client_ip = client_ip.clone();
+        async move { handle_request(req, &shared, &client_ip).await }
     });
     if let Err(e) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
         .serve_connection_with_upgrades(io, service)
@@ -214,6 +239,10 @@ struct SharedState {
     ordinary_routes: Vec<CompiledOrdinaryRoute>,
     #[cfg(feature = "ws")]
     enable_ws_upgrade: bool,
+    #[cfg(feature = "rate-limit")]
+    rate_limiter: Option<Arc<RateLimiter>>,
+    #[cfg(feature = "rate-limit")]
+    handler_names: Vec<String>,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -222,6 +251,8 @@ struct CompiledOrdinaryRoute {
     method: &'static str,
     pattern: RoutePattern,
     invoker: &'static dyn crate::handler::OrdinaryHandlerInvoker,
+    #[cfg_attr(not(feature = "rate-limit"), allow(dead_code))]
+    handler_name: &'static str,
 }
 
 /// Dispatches an incoming HTTP request to the correct handler.
@@ -236,6 +267,7 @@ struct CompiledOrdinaryRoute {
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
+    client_ip: &str,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -255,6 +287,31 @@ async fn handle_request(
                 continue;
             }
             if let Some(path_params) = compiled.pattern.matches(&path) {
+                // Rate-limit check for ordinary routes.
+                #[cfg(feature = "rate-limit")]
+                if let Some(ref limiter) = shared.rate_limiter {
+                    let handler_name = compiled.handler_name;
+                    let mut ctx = ConnectionContext::new(client_ip.to_string());
+                    // Pre-populate header cache from the request.
+                    for (name, value) in req.headers().iter() {
+                        if let Ok(v) = value.to_str() {
+                            ctx.header_cache
+                                .insert(name.as_str().to_lowercase(), v.to_string());
+                        }
+                    }
+                    if let Err(e) = limiter.check(handler_name, &mut ctx).await {
+                        let status = StatusCode::TOO_MANY_REQUESTS;
+                        let body =
+                            format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                        return Ok(Response::builder()
+                            .status(status)
+                            .header("content-type", "application/json; charset=utf-8")
+                            .header("retry-after", "60")
+                            .body(Full::new(Bytes::from(body)))
+                            .expect("valid response builder"));
+                    }
+                }
+
                 let query_string = uri.query().unwrap_or("");
                 let state = shared.state.clone();
                 let invoker = compiled.invoker;
@@ -291,7 +348,7 @@ async fn handle_request(
             if method != hyper::Method::POST {
                 return method_not_allowed();
             }
-            handle_api(req, shared).await
+            handle_api(req, shared, client_ip).await
         }
         #[cfg(feature = "code")]
         Some("code") => {
@@ -310,7 +367,7 @@ async fn handle_request(
         #[cfg(feature = "ws")]
         Some("_ws") => {
             if shared.enable_ws_upgrade {
-                return handle_ws_upgrade(req, shared).await;
+                return handle_ws_upgrade(req, shared, client_ip).await;
             }
             not_found()
         }
@@ -328,11 +385,14 @@ async fn handle_request(
 /// Response format:
 /// - Success: `[0u8][0i64][data]` with `content-type: application/octet-stream`.
 /// - Error: `[1u8][code i64][message bytes]` with the same content type.
+#[allow(unused_variables)]
 async fn handle_api(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
+    client_ip: &str,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     use http_body_util::BodyExt;
+    let headers = req.headers().clone();
     let body = req.into_body().collect().await?.to_bytes();
 
     if body.len() < 4 {
@@ -365,6 +425,28 @@ async fn handle_api(
             CODE_LONG_CONNECTION_NOT_SUPPORTED,
             "long connection handlers are not supported in HTTP mode, use WebSocket instead",
         );
+    }
+
+    // Rate-limit check for binary API handlers.
+    #[cfg(feature = "rate-limit")]
+    if let Some(ref limiter) = shared.rate_limiter {
+        let handler_name = shared
+            .handler_names
+            .get(handler_id)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        if !handler_name.is_empty() {
+            let mut ctx = ConnectionContext::new(client_ip.to_string());
+            for (name, value) in headers.iter() {
+                if let Ok(v) = value.to_str() {
+                    ctx.header_cache
+                        .insert(name.as_str().to_lowercase(), v.to_string());
+                }
+            }
+            if let Err(e) = limiter.check(handler_name, &mut ctx).await {
+                return error_response(StatusCode::TOO_MANY_REQUESTS, e.code(), e.message());
+            }
+        }
     }
 
     let payload = &body[4..];
@@ -605,6 +687,7 @@ fn handle_doc(
 async fn handle_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
+    client_ip: &str,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::tungstenite::protocol::Role;
@@ -632,16 +715,50 @@ async fn handle_ws_upgrade(
         ws_key.expect("ws_key checked above").as_bytes(),
     );
 
+    // Extract headers for WS rate-limiting before moving `req`.
+    #[cfg(feature = "rate-limit")]
+    let mut header_cache = std::collections::HashMap::new();
+    #[cfg(feature = "rate-limit")]
+    for (name, value) in req.headers().iter() {
+        if let Ok(v) = value.to_str() {
+            header_cache.insert(name.as_str().to_lowercase(), v.to_string());
+        }
+    }
+
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let handlers = shared.handlers.clone();
+
+    #[cfg(feature = "rate-limit")]
+    let client_ip_owned = client_ip.to_string();
+    #[cfg(feature = "rate-limit")]
+    let rate_limiter = shared.rate_limiter.clone();
+    #[cfg(feature = "rate-limit")]
+    let handler_names = shared.handler_names.clone();
 
     tokio::spawn(async move {
         match on_upgrade.await {
             Ok(upgraded) => {
                 let io = hyper_util::rt::TokioIo::new(upgraded);
                 let ws = WebSocketStream::from_raw_socket(io, Role::Server, None).await;
-                crate::app::transport::handle_websocket(ws, state, handlers).await;
+                #[cfg(feature = "rate-limit")]
+                let mut ctx = ConnectionContext::new(client_ip_owned);
+                #[cfg(feature = "rate-limit")]
+                {
+                    ctx.header_cache = header_cache;
+                }
+                crate::app::transport::handle_websocket(
+                    ws,
+                    state,
+                    handlers,
+                    #[cfg(feature = "rate-limit")]
+                    Some(ctx),
+                    #[cfg(feature = "rate-limit")]
+                    rate_limiter,
+                    #[cfg(feature = "rate-limit")]
+                    handler_names,
+                )
+                .await;
             }
             Err(e) => {
                 eprintln!("afast: ws upgrade error: {}", e);

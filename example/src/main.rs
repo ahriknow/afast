@@ -1,5 +1,6 @@
 use afast::{
-    AFast, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, RsCallType, register, service,
+    AFast, Algorithm, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, RateLimitConfig,
+    RateLimitKey, RateLimitPolicy, RsCallType, register, service,
 };
 
 mod handler;
@@ -126,6 +127,26 @@ async fn main() {
         .service(admin_extra_svc) // merges into "admin"
         .service(internal_svc) // empty name: excluded from codegen/docs
         .marker("afast") // marker for conditional field skipping (afastdata 0.0.7+)
+        .rate_limit(
+            RateLimitConfig::new()
+                // Login: 每 IP 每分钟最多 5 次
+                .policy(RateLimitPolicy {
+                    id: "login".into(),
+                    max_requests: 5,
+                    window_secs: 60,
+                    key: RateLimitKey::Ip,
+                    algorithm: Algorithm::SlidingWindow,
+                })
+                // 默认策略：每 IP 每秒最多 100 次（未显式配置限流的接口自动使用）
+                .default_policy("global")
+                .policy(RateLimitPolicy {
+                    id: "global".into(),
+                    max_requests: 100,
+                    window_secs: 1,
+                    key: RateLimitKey::Ip,
+                    algorithm: Algorithm::SlidingWindow,
+                }),
+        )
         .ws("[::]:3001")
         .http("[::]:5001")
         .tcp("[::]:4001");

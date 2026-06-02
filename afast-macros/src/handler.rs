@@ -43,7 +43,8 @@ pub fn expand(
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, cache_seconds) = parse_handler_attrs_from_tokens(&attr)?;
+    let (desc, api_name, cache_seconds, rate_limit_policy) =
+        parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, method)?;
 
     // Detect whether the handler mixes binary and ordinary extractors, which is
@@ -268,6 +269,7 @@ pub fn expand(
         is_ordinary: method.is_some(),
         param_meta_entries: &param_meta_entries,
         cache_seconds,
+        rate_limit_policy: &rate_limit_policy,
     });
 
     let invoker_ident = syn::Ident::new(&format!("__Invoker_{}", fn_name_str), Span::call_site());
@@ -375,13 +377,14 @@ pub fn expand(
 /// to 0 (no caching) when the attribute is not provided.
 fn parse_handler_attrs_from_tokens(
     attr_tokens: &TokenStream,
-) -> syn::Result<(String, String, u64)> {
+) -> syn::Result<(String, String, u64, String)> {
     let mut desc = String::new();
     let mut api_name = String::new();
     let mut cache_seconds: u64 = 0;
+    let mut rate_limit_policy = String::new();
 
     if attr_tokens.is_empty() {
-        return Ok((desc, api_name, cache_seconds));
+        return Ok((desc, api_name, cache_seconds, rate_limit_policy));
     }
 
     let parser = |input: syn::parse::ParseStream| -> syn::Result<Vec<Meta>> {
@@ -419,6 +422,12 @@ fn parse_handler_attrs_from_tokens(
                     }) = nv.value
                 {
                     cache_seconds = n.base10_parse()?;
+                } else if nv.path.is_ident("rate_limit")
+                    && let Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }) = nv.value
+                {
+                    rate_limit_policy = s.value();
                 }
             }
             Meta::List(list) => {
@@ -431,13 +440,16 @@ fn parse_handler_attrs_from_tokens(
                 } else if list.path.is_ident("cache") {
                     let lit: LitInt = list.parse_args()?;
                     cache_seconds = lit.base10_parse()?;
+                } else if list.path.is_ident("rate_limit") {
+                    let lit: LitStr = list.parse_args()?;
+                    rate_limit_policy = lit.value();
                 }
             }
             _ => {}
         }
     }
 
-    Ok((desc, api_name, cache_seconds))
+    Ok((desc, api_name, cache_seconds, rate_limit_policy))
 }
 
 /// Analyzes each parameter in the handler's function signature and classifies
@@ -728,6 +740,7 @@ struct HandlerMetaParams<'a> {
     is_ordinary: bool,
     param_meta_entries: &'a [TokenStream],
     cache_seconds: u64,
+    rate_limit_policy: &'a str,
 }
 
 fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
@@ -745,6 +758,7 @@ fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
     let is_ordinary = p.is_ordinary;
     let param_meta_entries = p.param_meta_entries;
     let cache_seconds = p.cache_seconds;
+    let rate_limit_policy = p.rate_limit_policy;
     quote! {
         pub const #meta_ident: afast::HandlerMeta = afast::HandlerMeta {
             name: #fn_name_str,
@@ -758,6 +772,7 @@ fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
             method: #method,
             path: "",
             cache_seconds: #cache_seconds,
+            rate_limit_policy: #rate_limit_policy,
         };
     }
 }

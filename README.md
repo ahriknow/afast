@@ -1,44 +1,46 @@
 # AFast
 
-简体中文 | [English](./README_EN.md)
+[简体中文](./README_CN.md) | English
 
-AFast 是一个高性能 Rust Web 后端框架。它消除了手工定义路由的工作——
-只需用 `#[handler]` 标注函数，框架即自动注册和分发请求。数据传输采用紧凑的
-二进制协议，比 JSON 更小、更快。同时支持一键生成 TypeScript、JavaScript、
-Kotlin 和 Rust 客户端代码，内置交互式 API 文档。
+AFast is a high-performance Rust web backend framework. It eliminates manual route
+definitions — annotate functions with `#[handler]` and the framework auto-registers
+and dispatches requests. Data transport uses a compact binary protocol that is
+smaller and faster than JSON. It supports one-click generation of TypeScript,
+JavaScript, Kotlin, and Rust client code, with built-in interactive API documentation.
 
-## 特性
+## Features
 
-- **零路由定义** — `#[handler]` 标注函数即可，无需手动编写路由表
-- **紧凑二进制协议** — 专为内部通信设计，比 JSON 体积更小、解析更快
-- **自动代码生成** — 生成 TypeScript / JavaScript / Kotlin / Rust 客户端，含完整类型定义
-- **交互式 API 文档** — 内置带深色/浅色主题的 Web 文档页面，支持在线测试
-- **多传输层** — 同时支持 WebSocket、HTTP/1.1、HTTP/2 和 TCP，可按需组合
-- **TLS / HTTPS** — 基于 rustls，支持 ALPN 协商 HTTP/2，HTTP 和 HTTPS 可同时运行
-- **HTTP + WS 端口合并** — 同一端口可同时提供 HTTP 和 WebSocket 服务
-- **RESTful 端点** — 支持标准 HTTP 方法（GET/POST/PUT/PATCH/DELETE），含 Query/Param/Body/Header 提取器
-- **长连接** — 通过 Receiver/Sender 支持 WebSocket/TCP 双向持久通信
-- **类型安全提取器** — `State<T>`、`Data<T>`、`Custom<T>` 等参数注入
-- **多个 State** — 支持注册多个不同类型的 State，通过泛型按类型区分
-- **多个 Data** — 一个 Handler 可接受多个 `Data<T>` 参数，客户端生成对应的方法参数
-- **嵌套 Handler 结构** — 通过 `group` 组织 API 命名空间，自动生成层级路径
-- **递归类型发现** — `#[derive(Tag)]` 通过函数指针递归发现嵌套类型，无需全局注册表
-- **客户端策略模式** — 构造时选择 WS/HTTP，之后不可切换，运行时零分支开销
-- **客户端缓存** — `cache(seconds)` 属性，生成类级别静态缓存，相同参数请求直接返回缓存数据
-- **服务自动合并** — 同名 Service 自动合并 handlers 和路由，无需担心重复注册
-- **空名称服务** — Service 名称为空时，handlers 仍可通过二进制协议调用，但不出现在客户端代码和 API 文档中
+- **Zero Route Definitions** — `#[handler]` annotation, no manual routing table
+- **Compact Binary Protocol** — Smaller and faster than JSON, designed for internal communication
+- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients with full type definitions
+- **Interactive API Docs** — Built-in Web docs with dark/light theme and online API testing
+- **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
+- **TLS / HTTPS** — Based on rustls with ALPN for HTTP/2 negotiation. HTTP and HTTPS can run simultaneously
+- **HTTP + WS Port Merging** — Same port serves both HTTP and WebSocket simultaneously
+- **RESTful Endpoints** — Standard HTTP methods with Query/Param/Body/Header extractors
+- **Long Connections** — Bidirectional persistent communication via Receiver/Sender over WS/TCP
+- **Type-Safe Extractors** — `State<T>`, `Data<T>`, `Custom<T>` parameter injection
+- **Multiple States** — Register multiple State types, keyed by generic type
+- **Multiple Data Params** — Accept multiple `Data<T>` params, generating corresponding client args
+- **Nested Handler Structure** — Organize APIs with `group`, auto-generating hierarchical paths
+- **Recursive Type Discovery** — `#[derive(Tag)]` with function pointers, no global registry
+- **Client Strategy Pattern** — Transport chosen at construction, immutable thereafter, zero overhead
+- **Client-Side Caching** — `cache(seconds)` attribute, class-level static cache, returns cached data for identical params
+- **Service Merge on Duplicate Name** — Same-name services auto-merge handlers and routes, no duplicate registration issues
+- **Empty-Name Service** — Services with empty name are callable via binary protocol but excluded from client code and API docs
+- **Rate Limiting** — Named-policy rate limiting across HTTP/WS/TCP with IP/Header/Connection/Global keys, pluggable store backend (built-in InMemoryStore, extensible to Redis etc.)
 
-## 快速开始
+## Quick Start
 
-### 添加依赖
+### Add Dependency
 
 ```toml
 [dependencies]
-afast = { version = "0.1.7", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.8", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
-### 定义 Handler
+### Define a Handler
 
 ```rust
 use afast::{AFast, handler, service, State, Data, Custom, Result};
@@ -55,20 +57,20 @@ struct CacheState {
 }
 
 #[derive(AFastDeserialize, Tag)]
-#[tag("认证信息")]
+#[tag("Auth info")]
 struct AuthCustom {
     token: i64,
     platform: String,
 }
 
 #[derive(AFastDeserialize, Tag)]
-#[tag("请求体")]
+#[tag("Request body")]
 struct HelloReq {
     name: String,
 }
 
 #[derive(AFastSerialize, Tag)]
-#[tag("响应体")]
+#[tag("Response body")]
 struct HelloResp {
     message: String,
 }
@@ -88,7 +90,7 @@ async fn hello(
 
 #[tokio::main]
 async fn main() {
-    let svc = service!("api", "示例 API" => {
+    let svc = service!("api", "Example API" => {
         h(hello),
     });
 
@@ -103,7 +105,7 @@ async fn main() {
 }
 ```
 
-### 运行
+### Run
 
 ```bash
 cargo run --features "http,ws,ts"
@@ -111,45 +113,45 @@ cargo run --features "http,ws,ts"
 
 - WebSocket API: `ws://localhost:3000`
 - HTTP API: `POST http://localhost:5000/_api`
-- 生成的 TS 客户端代码位于 `./code/api.ts`
+- Generated TS client code in `./code/api.ts`
 
-## Features 详解
+## Features (Detailed)
 
-| Feature | 说明 | 自动引入 |
-|---------|------|---------|
-| `http` | 启用 HTTP 服务端 | hyper, hyper-util, http-body-util |
-| `ws` | 启用 WebSocket 服务端 | tokio-tungstenite, futures-util |
-| `tcp` | 启用 TCP 服务端（长度前缀帧协议） | — |
-| `ts` | 生成 TypeScript 客户端（ESM + 完整类型） | — |
-| `js` | 生成 JavaScript 客户端（ESM + JSDoc） | — |
-| `kt` | 生成 Kotlin 客户端 | — |
-| `rs` | 生成 Rust 客户端（Tokio async / std sync TCP） | — |
-| `code` | HTTP `/code/{service}/{lang}` 按需生成端点 | `http` |
-| `doc` | 交互式 API 文档（`/doc` 端点） | `http`, `js` |
-| `ordinary-http` | RESTful JSON 端点（GET/POST/PUT/DELETE） | `http`, serde, serde_json |
-| `seq64` | WS 请求 ID 使用 `i64`（默认 `i32`） | — |
-| `len64` | WS 载荷长度使用 `u64`（默认 `u32`） | — |
-| `tag-u8` | 枚举标签使用 `u8`（默认） | afastdata/tag-u8 |
-| `tag-u16` | 枚举标签使用 `u16` | afastdata/tag-u16 |
-| `tag-u32` | 枚举标签使用 `u32` | afastdata/tag-u32 |
-| `marker` | 启用基于 marker 的条件序列化，通过 `AFast::marker()` 设置标记字符串（默认 `"afast"`） | — |
+| Feature | Description | Dependencies |
+|---------|-------------|-------------|
+| `http` | HTTP server | hyper, hyper-util, http-body-util |
+| `ws` | WebSocket server | tokio-tungstenite, futures-util |
+| `tcp` | TCP server (length-prefix framing) | — |
+| `ts` | TypeScript client generation (ESM + full types) | — |
+| `js` | JavaScript client generation (ESM + JSDoc) | — |
+| `kt` | Kotlin client generation | — |
+| `rs` | Rust client generation (Tokio async / std sync TCP) | — |
+| `code` | On-demand code generation at `/code/{service}/{lang}` | `http` |
+| `doc` | Interactive API docs at `/doc` endpoint | `http`, `js` |
+| `ordinary-http` | RESTful JSON endpoints (GET/POST/PUT/DELETE) | `http`, serde, serde_json |
+| `seq64` | WS request ID uses `i64` (default `i32`) | — |
+| `len64` | WS payload length uses `u64` (default `u32`) | — |
+| `tag-u8` | Enum tag uses `u8` (default) | afastdata/tag-u8 |
+| `tag-u16` | Enum tag uses `u16` | afastdata/tag-u16 |
+| `tag-u32` | Enum tag uses `u32` | afastdata/tag-u32 |
+| `marker` | Enable marker-based conditional serialization; set marker via `AFast::marker()` (default `"afast"`) | — |
 
-**注意**：如果服务器端启用了 `seq64` 或 `len64`，生成的客户端代码也必须使用
-相同的 feature，否则协议不匹配。
+**Note**: If the server uses `seq64` or `len64`, generated client code must use
+the same feature, otherwise protocol mismatch will occur.
 
-## 核心概念
+## Core Concepts
 
-### Handler 注册
+### Handler Registration
 
-`#[handler]` 过程宏在编译时自动生成：
+The `#[handler]` proc macro generates the following at compile time:
 
-1. 原函数保持不变
-2. `HandlerMeta` — 函数名、描述、参数列表、返回类型等元数据
-3. `HandlerInvoker` trait 实现 — 类型擦除的调用器，负责反序列化参数并调用原函数
-4. 静态 invoker 实例 — 供 `register!` 宏引用
+1. The original function unchanged
+2. `HandlerMeta` — name, description, parameter list, return type metadata
+3. `HandlerInvoker` trait impl — type-erased invoker, deserializes params, calls the function
+4. A static invoker instance — referenced by the `register!` macro
 
 ```rust
-#[handler(desc("获取用户"), name("get_user"))]
+#[handler(desc("Get user"), name("get_user"))]
 async fn get_user_handler(
     state: State<AppState>,
     auth: Custom<Auth>,
@@ -159,14 +161,15 @@ async fn get_user_handler(
 }
 ```
 
-- `desc("...")` — 设置描述，用于文档和 JSDoc 注释
-- `name("...")` — 覆盖客户端方法名（默认使用 Rust 函数名）
-- `cache(seconds)` — 启用客户端缓存，seconds 秒内相同参数的请求返回缓存数据，避免重复请求
+- `desc("...")` — Sets description used in docs and JSDoc comments
+- `name("...")` — Overrides the client-side method name (defaults to the Rust function name)
+- `cache(seconds)` — Enables client-side caching; requests with identical params within `seconds` return cached data
 
-### 多 State 支持
+### Multiple States
 
-AFast 支持注册**多个不同类型的 State**。`StateMap` 以 `TypeId` 为键，
-每种类型最多存储一个值。Handler 通过多个 `State<T>` 参数获取不同的 State：
+AFast supports registering **multiple State types**. `StateMap` uses `TypeId` as
+keys, with one value per type. Handlers access different States via multiple
+`State<T>` parameters:
 
 ```rust
 #[derive(Clone)]
@@ -178,14 +181,14 @@ struct RedisConfig { url: String }
 #[derive(Clone)]
 struct AppConfig { name: String }
 
-// 注册多个 State
+// Register multiple State values
 let app = AFast::new()
     .state(DbConfig { url: "postgres://...".into() })
     .state(RedisConfig { url: "redis://...".into() })
     .state(AppConfig { name: "my-app".into() });
 
-// Handler 中获取多个 State
-#[handler(desc("多 State 示例"))]
+// Access multiple States in a handler
+#[handler(desc("Multiple State example"))]
 async fn my_handler(
     db: State<DbConfig>,
     redis: State<RedisConfig>,
@@ -196,23 +199,25 @@ async fn my_handler(
 }
 ```
 
-如果 Handler 引用的 State 类型未注册，运行时会返回 `CODE_STATE_NOT_FOUND` 错误。
+If a handler references a State type that was not registered, it returns a
+`CODE_STATE_NOT_FOUND` error at runtime.
 
-### 多 Data 支持
+### Multiple Data Params
 
-一个 Handler 可以接受**多个 `Data<T>` 参数**。它们依次从二进制载荷中反序列化。
-生成的客户端方法以多个参数呈现：
+A handler can accept **multiple `Data<T>` parameters**, deserialized sequentially
+from the binary payload. The generated client method presents them as separate
+arguments:
 
 ```rust
 #[derive(AFastDeserialize, Tag)]
-#[tag("分页参数")]
+#[tag("Pagination")]
 struct PageRequest { page: i64, size: i64 }
 
 #[derive(AFastDeserialize, Tag)]
-#[tag("过滤条件")]
+#[tag("Filter")]
 struct FilterRequest { keyword: String, status: i32 }
 
-#[handler(desc("搜索用户"))]
+#[handler(desc("Search users"))]
 async fn search_users(
     page: Data<PageRequest>,
     filter: Data<FilterRequest>,
@@ -221,34 +226,34 @@ async fn search_users(
 }
 ```
 
-生成的 TypeScript 客户端方法签名：
+Generated TypeScript client method signature:
 
 ```typescript
 async searchUsers(page: PageRequest, filter: FilterRequest): Promise<PageResponse>
 ```
 
-每个 `Data<T>` 对应一个方法参数，顺序与 Rust 函数中 `Data<T>` 的声明顺序一致。
+Each `Data<T>` maps to one method parameter, in declaration order.
 
-### Extractor 类型
+### Extractor Types
 
-| Extractor | 说明 | 适用协议 |
-|-----------|------|---------|
-| `State<T>` | 从 StateMap 按类型注入共享状态（T: Clone） | 全部 |
-| `Data<T>` | 从二进制载荷反序列化请求体 | HTTP/WS/TCP |
-| `Custom<T>` | 客户端构造时设置的自定义上下文（如认证令牌） | HTTP/WS/TCP |
-| `Receiver` | 接收客户端推送的二进制消息（长连接） | WS/TCP |
-| `Sender` | 向客户端发送二进制消息（长连接） | WS/TCP |
-| `Query<T>` | 从 URL Query String 反序列化（需 `ordinary-http`） | HTTP |
-| `Param<T>` | 从路由路径参数（`:id`）反序列化（需 `ordinary-http`） | HTTP |
-| `Body<T>` | 从 HTTP JSON Body 反序列化（需 `ordinary-http`） | HTTP |
-| `Header<T>` | 从 HTTP 请求头反序列化（需 `ordinary-http`） | HTTP |
+| Extractor | Description | Protocols |
+|-----------|-------------|-----------|
+| `State<T>` | Injects shared state by type from StateMap (T: Clone) | All |
+| `Data<T>` | Deserializes request body from binary payload | HTTP/WS/TCP |
+| `Custom<T>` | Deserializes client-side custom context (e.g., auth token) | HTTP/WS/TCP |
+| `Receiver` | Receives binary messages from the client (long connection) | WS/TCP |
+| `Sender` | Sends binary messages to the client (long connection) | WS/TCP |
+| `Query<T>` | Deserializes from URL query string (requires `ordinary-http`) | HTTP |
+| `Param<T>` | Deserializes from route path params (`:id`) (requires `ordinary-http`) | HTTP |
+| `Body<T>` | Deserializes from HTTP JSON body (requires `ordinary-http`) | HTTP |
+| `Header<T>` | Deserializes from HTTP request headers (requires `ordinary-http`) | HTTP |
 
-### 服务与嵌套
+### Services and Nesting
 
-`service!` 宏用于构建 Handler 树，支持 `group` 命名空间：
+The `service!` macro builds handler trees with `group` for namespacing:
 
 ```rust
-let api_svc = service!("api", "用户 API" => {
+let api_svc = service!("api", "User API" => {
     h(health),
     group("user" => {
         h(list_users),
@@ -258,36 +263,37 @@ let api_svc = service!("api", "用户 API" => {
         }),
     }),
     group("chat" => {
-        h(chat),  // 使用 Receiver/Sender 的持久连接
+        h(chat),  // Persistent connection using Receiver/Sender
     }),
 });
 ```
 
-客户端命名空间路径为 `api.user.list_users`、`api.chat.chat` 等。
+Client namespace paths become `api.user.list_users`, `api.chat.chat`, etc.
 
-在 `group` 内可混合使用二进制 handler 和普通 HTTP 路由：
+Binary and ordinary HTTP routes can be mixed within a `group`:
 
 ```rust
 group("user" => {
-    h(get_user),                 // 二进制 handler
+    h(get_user),                 // binary handler
     get(":id", get_user_by_id),  // GET /user/:id
     post("", create_user),       // POST /user
     delete(":id", delete_user),  // DELETE /user/:id
 }),
 ```
 
-#### 同名 Service 自动合并
+#### Service Merge on Duplicate Name
 
-多次注册同名 Service 时，后续注册的 handlers 和路由会自动合并到第一个同名
-Service 中，不会产生重复。适合将不同模块的 handlers 分散定义后统一注册：
+Registering multiple services with the same name automatically merges the later
+handlers and routes into the first service — no duplicates are created. This is
+useful for splitting handlers across modules:
 
 ```rust
-let user_svc = service!("api", "用户 API" => {
+let user_svc = service!("api", "User API" => {
     h(list_users),
     h(create_user),
 });
 
-// 第二个 "api" 服务的 handlers 会合并到上面的 user_svc 中
+// Handlers from this second "api" service merge into user_svc
 let user_extra_svc = service!("api" => {
     h(delete_user),
     get(":id", get_user_http),
@@ -295,36 +301,38 @@ let user_extra_svc = service!("api" => {
 
 let app = AFast::new()
     .service(user_svc)
-    .service(user_extra_svc);  // delete_user 和 get_user_http 合并到 "api"
+    .service(user_extra_svc);  // delete_user and get_user_http merge into "api"
 ```
 
-#### 空名称 Service
+#### Empty-Name Service
 
-Service 名称为空字符串 `""` 时，其 handlers 仍会注册到全局 handler 表中，
-可通过二进制协议（HTTP/WS/TCP）正常调用，但不会出现在客户端代码生成和
-API 文档中。适合内部接口或调试用端点：
+A service with an empty string name (`""`) still registers its handlers into the
+global handler table and they remain fully callable via binary protocol
+(HTTP/WS/TCP), but they are excluded from client code generation and API
+documentation. Useful for internal or debug-only endpoints:
 
 ```rust
-let internal_svc = service!("", "内部服务" => {
+let internal_svc = service!("", "Internal" => {
     h(debug_info),
     get("ping", ping),
 });
 
 let app = AFast::new()
     .service(api_svc)
-    .service(internal_svc);  // debug_info 和 ping 可调用，但不出现在客户端代码和文档中
+    .service(internal_svc);  // debug_info and ping are callable but hidden from clients and docs
 ```
 
-### 类型标签（Tag）
+### Type Tags
 
-用 `#[derive(Tag)]` 为 struct/enum 生成运行时类型元数据。代码生成器通过
-`FieldMeta.structure` 函数指针递归发现嵌套类型，无需全局注册表。
+`#[derive(Tag)]` generates runtime type metadata for structs and enums. The
+code generator recursively discovers nested types through `FieldMeta.structure`
+function pointers — no global registry required.
 
 ```rust
 use afast::Tag;
 
 #[derive(Tag)]
-#[tag("用户角色")]
+#[tag("User role")]
 enum Role {
     Admin,
     User { level: i32 },
@@ -333,132 +341,239 @@ enum Role {
 }
 
 #[derive(Tag)]
-#[tag("用户信息")]
+#[tag("User info")]
 struct User {
     name: String,
-    role: Role,           // 自动递归发现 Role
-    tags: Vec<String>,    // Vec 元素类型自动展开
+    role: Role,           // Auto-discovers Role fields recursively
+    tags: Vec<String>,    // Vec element type auto-expanded
     avatar: Option<Vec<u8>>,
 }
 ```
 
-验证规则（通过 `#[afast(...)]` 设置，会生成客户端预检代码）：
+Validation rules via `#[afast(...)]`, generating client-side preflight checks:
 
-| 规则 | 示例 | 说明 |
-|------|------|------|
-| `gt(value, code, "msg")` | `#[afast(gt(0, 400, "必须 > 0"))]` | 大于 |
-| `gte(value, code, "msg")` | `#[afast(gte(1, 400, "必须 >= 1"))]` | 大于等于 |
-| `lt(value, code, "msg")` | `#[afast(lt(100, 400, "必须 < 100"))]` | 小于 |
-| `lte(value, code, "msg")` | `#[afast(lte(99, 400, "必须 <= 99"))]` | 小于等于 |
-| `len(min, max, code, "msg")` | `#[afast(len(1, 20, 400, "长度 1-20"))]` | 长度限制 |
-| `of(["a","b"], code, "msg")` | `#[afast(of(["a","b"], 400, "须为 a 或 b"))]` | 枚举值 |
+| Rule | Example | Description |
+|------|---------|-------------|
+| `gt(value, code, "msg")` | `#[afast(gt(0, 400, "must > 0"))]` | Greater than |
+| `gte(value, code, "msg")` | `#[afast(gte(1, 400, "must >= 1"))]` | Greater or equal |
+| `lt(value, code, "msg")` | `#[afast(lt(100, 400, "must < 100"))]` | Less than |
+| `lte(value, code, "msg")` | `#[afast(lte(99, 400, "must <= 99"))]` | Less or equal |
+| `len(min, max, code, "msg")` | `#[afast(len(1, 20, 400, "len 1-20"))]` | Length constraint |
+| `of(["a","b"], code, "msg")` | `#[afast(of(["a","b"], 400, "a or b"))]` | Enum of values |
 
-## 条件序列化（marker）
+## Conditional Serialization (Marker)
 
-启用 `marker` feature 后，可通过 `AFast::marker()` 设置一个全局标记字符串
-（默认 `"afast"`）。标记会传递给 afastdata 的 `to_bytes_with` / `from_bytes_with`，
-使标记了 `#[afast(skip_with("marker"))]` 的字段在序列化/反序列化时被条件跳过。
+When the `marker` feature is enabled, `AFast::marker()` sets a global marker
+string (default `"afast"`) passed to afastdata's `to_bytes_with` / `from_bytes_with`.
+Fields annotated with `#[afast(skip_with("marker"))]` are conditionally skipped
+during serialization/deserialization based on the active marker.
 
-支持两种跳过方式：
+Two skip modes are supported:
 
-- **`#[afast(skip)]`** — 字段始终跳过，不参与序列化/反序列化，必须提供 `Default` 实现或初始化函数
-- **`#[afast(skip_with("marker"))]`** — 当 marker 匹配时跳过，不匹配时正常序列化
+- **`#[afast(skip)]`** — Field is always skipped, never serialized/deserialized. Must have a `Default` impl or initialization function.
+- **`#[afast(skip_with("marker"))]`** — Skipped when the marker matches; serialized normally otherwise.
 
-marker 会递归传播到嵌套类型（`Vec<T>`、`Option<T>` 等容器内的类型也会被正确处理）。
+The marker propagates recursively into nested types (`Vec<T>`, `Option<T>`, etc.).
 
-生成的客户端代码（TS/JS/KT/RS）和 API 文档会自动排除被跳过的字段。
+Generated client code (TS/JS/KT/RS) and API docs automatically exclude skipped fields.
 
 ```rust
 #[derive(AFastSerialize, AFastDeserialize, Tag)]
-#[tag("用户信息")]
+#[tag("User info")]
 struct User {
     name: String,
     #[afast(skip)]
-    internal_secret: String,        // 始终跳过
+    internal_secret: String,        // always skipped
     #[afast(skip_with("afast"))]
-    internal_note: String,          // marker 为 "afast" 时跳过
+    internal_note: String,          // skipped when marker is "afast"
 }
 
 let app = AFast::new()
-    .marker("afast")  // 设置标记，默认值即为 "afast"
+    .marker("afast")  // set marker; default is already "afast"
     .service(svc)
     .http("0.0.0.0:5000");
 ```
 
-不启用 `marker` feature 时，`serialize` / `deserialize` 使用普通的 `to_bytes` / `from_bytes`，
-所有字段始终参与序列化。但 `#[afast(skip)]` 的字段仍会被生成的客户端代码排除。
+Without the `marker` feature, `serialize` / `deserialize` use plain
+`to_bytes` / `from_bytes` and all fields are always included.
+However, `#[afast(skip)]` fields are still excluded from generated client code.
 
-## 传输层
+## Rate Limiting (rate-limit)
+
+Enable the `rate-limit` feature to apply named rate-limit policies to handlers.
+Supports HTTP, WebSocket, and TCP transports.
+
+### Configuration
+
+```rust
+use afast::{RateLimitConfig, RateLimitPolicy, RateLimitKey, Algorithm};
+
+let app = AFast::new()
+    .state(AppState::new())
+    .rate_limit(
+        RateLimitConfig::new()
+            // Login: max 5 requests per IP per minute
+            .policy(RateLimitPolicy {
+                id: "login".into(),
+                max_requests: 5,
+                window_secs: 60,
+                key: RateLimitKey::Ip,
+                algorithm: Algorithm::SlidingWindow,
+            })
+            // Default policy: applied to handlers without explicit config
+            .default_policy("global")
+            .policy(RateLimitPolicy {
+                id: "global".into(),
+                max_requests: 100,
+                window_secs: 1,
+                key: RateLimitKey::Ip,
+                algorithm: Algorithm::SlidingWindow,
+            }),
+    )
+    .service(svc)
+    .http("0.0.0.0:5000");
+```
+
+### Binding a Handler
+
+Use `#[handler(rate_limit("policy_id"))]` to bind a handler to a policy:
+
+```rust
+#[handler(rate_limit("login"), desc("User login"))]
+async fn login(
+    state: State<AppState>,
+    req: Data<LoginRequest>,
+) -> Result<LoginResponse> {
+    // ...
+}
+```
+
+Handlers without `rate_limit` automatically use the `default_policy`. If no default
+is set, they are not rate-limited. Referencing a non-existent policy ID also results
+in no limiting.
+
+### Rate Limit Keys
+
+| Key | Description | HTTP | WebSocket | TCP |
+|-----|-------------|------|-----------|-----|
+| `Ip` | Client IP (supports `X-Forwarded-For`) | ✅ | ✅ | ✅ |
+| `Header("name")` | HTTP header value (e.g. API Key) | ✅ | ✅ (cached at handshake) | ⏭ skipped |
+| `Connection` | Per-connection (WS/TCP message rate) | ⏭ skipped | ✅ | ✅ |
+| `Global` | Shared global counter | ✅ | ✅ | ✅ |
+
+### Storage Backend
+
+The default `InMemoryStore` keeps counters in process memory (cleared on restart).
+Implement `RateLimitStore` for a custom backend:
+
+```rust
+use afast::{RateLimitStore, Algorithm};
+
+struct RedisStore { /* ... */ }
+
+impl RateLimitStore for RedisStore {
+    fn try_acquire<'a>(
+        &'a self,
+        policy_id: &'a str,
+        key: &'a str,
+        max_requests: u64,
+        window_secs: u64,
+        algorithm: &'a Algorithm,
+        is_connection: bool,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move {
+            // Implement with Redis INCR + EXPIRE ...
+            true
+        })
+    }
+}
+
+let app = AFast::new()
+    .rate_limit(
+        RateLimitConfig::new()
+            .store(Arc::new(RedisStore::new()))
+            .policy(RateLimitPolicy { /* ... */ }),
+    );
+```
+
+### Rejection Response
+
+- **HTTP**: Status `429 Too Many Requests`, body: `{"code":-90012,"message":"Too many requests"}`
+- **WebSocket / TCP**: Error frame with code `-90012`
+
+Customize via `RateLimitConfig::rejected_code()` and `rejected_message()`.
+
+## Transport Layer
 
 ### HTTP
 
-HTTP 服务端端点：
+HTTP server endpoints:
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/_api` | 二进制 Handler 分发 |
-| GET | `/_ws` | WebSocket 升级（合并模式） |
-| GET | `/code/{service}/{lang}` | 按需代码生成（需 `code`） |
-| GET | `/doc` | API 文档首页（需 `doc`） |
-| GET | `/doc/{service}` | 单服务文档页（需 `doc`） |
-| * | 普通路由 | RESTful 端点（需 `ordinary-http`） |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/_api` | Binary handler dispatch |
+| GET | `/_ws` | WebSocket upgrade (merged mode) |
+| GET | `/code/{service}/{lang}` | On-demand code gen (requires `code`) |
+| GET | `/doc` | API docs index (requires `doc`) |
+| GET | `/doc/{service}` | Service-specific docs (requires `doc`) |
+| * | Ordinary routes | RESTful endpoints (requires `ordinary-http`) |
 
-**HTTP 响应格式：**
-- 成功：`[0u8][0i64][data: bytes]`
-- 错误：`[1u8][code: i64][message: bytes]`
+**HTTP Response Format:**
+- Success: `[0u8][0i64][data: bytes]`
+- Error: `[1u8][code: i64][message: bytes]`
 
 ### WebSocket
 
-WS 协议帧格式：
+WS frame format:
 
 ```
-请求帧:  [req_id: SeqId][handler_id: u32][len: Len][payload]
-推送帧:  [0: SeqId][conn_id: u32][len: Len][payload]
-心跳帧:  [0xFFFFFFFF: SeqId][len: Len][conn_id1: u32]...
+Request:  [req_id: SeqId][handler_id: u32][len: Len][payload]
+Push:     [0: SeqId][conn_id: u32][len: Len][payload]
+Heartbeat:[0xFFFFFFFF: SeqId][len: Len][conn_id1: u32]...
 ```
 
-**WS 响应格式：**
-- 成功：`[req_id: SeqId][len: Len][0u8][0i64][data]`
-- 错误：`[req_id: SeqId][len: Len][1u8][code: i64][message_bytes]`
+**WS Response Format:**
+- Success: `[req_id: SeqId][len: Len][0u8][0i64][data]`
+- Error: `[req_id: SeqId][len: Len][1u8][code: i64][message_bytes]`
 
-`SeqId` 类型由 `seq64` feature 控制（`i32` 或 `i64`），`Len` 类型由 `len64`
-feature 控制（`u32` 或 `u64`）。
+`SeqId` type is controlled by the `seq64` feature (`i32` or `i64`), `Len` type
+by the `len64` feature (`u32` or `u64`).
 
 ### TCP
 
-TCP 使用 4 字节大端长度前缀帧协议，帧内是完整二进制请求载荷。
-适用于嵌入式设备或需要原始 TCP 通信的场景。
+TCP uses 4-byte big-endian length-prefix framing with complete binary payloads
+per frame. Suitable for embedded devices or raw TCP scenarios.
 
-### HTTP + WS 端口合并
+### HTTP + WS Port Merging
 
-当 `ws_addr` 和 `http_addr` 设置为**同一个地址**时，AFast 将 WebSocket
-合并到 HTTP 服务端，通过 HTTP Upgrade 机制处理 WS 连接，不再启动独立的
-WS 监听器。
+When `ws_addr` and `http_addr` are set to the **same address**, AFast merges
+WebSocket into the HTTP server via HTTP Upgrade, skipping a separate WS listener.
 
 ```rust
-// 同一端口同时提供 HTTP 和 WebSocket
+// Same port for both HTTP and WebSocket
 let app = AFast::new()
     .service(svc)
     .ws("0.0.0.0:5000")
-    .http("0.0.0.0:5000");  // 同一地址，自动合并
+    .http("0.0.0.0:5000");  // Same address, auto-merged
 ```
 
 ```rust
-// 不同端口分开监听
+// Separate ports
 let app = AFast::new()
     .service(svc)
-    .ws("0.0.0.0:3000")     // WS 独立端口
-    .http("0.0.0.0:5000");  // HTTP 独立端口
+    .ws("0.0.0.0:3000")     // Dedicated WS port
+    .http("0.0.0.0:5000");  // Dedicated HTTP port
 ```
 
-合并模式下，客户端自动连接 `ws://host:5000/_ws`。生成的客户端代码已兼容两种模式。
+In merged mode, clients connect via `ws://host:5000/_ws`. Generated client code
+handles both modes automatically.
 
-## 普通 HTTP（ordinary-http）
+## Ordinary HTTP
 
-启用 `ordinary-http` feature 后，在 `service!` 宏中使用 `get`/`post`/`put`/
-`patch`/`delete` 定义 RESTful 路由。
+With `ordinary-http`, define RESTful routes using `get`/`post`/`put`/
+`patch`/`delete` inside the `service!` macro.
 
-### 定义普通 Handler
+### Defining an Ordinary Handler
 
 ```rust
 use afast::{get, Query, Param, Body, Header, Json, HttpResult};
@@ -489,25 +604,26 @@ async fn get_user(
 }
 ```
 
-### 响应类型
+### Response Types
 
-| 类型 | HTTP 状态码 | Content-Type |
-|------|-----------|-------------|
+| Type | HTTP Status | Content-Type |
+|------|-------------|-------------|
 | `Json<T>` | 200 | `application/json` |
 | `Text` | 200 | `text/plain` |
 | `Html` | 200 | `text/html` |
-| `File` | 200 | 自定义 + `Content-Disposition: attachment` |
-| `Status(code)` | 自定义 | — |
+| `File` | 200 | Custom + `Content-Disposition: attachment` |
+| `Status(code)` | Custom | — |
 | `Redirect(url)` | 302 | `Location` header |
-| `Result<T>` | 200 / 错误码 | `application/json`（错误时） |
+| `Result<T>` | 200 / Error code | `application/json` (on error) |
 
-## 长连接（Chat）
+## Long Connections (Chat)
 
-使用 `Receiver` 和 `Sender` 的 Handler 自动识别为长连接模式。
-服务端分配 `conn_id`，初始响应携带 `conn_id`，后续消息通过 push 帧双向通信。
+Handlers using `Receiver`/`Sender` are auto-detected as long-connection mode.
+The server allocates a `conn_id`, carried in the initial response; subsequent
+messages use push frames for bidirectional communication.
 
 ```rust
-#[handler(desc("聊天"))]
+#[handler(desc("Chat"))]
 async fn chat(
     state: State<AppState>,
     auth: Custom<Auth>,
@@ -524,14 +640,14 @@ async fn chat(
 }
 ```
 
-生成的客户端为长连接 Handler 返回 `Socket` 对象，
-提供 `send()`/`close()` 方法和 `onMessage` 回调。
+Generated clients return a `Socket` object for long-connection handlers, with
+`send()`/`close()` and `onMessage` callback.
 
-## 二进制协议
+## Binary Protocol
 
-### 数据类型映射
+### Type Mapping
 
-| Rust 类型 | TS/JS 类型 | Kotlin 类型 |
+| Rust Type | TS/JS Type | Kotlin Type |
 |-----------|-----------|------------|
 | `i8`~`i64`, `u8`~`u64`, `f32`, `f64` | `number` | `Int`/`Long`/`Float`/`Double` |
 | `bool` | `boolean` | `Boolean` |
@@ -542,33 +658,34 @@ async fn chat(
 | struct | `{ field: Type }` | `data class` |
 | enum | `{ tag: 'Variant', data: ... }` | `sealed class` |
 
-### 错误码
+### Error Codes
 
-系统保留错误码范围 `-90011` ~ `-90000`，用户自定义错误不能使用此范围。
+System reserved error codes range from `-90011` to `-90000`. User-defined errors
+must not use this range.
 
-| 常量 | 值 | 说明 |
-|------|-----|------|
-| `CODE_SIGNAL` | -90000 | 系统信号（如 Ctrl+C） |
-| `CODE_MSG_TOO_SHORT` | -90001 | 消息太短 |
-| `CODE_PAYLOAD_MISMATCH` | -90002 | 载荷长度不匹配 |
-| `CODE_SERIALIZE` | -90003 | 序列化/反序列化错误 |
-| `CODE_STATE_NOT_FOUND` | -90004 | State 类型未注册 |
-| `CODE_HANDLER` | -90005 | Handler 执行错误 |
-| `CODE_INVALID_PARAM` | -90006 | 参数无效 |
-| `CODE_IO` | -90007 | I/O 错误 |
-| `CODE_WS` | -90008 | WebSocket 错误 |
-| `CODE_HTTP` | -90009 | HTTP 错误 |
-| `CODE_TCP` | -90010 | TCP 错误 |
-| `CODE_LONG_CONNECTION_NOT_SUPPORTED` | -90011 | HTTP 模式不支持长连接 |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `CODE_SIGNAL` | -90000 | OS signal (e.g., Ctrl+C) |
+| `CODE_MSG_TOO_SHORT` | -90001 | Message too short |
+| `CODE_PAYLOAD_MISMATCH` | -90002 | Payload length mismatch |
+| `CODE_SERIALIZE` | -90003 | Serialization/deserialization error |
+| `CODE_STATE_NOT_FOUND` | -90004 | State type not registered |
+| `CODE_HANDLER` | -90005 | Handler execution error |
+| `CODE_INVALID_PARAM` | -90006 | Invalid parameter |
+| `CODE_IO` | -90007 | I/O error |
+| `CODE_WS` | -90008 | WebSocket error |
+| `CODE_HTTP` | -90009 | HTTP error |
+| `CODE_TCP` | -90010 | TCP error |
+| `CODE_LONG_CONNECTION_NOT_SUPPORTED` | -90011 | Long connections unsupported in HTTP mode |
 
 ```rust
-// 自定义错误（code 必须在保留范围之外）
-return Err(afast::Error::custom(400, "请求参数无效"));
+// Custom error (code must be outside the reserved range)
+return Err(afast::Error::custom(400, "invalid request parameter"));
 ```
 
-## 代码生成
+## Code Generation
 
-### 静态生成（编译时写文件）
+### Static Generation (compile-time file output)
 
 ```rust
 use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType};
@@ -594,7 +711,7 @@ let app = AFast::new()
     ]);
 ```
 
-### 动态生成（HTTP 端点）
+### Dynamic Generation (HTTP endpoint)
 
 ```
 GET /code/api/ts?call=fetch,ws
@@ -603,58 +720,59 @@ GET /code/pay/kt?call=http,ws,tcp
 GET /code/api/rs?call=tcp-async
 ```
 
-### 支持的传输类型
+### Supported Transport Types
 
-**TS/JS：**
+**TS/JS:**
 
-| 值 | 对应 API |
-|----|---------|
-| `fetch` | 浏览器 `fetch` |
-| `ws` | 浏览器 `WebSocket` |
+| Value | API |
+|-------|-----|
+| `fetch` | Browser `fetch` |
+| `ws` | Browser `WebSocket` |
 | `nodetcp` | Node.js `net` |
 | `buntcp` | Bun `Bun.connect` |
 | `unirequest` | UniApp `uni.request` |
 | `uniws` | UniApp `uni.connectSocket` |
-| `wxrequest` | 微信小程序 `wx.request` |
-| `wxws` | 微信小程序 `wx.connectSocket` |
+| `wxrequest` | WeChat Mini Program `wx.request` |
+| `wxws` | WeChat Mini Program `wx.connectSocket` |
 
-**Kotlin：**
+**Kotlin:**
 
-| 值 | 对应 API |
-|----|---------|
+| Value | API |
+|-------|-----|
 | `http` / `fetch` | `java.net.HttpURLConnection` |
 | `ws` | `java.net.http.WebSocket` |
 | `tcp` | `java.net.Socket` |
 
-**Rust：**
+**Rust:**
 
-| 值 | 对应 API |
-|----|----------|
-| `tcp-async` | `tokio::net::TcpStream`（异步） |
-| `tcp-sync` | `std::net::TcpStream`（同步） |
+| Value | API |
+|-------|-----|
+| `tcp-async` | `tokio::net::TcpStream` (async) |
+| `tcp-sync` | `std::net::TcpStream` (sync) |
 
-### 客户端使用方法
+### Client Usage
 
 ```typescript
 import { ApiClient } from './api';
 
-// 独立 WS 端口
+// Dedicated WS port
 const wsClient = new ApiClient('ws://localhost:3000');
 const wsResult = await wsClient.apis.user.list_users({ page: 1, size: 20 });
 
-// 独立 HTTP 端口
+// Dedicated HTTP port
 const httpClient = new ApiClient('http://localhost:5000');
 const httpResult = await httpClient.apis.user.list_users({ page: 1, size: 20 });
 
-// 合并模式（WS 和 HTTP 同一端口）
+// Merged mode (WS and HTTP on the same port)
 const mergedClient = new ApiClient('ws://localhost:5000');
-// 自动连接 ws://localhost:5000/_ws
+// Auto-connects to ws://localhost:5000/_ws
 ```
 
-客户端传输模式在构造时确定，之后不可切换。每种传输类型有对应的策略方法
-（`_callWs` / `_callHttp` / `_callTcp`），运行时通过函数引用分发。
+The client transport mode is fixed at construction time. Each transport type
+has a strategy method (`_callWs` / `_callHttp` / `_callTcp`), dispatched via
+function reference at runtime.
 
-**JavaScript 版本**使用 JSDoc 提供类型提示：
+**JavaScript** uses JSDoc for type hints:
 
 ```javascript
 /**
@@ -670,18 +788,18 @@ const mergedClient = new ApiClient('ws://localhost:5000');
  */
 ```
 
-嵌套类型完整展开，不会用 `Object` 带过。
+Nested types are fully expanded — never replaced with `Object`.
 
-## 客户端缓存
+## Client-Side Caching
 
-通过 `cache(seconds)` 属性，可以为 Handler 启用客户端缓存，减少重复请求。
+The `cache(seconds)` attribute enables client-side caching for handlers, reducing redundant requests.
 
-### 服务端
+### Server-Side
 
-`#[handler]` 和普通 HTTP 宏（`#[get]`、`#[post]` 等）均支持 `cache(seconds)`：
+Both `#[handler]` and ordinary HTTP macros (`#[get]`, `#[post]`, etc.) support `cache(seconds)`:
 
 ```rust
-#[handler(desc("用户列表"), cache(60))]
+#[handler(desc("List users"), cache(60))]
 async fn list_users(
     state: State<AppState>,
     req: Data<ListUsersRequest>,
@@ -690,38 +808,38 @@ async fn list_users(
 }
 ```
 
-### 生成的客户端方法
+### Generated Client Methods
 
 ```typescript
-// 缓存 60 秒，force 默认为 false
+// Cached for 60 seconds, force defaults to false
 const users = await client.apis.admin.listUsers({ page: 1, size: 20 });
-// 60 秒内相同参数直接返回缓存数据，不发请求
+// Within 60 seconds, same params return cached data without a network request
 
-// force = true 强制刷新缓存
+// force = true forces a fresh fetch
 const fresh = await client.apis.admin.listUsers({ page: 1, size: 20 }, true);
 ```
 
-### 缓存策略
+### Cache Strategy
 
-- **类级别** — 缓存存储在类的 `static _cache` 上，所有实例共享
-- **参数感知** — 缓存键由方法名 + 序列化的参数组成，参数变化自动重新请求
-- **惰性缓存** — `force = false` 且缓存未过期时直接返回；`force = true` 忽略缓存
-- **多语言一致** — TypeScript、JavaScript、Kotlin、Rust 客户端使用相同的缓存策略
+- **Class-level** — Cache is stored on the class `static _cache`, shared across all instances
+- **Param-aware** — Cache key is composed of method name + serialized params; changed params trigger a fresh request
+- **Lazy caching** — `force = false` with valid cache returns immediately; `force = true` bypasses cache
+- **Cross-language** — TypeScript, JavaScript, Kotlin, and Rust clients use the same caching strategy
 
-TS 客户端缓存存储结构：
+TS client cache structure:
 
 ```typescript
 private static _cache = new Map<string, { data: any; expiry: number }>();
 ```
 
-JS 客户端：
+JS client:
 
 ```javascript
 /** @type {Map<string, { data: any; expiry: number }>} */
 static _cache = new Map();
 ```
 
-Kotlin 客户端：
+Kotlin client:
 
 ```kotlin
 companion object {
@@ -729,84 +847,84 @@ companion object {
 }
 ```
 
-## 关于 TextEncoder / TextDecoder
+## About TextEncoder / TextDecoder
 
-生成的客户端代码（包括 Socket 类和二进制序列化）使用了 `TextEncoder` 和
-`TextDecoder` API。这两个 API 在以下平台**不可用**：
+The generated client code (including Socket and binary serialization) uses the
+`TextEncoder` and `TextDecoder` APIs. These are **unavailable** on:
 
-- **React Native**（所有版本）
-- **微信小程序**（非标准 Web API 环境）
-- **较旧的浏览器**（Chrome < 38, Firefox < 19, Safari < 10.1, IE 全版本）
+- **React Native** (all versions)
+- **WeChat Mini Programs** (non-standard Web API environment)
+- **Older browsers** (Chrome < 38, Firefox < 19, Safari < 10.1, all IE versions)
 
-可以通过手动在全局变量上实现 `TextEncoder` 和 `TextDecoder` 来解决
+This can be resolved by manually implementing `TextEncoder` and `TextDecoder` on global.
 
-### 解决方案
+### Solutions
 
-1. **使用 polyfill**（推荐）：
+1. **Use a polyfill** (recommended):
 
 ```bash
 npm install text-encoding
 ```
 
 ```javascript
-import 'text-encoding';  // 应用入口处引入
+import 'text-encoding';  // At your application entry point
 ```
 
-2. **React Native**：RN 0.72+ 已内置支持。旧版本可用 `react-native-polyfill-globals`：
+2. **React Native**: RN 0.72+ has built-in support. For older versions:
 
 ```javascript
 import { polyfill as polyfillEncoding } from 'react-native-polyfill-globals/src/encoding';
 polyfillEncoding();
 ```
 
-3. **微信小程序 / UniApp**：使用 `wxrequest` / `wxws` / `unirequest` / `uniws`
-传输类型，生成的代码走平台原生 API，不依赖 TextEncoder。
+3. **WeChat Mini Programs / UniApp**: Use `wxrequest` / `wxws` / `unirequest` /
+`uniws` transport types — generated code uses platform-native APIs.
 
-4. **自定义替换**：如果完全无法使用 polyfill，可在生成的客户端中替换 `_writer`
-（编码）和 `_reader`（解码）方法。
+4. **Custom replacement**: Replace the `_writer` (encode) and `_reader` (decode)
+methods in the generated client with your platform's native serialization.
 
-涉及 TextEncoder/TextDecoder 的位置：
-- **Socket 类** `send()` — 将字符串/Uint8Array 编码为二进制帧
-- **二进制协议序列化** — `Data<T>` / `Custom<T>` 的参数序列化/反序列化
-- 纯 JSON 普通 HTTP 请求（`Body<T>`）不需要 TextEncoder
+Where TextEncoder/TextDecoder is needed:
+- **Socket class** `send()` — encoding strings/Uint8Arrays into binary frames
+- **Binary protocol** — `Data<T>` / `Custom<T>` serialization/deserialization
+- Plain JSON HTTP (`Body<T>`) does NOT require TextEncoder
 
-## 交互式文档
+## Interactive Documentation
 
-启用 `doc` feature 后，访问 `http://host:port/doc` 获得交互式 API 文档：
+With the `doc` feature, visit `http://host:port/doc` for interactive API docs:
 
 ```rust
 let app = AFast::new()
     .service(svc)
     .document(afast::DocConfig::new()
-        .title("我的 API 文档")
-        .output("./docs")  // 同时输出静态 HTML 到磁盘
+        .title("My API Documentation")
+        .output("./docs")  // Also write static HTML to disk
     )
     .http("0.0.0.0:5000");
 ```
 
-- `GET /doc` — 首页，列出所有服务
-- `GET /doc/{service}` — 单服务文档，包含类型定义和在线测试面板
-- 支持深色/浅色主题切换
-- 在线测试面板可直接发送真实请求到服务器
+- `GET /doc` — Index page listing all services
+- `GET /doc/{service}` — Service docs with type definitions and online test panel
+- Dark/light theme toggle
+- Online test panel can send real requests to the server
 
-## 项目结构
+## Project Structure
 
 ```
-afast/           — 主框架 crate（核心类型、State、传输层、代码生成）
-afast-macros/    — 过程宏（#[handler]、register!、#[derive(Tag)]）
-example/         — 示例项目（含 HTTP、WS、TCP、文档等完整用法）
+afast/           — Main framework crate (core types, State, transports, code generation)
+afast-macros/    — Proc macros (#[handler], register!, #[derive(Tag)])
+example/         — Example project (full usage including HTTP, WS, TCP, docs)
 ```
 
-### 依赖关系
+### Dependencies
 
 - `afast` → `afast-macros`, `afastdata`, `tokio`
 - `afast-macros` → `syn`, `quote`, `proc-macro2`
-- 用户 crate 需要间接依赖 `afastdata-core`（`#[derive(Tag)]` 展开后的代码引用它）
+- User crates indirectly depend on `afastdata-core` (referenced by `#[derive(Tag)]` expanded code)
 
-## 测试
+## Testing
 
 ```bash
-# 启动示例服务器
+# Start the example server
 cargo run -p example
 ```
 

@@ -1,4 +1,23 @@
-「方案选单」# Changelog
+# Changelog
+
+## [0.1.8]
+
+### Added
+
+- **`rate-limit` feature — 请求限流**: 新增基于命名策略的限流模块，支持 HTTP / WebSocket / TCP 全传输层。
+  - `RateLimitConfig` 声明命名策略，handler 通过 `#[handler(rate_limit("policy_id"))]` 绑定。
+  - `default_policy("id")` 设置默认策略：未显式配置限流的接口自动使用默认策略。
+  - 支持四种限流键：`Ip`（按客户端 IP）、`Header`（按 HTTP 头）、`Connection`（按单连接，WS/TCP 专用）、`Global`（全局共享）。
+  - 三种算法：`FixedWindow`（固定窗口）、`SlidingWindow`（滑动窗口）、`TokenBucket`（令牌桶）。
+  - 可插拔存储后端：`RateLimitStore` trait 允许用户自定义存储（如 Redis），内置 `InMemoryStore` 默认实现。
+  - 被限流时返回 `Error::RateLimited`（code: `-90012`），HTTP 层返回 `429 Too Many Requests`。
+
+### Changed
+
+- `HandlerMeta` 新增 `rate_limit_policy` 字段，`#[handler]` 宏支持 `rate_limit("...")` 属性。
+- `AFast` builder 新增 `.rate_limit(config)` 方法。
+- `error` 模块新增 `CODE_RATE_LIMITED` 常量和 `Error::RateLimited` 变体。
+- `Algorithm` 新增 `Debug + Clone` derive，`RateLimitKey` 新增 `Debug` derive。
 
 ## [0.1.7]
 

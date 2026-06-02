@@ -294,6 +294,9 @@ pub struct AFast {
     /// HTTPS listen address (`"host:port"`), if bound.
     #[cfg(feature = "tls")]
     https_addr: Option<String>,
+    /// Rate-limit configuration, if enabled.
+    #[cfg(feature = "rate-limit")]
+    rate_limit_config: Option<crate::rate_limit::RateLimitConfig>,
 }
 
 impl AFast {
@@ -323,6 +326,8 @@ impl AFast {
             tls_config: None,
             #[cfg(feature = "tls")]
             https_addr: None,
+            #[cfg(feature = "rate-limit")]
+            rate_limit_config: None,
         }
     }
 
@@ -477,6 +482,16 @@ impl AFast {
         self
     }
 
+    /// Sets the rate-limit configuration.
+    ///
+    /// Requires the `rate-limit` feature. Each handler can bind to a named
+    /// policy via `#[handler(rate_limit("policy_id"))]`.
+    #[cfg(feature = "rate-limit")]
+    pub fn rate_limit(mut self, config: crate::rate_limit::RateLimitConfig) -> Self {
+        self.rate_limit_config = Some(config);
+        self
+    }
+
     /// Writes interactive API documentation as static HTML files to the
     /// given directory.
     ///
@@ -577,7 +592,48 @@ impl AFast {
                 #[cfg(feature = "doc")]
                 let doc_title = self.doc_config.and_then(|c| c.title);
 
+                // Build the rate limiter (if configured).
+                #[cfg(feature = "rate-limit")]
+                let (rate_limiter, rate_handler_names) = {
+                    // Collect all HandlerMeta references for the limiter to scan.
+                    let all_meta: Vec<&crate::handler::HandlerMeta> = self
+                        .services
+                        .iter()
+                        .flat_map(|svc| svc.handlers.iter())
+                        .map(|h| h.meta)
+                        .collect();
+                    match self.rate_limit_config {
+                        Some(cfg) => (
+                            Some(std::sync::Arc::new(crate::rate_limit::RateLimiter::new(
+                                cfg, &all_meta,
+                            ))),
+                            {
+                                // Build handler_id → handler_name mapping.
+                                let mut names = Vec::with_capacity(handlers.len());
+                                for i in 0..handlers.len() {
+                                    let name = self
+                                        .services
+                                        .iter()
+                                        .flat_map(|svc| svc.handlers.iter())
+                                        .find(|h| h.offset == i)
+                                        .map(|h| h.meta.name)
+                                        .unwrap_or("");
+                                    names.push(name.to_string());
+                                }
+                                names
+                            },
+                        ),
+                        None => (None, Vec::new()),
+                    }
+                };
+
                 let mut handles: Vec<tokio::task::JoinHandle<Result<(), Error>>> = Vec::new();
+
+                // Pre-clone rate limiter for use across multiple server spawns.
+                #[cfg(feature = "rate-limit")]
+                let rate_limiter_outer = rate_limiter.clone();
+                #[cfg(feature = "rate-limit")]
+                let rate_handler_names_outer = rate_handler_names.clone();
 
                 // Detect if WS and HTTP/HTTPS share the same address
                 #[cfg(all(feature = "ws", feature = "http"))]
@@ -610,6 +666,10 @@ impl AFast {
 
                         let state_clone = state.clone();
                         let handlers_clone = handlers.clone();
+                        #[cfg(feature = "rate-limit")]
+                        let rl_base = rate_limiter_outer.clone();
+                        #[cfg(feature = "rate-limit")]
+                        let hn_base = rate_handler_names_outer.clone();
                         let mut shutdown_rx = shutdown_tx.subscribe();
 
                         let server = tokio::spawn(async move {
@@ -620,8 +680,21 @@ impl AFast {
                                             Ok((stream, _)) => {
                                                 let state = state_clone.clone();
                                                 let handlers = handlers_clone.clone();
+                                                #[cfg(feature = "rate-limit")]
+                                                let rl = rl_base.clone();
+                                                #[cfg(feature = "rate-limit")]
+                                                let hn = hn_base.clone();
                                                 tokio::spawn(async move {
-                                                    crate::app::transport::handle_connection(stream, state, handlers).await;
+                                                    crate::app::transport::handle_connection(
+                                                        stream,
+                                                        state,
+                                                        handlers,
+                                                        #[cfg(feature = "rate-limit")]
+                                                        rl,
+                                                        #[cfg(feature = "rate-limit")]
+                                                        hn,
+                                                    )
+                                                    .await;
                                                 });
                                             }
                                             Err(e) => eprintln!("afast: accept error: {}", e),
@@ -652,6 +725,10 @@ impl AFast {
                     let ws_addr_clone = self.ws_addr.clone();
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let rl = rate_limiter_outer.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let hn = rate_handler_names_outer.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -671,6 +748,10 @@ impl AFast {
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
                                 tls_config: None,
+                                #[cfg(feature = "rate-limit")]
+                                rate_limiter: rl,
+                                #[cfg(feature = "rate-limit")]
+                                handler_names: hn,
                             },
                             shutdown_rx,
                         )
@@ -696,6 +777,10 @@ impl AFast {
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
                     let tls_config = self.tls_config.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let rl = rate_limiter_outer.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let hn = rate_handler_names_outer.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -715,6 +800,10 @@ impl AFast {
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
                                 tls_config,
+                                #[cfg(feature = "rate-limit")]
+                                rate_limiter: rl,
+                                #[cfg(feature = "rate-limit")]
+                                handler_names: hn,
                             },
                             shutdown_rx,
                         )
@@ -736,6 +825,10 @@ impl AFast {
                     let state_clone = state.clone();
                     let handlers_clone = handlers.clone();
                     let mut shutdown_rx = shutdown_tx.subscribe();
+                    #[cfg(feature = "rate-limit")]
+                    let rl = rate_limiter_outer.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let hn = rate_handler_names_outer.clone();
 
                     let server = tokio::spawn(async move {
                         loop {
@@ -745,8 +838,25 @@ impl AFast {
                                         Ok((stream, _)) => {
                                             let state = state_clone.clone();
                                             let handlers = handlers_clone.clone();
+                                            #[cfg(feature = "rate-limit")]
+                                            let rl = rl.clone();
+                                            #[cfg(feature = "rate-limit")]
+                                            let hn = hn.clone();
+                                            #[cfg(feature = "rate-limit")]
+                                            let rl = rl.clone();
+                                            #[cfg(feature = "rate-limit")]
+                                            let hn = hn.clone();
                                             tokio::spawn(async move {
-                                                crate::app::transport::handle_tcp_connection(stream, state, handlers).await;
+                                                crate::app::transport::handle_tcp_connection(
+                                                    stream,
+                                                    state,
+                                                    handlers,
+                                                    #[cfg(feature = "rate-limit")]
+                                                    rl,
+                                                    #[cfg(feature = "rate-limit")]
+                                                    hn,
+                                                )
+                                                .await;
                                             });
                                         }
                                         Err(e) => eprintln!("afast: tcp accept error: {}", e),
