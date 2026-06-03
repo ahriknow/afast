@@ -5,8 +5,14 @@ language = "en"
 src = "src"
 description = "A high-performance Rust web backend framework"
 
+[rust]
+edition = "2024"
+
 [build]
 build-dir = "book"
 
 [output.html]
 git-repository-url = "https://github.com/ahriknow/afast"
+default-theme = "latte"
+preferred-dark-theme = "mocha"
+additional-css = ["./theme/catppuccin.css"]

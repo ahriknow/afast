@@ -4,7 +4,7 @@
 
 | Rust Type | TS/JS Type | Kotlin Type |
 |-----------|-----------|------------|
-| `i8`~`i64`, `u8`~`u64`, `f32`, `f64` | `number` | `Int`/`Long`/`Float`/`Double` |
+| `i8` ~ `i64`, `u8` ~ `u64`, `f32`, `f64` | `number` | `Int`/`Long`/`Float`/`Double` |
 | `bool` | `boolean` | `Boolean` |
 | `String`, `&str` | `string` | `String` |
 | `Vec<u8>` | `Uint8Array` | `ByteArray` |

@@ -23,16 +23,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mdbook
-        uses: peaceiris/actions-mdbook@v2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache mdbook
+        uses: actions/cache@v4
         with:
-          mdbook-version: 'latest'
+          path: ~/.cargo/bin/mdbook
+          key: mdbook-${{ runner.os }}
+
+      - name: Install mdbook
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/mdbook" ]; then
+            cargo install mdbook
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build docs
         run: mdbook build docs
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: docs/book
 
