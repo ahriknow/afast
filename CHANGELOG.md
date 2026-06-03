@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.9]
+
+### Added
+
+- **`hook` feature — 生命周期钩子**: 新增请求/连接生命周期钩子系统，支持全局和 Service 级别。
+  - `Hook` trait：实现 `before_request` 和 `on_connect` 方法。
+  - `RequestGuard` trait：实现 `on_response` 和 `on_error` 方法。
+  - `ConnectionGuard` trait：实现 `on_disconnect` 方法。
+  - `RequestContext` 提供 handler 名称、描述、传输层类型、handler_id、共享状态等上下文。
+  - 全局钩子：`AFast::hook(my_hook)` 注册，所有 handler 生效。
+  - Service 级钩子：`service!("name" => { ... }).hook(my_hook)` 注册，仅该 service 的 handler 生效。
+  - 多个钩子按注册顺序执行（入方向正序，出方向反序 — 洋葱模型）。
+  - 长连接 handler 支持完整生命周期：`on_connect` → `before_request` → `on_response`/`on_error` → `on_disconnect`。
+- **`HandlerInvoker::meta()` 方法**: `HandlerInvoker` trait 新增 `meta()` 方法，返回 `Option<&'static HandlerMeta>`，供钩子获取 handler 元数据。
+
+### Changed
+
+- **`RateLimitStore` trait 重构**: 简化为 `incr`/`get`/`set`/`delete` 四个基础 KV 操作，算法逻辑（固定窗口/滑动窗口/令牌桶）由框架内部实现。用户实现 Redis 等外部存储时只需实现四个原子操作。
+
 ## [0.1.8]
 
 ### Added

@@ -3,6 +3,9 @@ use afast::{
     RateLimitKey, RateLimitPolicy, RsCallType, register, service,
 };
 
+#[cfg(feature = "hook")]
+use afast::hook::{ConnectionGuard, Hook, RequestContext, RequestGuard};
+
 mod handler;
 mod state;
 
@@ -18,6 +21,82 @@ use handler::chat::chat_echo;
 use handler::{health, info, ping};
 use state::AppState;
 
+// ─── Hook Implementations ────────────────────────────────────────
+
+/// Logs every request with handler name and duration.
+#[cfg(feature = "hook")]
+struct LoggingHook;
+
+#[cfg(feature = "hook")]
+struct HookTimer(std::time::Instant);
+
+#[cfg(feature = "hook")]
+struct HookConn;
+
+#[cfg(feature = "hook")]
+impl Hook for LoggingHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        eprintln!("[hook] → {} ({})", ctx.handler_name, ctx.transport);
+        Some(Box::new(HookTimer(std::time::Instant::now())))
+    }
+
+    fn on_connect(&self, ctx: &RequestContext) -> Option<Box<dyn ConnectionGuard>> {
+        eprintln!("[hook] ↕ connect: {} ({})", ctx.handler_name, ctx.transport);
+        Some(Box::new(HookConn))
+    }
+}
+
+#[cfg(feature = "hook")]
+impl RequestGuard for HookTimer {
+    fn on_response(&mut self, ctx: &RequestContext, _resp: &[u8]) {
+        eprintln!("[hook] ← {} OK ({:?})", ctx.handler_name, self.0.elapsed());
+    }
+    fn on_error(&mut self, ctx: &RequestContext, err: &afast::Error) {
+        eprintln!(
+            "[hook] ✗ {} error: {} ({:?})",
+            ctx.handler_name,
+            err,
+            self.0.elapsed()
+        );
+    }
+}
+
+#[cfg(feature = "hook")]
+impl ConnectionGuard for HookConn {
+    fn on_disconnect(&mut self, ctx: &RequestContext) {
+        eprintln!(
+            "[hook] ✕ disconnect: {} ({})",
+            ctx.handler_name, ctx.transport
+        );
+    }
+}
+
+/// Service-level hook for the check service.
+/// Runs after the global LoggingHook, demonstrating stacked hooks.
+#[cfg(feature = "hook")]
+struct CheckServiceHook;
+
+#[cfg(feature = "hook")]
+struct CheckGuard(&'static str);
+
+#[cfg(feature = "hook")]
+impl Hook for CheckServiceHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        eprintln!("[check-svc] ▶ {}", ctx.handler_name);
+        Some(Box::new(CheckGuard(ctx.handler_name)))
+    }
+}
+
+#[cfg(feature = "hook")]
+impl RequestGuard for CheckGuard {
+    fn on_response(&mut self, _ctx: &RequestContext, _resp: &[u8]) {
+        eprintln!("[check-svc] ◀ {} done", self.0);
+    }
+    fn on_error(&mut self, _ctx: &RequestContext, err: &afast::Error) {
+        eprintln!("[check-svc] ✗ {} error: {}", self.0, err);
+    }
+}
+
 // ─── Entry Point ──────────────────────────────────────────────────
 
 #[tokio::main]
@@ -28,6 +107,8 @@ async fn main() {
             h(info),
         })
     });
+    #[cfg(feature = "hook")]
+    let check_svc = check_svc.hook(CheckServiceHook);
 
     let admin_svc = service!("admin", "Admin Service" => {
         group("user" => {
@@ -62,7 +143,8 @@ async fn main() {
 
     let chat_svc = service!("chat", "Chat Service" => {
         h(chat_echo),
-    });
+    })
+    .hook(CheckServiceHook);
 
     // Duplicate service name: handlers will be merged into the first "admin" service
     let admin_extra_svc = service!("admin", "Admin Extra" => {
@@ -76,9 +158,18 @@ async fn main() {
         get("ping", ping),
     });
 
-    let app = AFast::new()
+    #[allow(unused_mut)]
+    let mut app = AFast::new()
         .state(AppState::new())
-        .document(DocConfig::with("Blog API Docs", "./client/doc"))
+        .document(DocConfig::with("Blog API Docs", "./client/doc"));
+
+    // Register hooks (only when "hook" feature is enabled)
+    #[cfg(feature = "hook")]
+    {
+        app = app.hook(LoggingHook);
+    }
+
+    let app = app
         .generate(vec![
             GenerateTarget {
                 debug: true,

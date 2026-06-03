@@ -65,6 +65,9 @@ pub struct HttpConfig {
     /// Handler names indexed by handler ID, for rate-limit lookups.
     #[cfg(feature = "rate-limit")]
     pub handler_names: Vec<String>,
+    /// Registered lifecycle hooks.
+    #[cfg(feature = "hook")]
+    pub hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -123,6 +126,8 @@ pub async fn serve(
         rate_limiter: config.rate_limiter,
         #[cfg(feature = "rate-limit")]
         handler_names: config.handler_names,
+        #[cfg(feature = "hook")]
+        hooks: config.hooks,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -243,6 +248,8 @@ struct SharedState {
     rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")]
     handler_names: Vec<String>,
+    #[cfg(feature = "hook")]
+    hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -450,7 +457,48 @@ async fn handle_api(
     }
 
     let payload = &body[4..];
+
+    // Hook: before_request
+    #[cfg(feature = "hook")]
+    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+        let ctx = crate::hook::RequestContext {
+            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+            transport: "http",
+            handler_id,
+            state: shared.state.clone(),
+        };
+        shared.hooks[handler_id]
+            .iter()
+            .filter_map(|h| h.before_request(&ctx))
+            .collect()
+    };
+
     let result = invoker.call(&shared.state, payload).await;
+
+    // Hook: on_response / on_error
+    #[cfg(feature = "hook")]
+    {
+        let ctx = crate::hook::RequestContext {
+            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+            transport: "http",
+            handler_id,
+            state: shared.state.clone(),
+        };
+        match &result {
+            Ok(bytes) => {
+                for g in _guards.iter_mut().rev() {
+                    g.on_response(&ctx, bytes);
+                }
+            }
+            Err(e) => {
+                for g in _guards.iter_mut().rev() {
+                    g.on_error(&ctx, e);
+                }
+            }
+        }
+    }
 
     match result {
         Ok(data) => {
@@ -728,6 +776,8 @@ async fn handle_ws_upgrade(
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let handlers = shared.handlers.clone();
+    #[cfg(feature = "hook")]
+    let hooks = shared.hooks.clone();
 
     #[cfg(feature = "rate-limit")]
     let client_ip_owned = client_ip.to_string();
@@ -751,6 +801,8 @@ async fn handle_ws_upgrade(
                     ws,
                     state,
                     handlers,
+                    #[cfg(feature = "hook")]
+                    hooks,
                     #[cfg(feature = "rate-limit")]
                     Some(ctx),
                     #[cfg(feature = "rate-limit")]

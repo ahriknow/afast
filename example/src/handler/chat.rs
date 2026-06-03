@@ -1,4 +1,4 @@
-use afast::{AFastDeserialize, AFastSerialize, Tag, handler};
+use afast::{AFastDeserialize, Tag, handler};
 
 use crate::state::AppState;
 
@@ -11,25 +11,11 @@ pub struct ChatJoin {
     pub name: String,
 }
 
-// ─── Response Types ───────────────────────────────────────────────
-
-#[derive(AFastSerialize, Tag)]
-#[tag("Chat message from server")]
-pub struct ChatMessage {
-    #[tag("Sender name")]
-    pub sender: String,
-    #[tag("Message content")]
-    pub text: String,
-    #[tag("Unix timestamp in seconds")]
-    pub ts: i64,
-}
-
 // ─── Handlers ─────────────────────────────────────────────────────
 
 #[handler(desc("Chat echo — returns a Socket for bidirectional streaming"))]
 pub async fn chat_echo(
     afast::State(_state): afast::State<AppState>,
-    afast::State(marker): afast::State<std::sync::Arc<String>>,
     afast::Data(join): afast::Data<ChatJoin>,
     mut receiver: afast::Receiver,
     sender: afast::Sender,
@@ -37,24 +23,7 @@ pub async fn chat_echo(
     println!("afast: chat_echo connection opened for '{}'", join.name);
 
     while let Some(data) = receiver.recv().await {
-        // Echo back: try UTF-8 text, fall back to binary
-        let response = if let Ok(text) = String::from_utf8(data.clone()) {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64;
-            let msg = ChatMessage {
-                sender: join.name.clone(),
-                text,
-                ts,
-            };
-            afast::marker::serialize(&msg, &marker)
-        } else {
-            // Binary data: echo as-is
-            data
-        };
-
-        if sender.send(response).await.is_err() {
+        if sender.send(data).await.is_err() {
             println!("afast: chat_echo send error for '{}', closing", join.name);
             break;
         }

@@ -29,6 +29,7 @@ tag-u8 = ["afastdata/tag-u8"]
 tag-u16 = ["afastdata/tag-u16"]
 tag-u32 = ["afastdata/tag-u32"]
 marker = []
+hook = []
 rate-limit = []
 
 [dependencies]

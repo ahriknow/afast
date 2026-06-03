@@ -297,6 +297,9 @@ pub struct AFast {
     /// Rate-limit configuration, if enabled.
     #[cfg(feature = "rate-limit")]
     rate_limit_config: Option<crate::rate_limit::RateLimitConfig>,
+    /// Registered lifecycle hooks.
+    #[cfg(feature = "hook")]
+    hooks: Vec<std::sync::Arc<dyn crate::hook::Hook>>,
 }
 
 impl AFast {
@@ -328,6 +331,8 @@ impl AFast {
             https_addr: None,
             #[cfg(feature = "rate-limit")]
             rate_limit_config: None,
+            #[cfg(feature = "hook")]
+            hooks: Vec::new(),
         }
     }
 
@@ -341,6 +346,17 @@ impl AFast {
     /// Defaults to `"afast"` if never called.
     pub fn marker(mut self, marker: &str) -> Self {
         self.marker = marker.to_string();
+        self
+    }
+
+    /// Registers a lifecycle hook.
+    ///
+    /// Hooks receive callbacks before/after handler execution and on
+    /// long-connection events.  Multiple hooks can be registered; they
+    /// are called in registration order.
+    #[cfg(feature = "hook")]
+    pub fn hook(mut self, hook: impl crate::hook::Hook + 'static) -> Self {
+        self.hooks.push(std::sync::Arc::new(hook));
         self
     }
 
@@ -582,6 +598,29 @@ impl AFast {
                 state.insert(std::sync::Arc::new(self.marker));
 
                 let state = std::sync::Arc::new(state);
+
+                #[cfg(feature = "hook")]
+                let hooks = {
+                    // Build a per-handler hook table: handler_hooks[handler_id] is
+                    // the hooks for that handler (service-specific or global).
+                    let total = self.handler_table.len();
+                    let mut handler_hooks: Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>> =
+                        vec![Vec::new(); total];
+
+                    // Walk each service's handler tree and assign hooks.
+                    for svc in &self.services {
+                        let svc_hooks: &Vec<std::sync::Arc<dyn crate::hook::Hook>> = &svc.hooks;
+                        assign_hooks_recursive(
+                            &svc.handlers,
+                            svc_hooks,
+                            &self.hooks,
+                            &mut handler_hooks,
+                        );
+                    }
+
+                    std::sync::Arc::new(handler_hooks)
+                };
+
                 let handlers = std::sync::Arc::new(self.handler_table);
 
                 #[cfg(any(feature = "code", feature = "doc"))]
@@ -666,6 +705,8 @@ impl AFast {
 
                         let state_clone = state.clone();
                         let handlers_clone = handlers.clone();
+                        #[cfg(feature = "hook")]
+                        let hooks_clone = hooks.clone();
                         #[cfg(feature = "rate-limit")]
                         let rl_base = rate_limiter_outer.clone();
                         #[cfg(feature = "rate-limit")]
@@ -680,6 +721,8 @@ impl AFast {
                                             Ok((stream, _)) => {
                                                 let state = state_clone.clone();
                                                 let handlers = handlers_clone.clone();
+                                                #[cfg(feature = "hook")]
+                                                let hooks = hooks_clone.clone();
                                                 #[cfg(feature = "rate-limit")]
                                                 let rl = rl_base.clone();
                                                 #[cfg(feature = "rate-limit")]
@@ -689,6 +732,8 @@ impl AFast {
                                                         stream,
                                                         state,
                                                         handlers,
+                                                        #[cfg(feature = "hook")]
+                                                        hooks,
                                                         #[cfg(feature = "rate-limit")]
                                                         rl,
                                                         #[cfg(feature = "rate-limit")]
@@ -718,6 +763,8 @@ impl AFast {
 
                     let state_clone = state.clone();
                     let handlers_clone = handlers.clone();
+                    #[cfg(feature = "hook")]
+                    let hooks_clone = hooks.clone();
                     let shutdown_rx = shutdown_tx.subscribe();
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
@@ -736,6 +783,8 @@ impl AFast {
                                 addr,
                                 state: state_clone,
                                 handlers: handlers_clone,
+                                #[cfg(feature = "hook")]
+                                hooks: hooks_clone,
                                 #[cfg(any(feature = "code", feature = "doc"))]
                                 services: http_services,
                                 #[cfg(feature = "doc")]
@@ -769,6 +818,8 @@ impl AFast {
 
                     let state_clone = state.clone();
                     let handlers_clone = handlers.clone();
+                    #[cfg(feature = "hook")]
+                    let hooks_clone = hooks.clone();
                     let shutdown_rx = shutdown_tx.subscribe();
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
@@ -788,6 +839,8 @@ impl AFast {
                                 addr,
                                 state: state_clone,
                                 handlers: handlers_clone,
+                                #[cfg(feature = "hook")]
+                                hooks: hooks_clone,
                                 #[cfg(any(feature = "code", feature = "doc"))]
                                 services: https_services,
                                 #[cfg(feature = "doc")]
@@ -824,6 +877,8 @@ impl AFast {
 
                     let state_clone = state.clone();
                     let handlers_clone = handlers.clone();
+                    #[cfg(feature = "hook")]
+                    let hooks_clone = hooks.clone();
                     let mut shutdown_rx = shutdown_tx.subscribe();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
@@ -838,6 +893,8 @@ impl AFast {
                                         Ok((stream, _)) => {
                                             let state = state_clone.clone();
                                             let handlers = handlers_clone.clone();
+                                            #[cfg(feature = "hook")]
+                                            let hooks = hooks_clone.clone();
                                             #[cfg(feature = "rate-limit")]
                                             let rl = rl.clone();
                                             #[cfg(feature = "rate-limit")]
@@ -851,6 +908,8 @@ impl AFast {
                                                     stream,
                                                     state,
                                                     handlers,
+                                                    #[cfg(feature = "hook")]
+                                                    hooks,
                                                     #[cfg(feature = "rate-limit")]
                                                     rl,
                                                     #[cfg(feature = "rate-limit")]
@@ -927,6 +986,27 @@ fn build_handler_table(handlers: &mut [Handler], counter: &mut usize) {
         h.offset = *counter;
         *counter += 1;
         build_handler_table(&mut h.children, counter);
+    }
+}
+
+/// Recursively assigns hooks to each handler's slot in the `handler_hooks`
+/// table.  If the service has its own hooks, they are **appended** after the
+/// global hooks so that both run (global first, then service-specific).
+#[cfg(feature = "hook")]
+fn assign_hooks_recursive(
+    handlers: &[Handler],
+    svc_hooks: &[std::sync::Arc<dyn crate::hook::Hook>],
+    global_hooks: &[std::sync::Arc<dyn crate::hook::Hook>],
+    table: &mut [Vec<std::sync::Arc<dyn crate::hook::Hook>>],
+) {
+    for h in handlers {
+        let idx = h.offset;
+        if idx < table.len() {
+            let mut hooks = global_hooks.to_vec();
+            hooks.extend(svc_hooks.iter().cloned());
+            table[idx] = hooks;
+        }
+        assign_hooks_recursive(&h.children, svc_hooks, global_hooks, table);
     }
 }
 

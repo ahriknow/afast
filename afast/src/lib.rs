@@ -64,6 +64,8 @@
 
 pub mod error;
 pub mod handler;
+#[cfg(feature = "hook")]
+pub mod hook;
 pub mod marker;
 #[cfg(feature = "rate-limit")]
 pub mod rate_limit;

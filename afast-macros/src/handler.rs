@@ -346,6 +346,7 @@ pub fn expand(
             &impl_fn_name,
             &params,
             return_type_str.starts_with("Result"),
+            &meta_ident,
         );
 
         Ok(quote! {
@@ -785,16 +786,23 @@ fn build_invoker_impl(
     fn_name: &syn::Ident,
     params: &[ParamInfo],
     returns_result: bool,
+    meta_ident: &syn::Ident,
 ) -> TokenStream {
     let long_connection = params
         .iter()
         .any(|p| p.extractor == "Receiver" || p.extractor == "Sender");
 
     if long_connection {
-        return build_stream_invoker_impl(invoker_ident, fn_name, params, returns_result);
+        return build_stream_invoker_impl(
+            invoker_ident,
+            fn_name,
+            params,
+            returns_result,
+            meta_ident,
+        );
     }
 
-    build_call_invoker_impl(invoker_ident, fn_name, params)
+    build_call_invoker_impl(invoker_ident, fn_name, params, meta_ident)
 }
 
 /// Builds the request-response `HandlerInvoker` implementation.
@@ -807,6 +815,7 @@ fn build_call_invoker_impl(
     invoker_ident: &syn::Ident,
     fn_name: &syn::Ident,
     params: &[ParamInfo],
+    meta_ident: &syn::Ident,
 ) -> TokenStream {
     let mut sync_extractions: Vec<TokenStream> = Vec::new();
     let mut has_payload_extractor = false;
@@ -897,6 +906,10 @@ fn build_call_invoker_impl(
                     Ok(afast::marker::serialize(&result, &__marker))
                 })
             }
+
+            fn meta(&self) -> Option<&'static afast::HandlerMeta> {
+                Some(&#meta_ident)
+            }
         }
     }
 }
@@ -914,6 +927,7 @@ fn build_stream_invoker_impl(
     fn_name: &syn::Ident,
     params: &[ParamInfo],
     returns_result: bool,
+    meta_ident: &syn::Ident,
 ) -> TokenStream {
     let mut sync_extractions: Vec<TokenStream> = Vec::new();
     let mut has_payload_extractor = false;
@@ -1052,6 +1066,10 @@ fn build_stream_invoker_impl(
                     });
                     Ok(Vec::new())
                 })
+            }
+
+            fn meta(&self) -> Option<&'static afast::HandlerMeta> {
+                Some(&#meta_ident)
             }
         }
     }

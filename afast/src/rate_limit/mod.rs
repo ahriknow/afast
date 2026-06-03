@@ -5,8 +5,9 @@
 //! with fixed-window, sliding-window, and token-bucket algorithms.
 //!
 //! The underlying storage is pluggable via the [`RateLimitStore`] trait.
-//! A built-in [`InMemoryStore`] is provided; users can supply their own
-//! implementation (e.g. Redis) through [`RateLimitConfig::store`].
+//! Algorithm logic is handled internally by the framework; users only
+//! need to implement simple key-value operations (`incr`, `get`, `set`,
+//! `delete`).  A built-in [`InMemoryStore`] is provided.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -133,144 +134,67 @@ impl Default for RateLimitConfig {
 /// Pluggable storage backend for rate-limit counters.
 ///
 /// Implement this trait to use a custom store such as Redis, Memcached, or
-/// a database. The built-in [`InMemoryStore`] is used when no custom store
+/// a database.  The built-in [`InMemoryStore`] is used when no custom store
 /// is provided.
+///
+/// Users only need to implement simple key-value operations.  The rate-limit
+/// algorithms (fixed window, sliding window, token bucket) are handled
+/// internally by the framework.
 ///
 /// # Contract
 ///
-/// * `try_acquire` must be **atomic** — concurrent calls with the same
-///   `(policy_id, key)` pair must not over-count.
-/// * Returning `true` means the request is **allowed**; `false` means it
-///   should be rejected.
-/// * `is_connection == true` indicates a per-connection scoped counter.
-///   Implementations that do not support connection scoping may ignore
-///   this flag.
+/// * `incr` must be **atomic** — concurrent calls with the same key must
+///   not over-count.
+/// * `get` returns `0` for non-existent keys.
+/// * `set` overwrites the value and resets the TTL.
+/// * `ttl_secs > 0` means the key expires after that many seconds.
 pub trait RateLimitStore: Send + Sync + 'static {
-    /// Attempts to consume one request slot.
-    ///
-    /// Returns `true` if the request is within the rate limit, `false` if
-    /// it should be rejected.
-    fn try_acquire<'a>(
+    /// Atomically increments `key` by 1 and returns the new value.
+    /// If the key does not exist, it is created starting from 0 (so the
+    /// first `incr` returns 1).  If `ttl_secs > 0`, the key expires after
+    /// that many seconds.
+    fn incr<'a>(
         &'a self,
-        policy_id: &'a str,
         key: &'a str,
-        max_requests: u64,
-        window_secs: u64,
-        algorithm: &'a Algorithm,
-        is_connection: bool,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>>;
+
+    /// Returns the current value of `key`, or `0` if it does not exist.
+    fn get<'a>(&'a self, key: &'a str) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>>;
+
+    /// Sets `key` to `value` with an optional TTL.  Overwrites any
+    /// existing value.  If `ttl_secs > 0`, the key expires after that
+    /// many seconds.
+    fn set<'a>(
+        &'a self,
+        key: &'a str,
+        value: u64,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+    /// Deletes `key`.  No-op if the key does not exist.
+    fn delete<'a>(&'a self, key: &'a str) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 }
 
 // ─── InMemoryStore ────────────────────────────────────────────────
 
-/// Internal sliding-window / token-bucket counter.
-struct WindowCounter {
-    slots: Vec<(u64, u64)>,
-    count: u64,
-    tokens: f64,
-    last_refill: u64,
-}
-
-impl WindowCounter {
-    fn new() -> Self {
-        Self {
-            slots: Vec::new(),
-            count: 0,
-            tokens: 0.0,
-            last_refill: 0,
-        }
-    }
-
-    fn try_fixed_window(&mut self, max_requests: u64, window_secs: u64) -> bool {
-        let now = now_secs();
-        let window_start = now / window_secs * window_secs;
-
-        if self.slots.first().is_some_and(|&(ts, _)| ts < window_start) {
-            self.slots.clear();
-            self.count = 0;
-        }
-
-        if self.count >= max_requests {
-            return false;
-        }
-        self.count += 1;
-        self.slots.push((now, 1));
-        true
-    }
-
-    fn try_sliding_window(&mut self, max_requests: u64, window_secs: u64) -> bool {
-        let now = now_secs();
-        let cutoff = now.saturating_sub(window_secs);
-
-        let mut removed = 0u64;
-        while self.slots.first().is_some_and(|&(ts, _)| ts < cutoff) {
-            if let Some((_, cnt)) = self.slots.first() {
-                removed += cnt;
-            }
-            self.slots.remove(0);
-        }
-        self.count = self.count.saturating_sub(removed);
-
-        if self.count >= max_requests {
-            return false;
-        }
-        self.count += 1;
-        self.slots.push((now, 1));
-        true
-    }
-
-    fn try_token_bucket(&mut self, max_requests: u64, window_secs: u64) -> bool {
-        let now = now_secs();
-        let rate = max_requests as f64 / window_secs as f64;
-
-        if self.last_refill == 0 {
-            self.tokens = max_requests as f64;
-            self.last_refill = now;
-        } else {
-            let elapsed = (now.saturating_sub(self.last_refill)) as f64;
-            self.tokens = (self.tokens + elapsed * rate).min(max_requests as f64);
-            self.last_refill = now;
-        }
-
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            true
-        } else {
-            false
-        }
-    }
-}
-
-/// Returns the current time in seconds since the Unix epoch.
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-/// `policy_id` → `(composite_key → counter)`.
-#[allow(clippy::type_complexity)]
-type CounterMap = Arc<RwLock<HashMap<String, Arc<RwLock<HashMap<String, WindowCounter>>>>>>;
-
-/// Default in-memory rate-limit store.
+/// Default in-memory rate-limit store backed by a concurrent `HashMap`.
 ///
-/// Counters are stored in a two-level concurrent map:
-/// `policy_id → (composite_key → WindowCounter)`.
-///
-/// This store is **not** shared across processes. For distributed
+/// This store is **not** shared across processes.  For distributed
 /// rate limiting, implement [`RateLimitStore`] backed by Redis or a
 /// similar external store.
 #[derive(Clone)]
 pub struct InMemoryStore {
-    counters: CounterMap,
+    /// `(value, Option<expires_at_secs>)`
+    #[allow(clippy::type_complexity)]
+    data: Arc<RwLock<HashMap<String, (u64, Option<u64>)>>>,
 }
 
 impl InMemoryStore {
     /// Creates a new empty in-memory store.
     pub fn new() -> Self {
         Self {
-            counters: Arc::new(RwLock::new(HashMap::new())),
+            data: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -282,41 +206,155 @@ impl Default for InMemoryStore {
 }
 
 impl RateLimitStore for InMemoryStore {
-    fn try_acquire<'a>(
+    fn incr<'a>(
         &'a self,
-        policy_id: &'a str,
         key: &'a str,
-        max_requests: u64,
-        window_secs: u64,
-        algorithm: &'a Algorithm,
-        is_connection: bool,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>> {
         Box::pin(async move {
-            let composite_key = if is_connection {
-                format!("__conn:{}:{}", policy_id, key)
-            } else {
-                format!("{}:{}", policy_id, key)
-            };
+            let now = now_secs();
+            let mut map = self.data.write().await;
+            let entry = map.entry(key.to_string()).or_insert((0, None));
+            // Expired → reset
+            if let Some(exp) = entry.1
+                && now >= exp
+            {
+                *entry = (0, None);
+            }
+            entry.0 += 1;
+            if ttl_secs > 0 {
+                entry.1 = Some(now + ttl_secs);
+            }
+            entry.0
+        })
+    }
 
-            let inner_arc = {
-                let mut outer = self.counters.write().await;
-                outer
-                    .entry(policy_id.to_string())
-                    .or_insert_with(|| Arc::new(RwLock::new(HashMap::new())))
-                    .clone()
-            };
-
-            let mut inner = inner_arc.write().await;
-            let counter = inner
-                .entry(composite_key)
-                .or_insert_with(WindowCounter::new);
-
-            match algorithm {
-                Algorithm::FixedWindow => counter.try_fixed_window(max_requests, window_secs),
-                Algorithm::SlidingWindow => counter.try_sliding_window(max_requests, window_secs),
-                Algorithm::TokenBucket => counter.try_token_bucket(max_requests, window_secs),
+    fn get<'a>(&'a self, key: &'a str) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>> {
+        Box::pin(async move {
+            let now = now_secs();
+            let map = self.data.read().await;
+            match map.get(key) {
+                Some((val, Some(exp))) if now < *exp => *val,
+                Some((_, Some(_))) => 0, // expired
+                Some((val, None)) => *val,
+                None => 0,
             }
         })
+    }
+
+    fn set<'a>(
+        &'a self,
+        key: &'a str,
+        value: u64,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let now = now_secs();
+            let mut map = self.data.write().await;
+            let exp = if ttl_secs > 0 {
+                Some(now + ttl_secs)
+            } else {
+                None
+            };
+            map.insert(key.to_string(), (value, exp));
+        })
+    }
+
+    fn delete<'a>(&'a self, key: &'a str) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let mut map = self.data.write().await;
+            map.remove(key);
+        })
+    }
+}
+
+// ─── Algorithm implementation ─────────────────────────────────────
+
+/// Returns the current time in seconds since the Unix epoch.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Attempts to acquire one request slot using the specified algorithm.
+///
+/// This function implements the rate-limit algorithms on top of the simple
+/// [`RateLimitStore`] operations (`incr`, `get`, `set`, `delete`).
+async fn try_acquire(
+    store: &dyn RateLimitStore,
+    policy_id: &str,
+    key: &str,
+    max_requests: u64,
+    window_secs: u64,
+    algorithm: &Algorithm,
+    is_connection: bool,
+) -> bool {
+    let prefix = if is_connection {
+        format!("__conn:{}:{}", policy_id, key)
+    } else {
+        format!("{}:{}", policy_id, key)
+    };
+
+    match algorithm {
+        Algorithm::FixedWindow => {
+            let now = now_secs();
+            let window_start = now / window_secs * window_secs;
+            let store_key = format!("{}:{}", prefix, window_start);
+            let count = store.incr(&store_key, window_secs).await;
+            count <= max_requests
+        }
+        Algorithm::SlidingWindow => {
+            let now = now_secs();
+            let current_window = now / window_secs * window_secs;
+            let previous_window = current_window.saturating_sub(window_secs);
+            let current_key = format!("{}:{}", prefix, current_window);
+            let previous_key = format!("{}:{}", prefix, previous_window);
+
+            let current_count = store.get(&current_key).await;
+            let previous_count = store.get(&previous_key).await;
+
+            let elapsed_in_window = now.saturating_sub(current_window);
+            let weight = 1.0 - (elapsed_in_window as f64 / window_secs as f64);
+            let estimated = previous_count as f64 * weight + current_count as f64;
+
+            if estimated < max_requests as f64 {
+                store.incr(&current_key, window_secs * 2).await;
+                true
+            } else {
+                false
+            }
+        }
+        Algorithm::TokenBucket => {
+            let now = now_secs();
+            let tokens_key = format!("{}:tokens", prefix);
+            let refill_key = format!("{}:refill", prefix);
+
+            let current_tokens = store.get(&tokens_key).await;
+            let last_refill = store.get(&refill_key).await;
+            let rate = max_requests as f64 / window_secs as f64;
+
+            let new_tokens = if last_refill == 0 {
+                max_requests as f64
+            } else {
+                let elapsed = now.saturating_sub(last_refill) as f64;
+                (current_tokens as f64 + elapsed * rate).min(max_requests as f64)
+            };
+
+            if new_tokens >= 1.0 {
+                let remaining = (new_tokens - 1.0) as u64;
+                store.set(&tokens_key, remaining, window_secs * 2).await;
+                store.set(&refill_key, now, window_secs * 2).await;
+                true
+            } else {
+                store
+                    .set(&tokens_key, new_tokens as u64, window_secs * 2)
+                    .await;
+                store.set(&refill_key, now, window_secs * 2).await;
+                false
+            }
+        }
     }
 }
 
@@ -473,17 +511,16 @@ impl RateLimiter {
             None => key,
         };
 
-        let allowed = self
-            .store
-            .try_acquire(
-                policy_id,
-                &store_key,
-                policy.max_requests,
-                policy.window_secs,
-                &policy.algorithm,
-                is_connection,
-            )
-            .await;
+        let allowed = try_acquire(
+            self.store.as_ref(),
+            policy_id,
+            &store_key,
+            policy.max_requests,
+            policy.window_secs,
+            &policy.algorithm,
+            is_connection,
+        )
+        .await;
 
         if !allowed {
             return Err(Error::RateLimited {

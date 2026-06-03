@@ -28,6 +28,7 @@ Kotlin 和 Rust 客户端代码，内置交互式 API 文档。
 - **服务自动合并** — 同名 Service 自动合并 handlers 和路由，无需担心重复注册
 - **空名称服务** — Service 名称为空时，handlers 仍可通过二进制协议调用，但不出现在客户端代码和 API 文档中
 - **请求限流** — 基于命名策略的限流，支持按 IP/Header/连接/全局维度，可插拔存储后端（内置内存存储，可扩展 Redis 等）
+- **生命周期钩子** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`，支持全局和 Service 级别，洋葱模型执行顺序
 
 ## 快速开始
 
@@ -134,6 +135,8 @@ cargo run --features "http,ws,ts"
 | `tag-u16` | 枚举标签使用 `u16` | afastdata/tag-u16 |
 | `tag-u32` | 枚举标签使用 `u32` | afastdata/tag-u32 |
 | `marker` | 启用基于 marker 的条件序列化，通过 `AFast::marker()` 设置标记字符串（默认 `"afast"`） | — |
+| `hook` | 生命周期钩子（`before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`），支持全局和 Service 级别 | — |
+| `rate-limit` | 命名策略限流（固定窗口/滑动窗口/令牌桶），可插拔存储（内置 InMemoryStore） | — |
 
 **注意**：如果服务器端启用了 `seq64` 或 `len64`，生成的客户端代码也必须使用
 相同的 feature，否则协议不匹配。
@@ -494,6 +497,58 @@ let app = AFast::new()
 - **WebSocket / TCP**: Error frame with code `-90012`
 
 Customize via `RateLimitConfig::rejected_code()` and `rejected_message()`.
+
+## 生命周期钩子（`hook`）
+
+启用 `hook` feature 可以拦截请求生命周期事件，用于可观测性、链路追踪、日志记录或自定义中间件。
+
+```rust
+use afast::hook::{Hook, RequestContext, RequestGuard};
+
+struct TimingHook;
+
+impl Hook for TimingHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        println!("→ {} ({})", ctx.handler_name, ctx.transport);
+        Some(Box::new(std::time::Instant::now()))
+    }
+}
+
+impl RequestGuard for std::time::Instant {
+    fn on_response(&mut self, ctx: &RequestContext, _resp: &[u8]) {
+        println!("← {} OK ({:?})", ctx.handler_name, self.elapsed());
+    }
+    fn on_error(&mut self, ctx: &RequestContext, err: &afast::Error) {
+        println!("✗ {} error: {}", ctx.handler_name, err);
+    }
+}
+```
+
+### 全局钩子与 Service 钩子
+
+```rust
+let app = AFast::new()
+    .hook(TimingHook)                    // 全局：所有 handler 生效
+    .service(
+        service!("api" => { h(handler) })
+            .hook(ApiSpecificHook)       // Service 级：仅该 service 的 handler 生效
+    );
+```
+
+- **全局钩子**对所有 handler 生效。
+- **Service 钩子**仅对该 service 的 handler 生效。
+- 两者始终同时执行，互不覆盖。
+- 执行顺序：全局先执行，Service 后执行（洋葱模型 🧅）。
+  - `before_request`：Hook1 → Hook2 → handler
+  - `on_response`/`on_error`：Guard2 → Guard1（反序）
+
+### 长连接钩子
+
+对于 WebSocket/TCP 长连接 handler，完整生命周期为：
+
+```
+on_connect → before_request → handler → on_response/on_error → on_disconnect
+```
 
 ## Transport Layer
 

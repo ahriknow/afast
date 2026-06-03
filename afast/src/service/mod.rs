@@ -33,6 +33,10 @@ pub struct Service {
     /// Ordinary HTTP routes registered in this service.
     #[cfg(feature = "ordinary-http")]
     pub ordinary_routes: Vec<OrdinaryRouteInfo>,
+    /// Per-service lifecycle hooks. When non-empty, these override global
+    /// hooks for handlers belonging to this service.
+    #[cfg(feature = "hook")]
+    pub hooks: Vec<std::sync::Arc<dyn crate::hook::Hook>>,
 }
 
 impl Service {
@@ -44,6 +48,8 @@ impl Service {
             handlers: Vec::new(),
             #[cfg(feature = "ordinary-http")]
             ordinary_routes: Vec::new(),
+            #[cfg(feature = "hook")]
+            hooks: Vec::new(),
         }
     }
 
@@ -58,6 +64,18 @@ impl Service {
     #[doc(hidden)]
     pub fn handler(mut self, handler: Handler) -> Self {
         self.handlers.push(handler);
+        self
+    }
+
+    /// Registers a lifecycle hook for this service.
+    ///
+    /// Service hooks run **after** global hooks (registered via
+    /// [`AFast::hook()`](crate::AFast::hook)) for all handlers belonging
+    /// to this service.  Both global and service hooks always execute;
+    /// they never replace each other.
+    #[cfg(feature = "hook")]
+    pub fn hook(mut self, hook: impl crate::hook::Hook + 'static) -> Self {
+        self.hooks.push(std::sync::Arc::new(hook));
         self
     }
 

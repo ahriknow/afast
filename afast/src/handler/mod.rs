@@ -75,6 +75,14 @@ pub trait HandlerInvoker: Send + Sync {
         false
     }
 
+    /// Returns the handler's static metadata, if available.
+    ///
+    /// Generated invokers return `Some(meta)`; dummy/placeholder invokers
+    /// return `None`. Used by hooks to access handler name and description.
+    fn meta(&self) -> Option<&'static HandlerMeta> {
+        None
+    }
+
     /// Spawn a persistent handler and return its `conn_id` immediately.
     ///
     /// `server_rx` receives bytes from the client; `server_tx` sends bytes to

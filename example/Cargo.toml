@@ -10,9 +10,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["ordinary-http"]
+default = ["ordinary-http", "hook"]
 ordinary-http = ["afast/ordinary-http"]
 tls = ["afast/tls"]
+hook = ["afast/hook"]
 
 [dependencies]
 afast = { path = "../afast", features = [
@@ -25,7 +26,8 @@ afast = { path = "../afast", features = [
     "rs",
     "doc",
     "marker",
-    "rate-limit"
+    "rate-limit",
+    "hook"
 ] }
 afast-macros.workspace = true
 afastdata.workspace = true

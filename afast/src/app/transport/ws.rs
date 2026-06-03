@@ -161,6 +161,7 @@ pub async fn handle_websocket<S>(
     ws: tokio_tungstenite::WebSocketStream<S>,
     state: Arc<StateMap>,
     handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(feature = "hook")] hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] mut conn_ctx: Option<ConnectionContext>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
@@ -345,9 +346,53 @@ pub async fn handle_websocket<S>(
                                 let payload = payload.to_vec();
                                 let push_tx = push_tx.clone();
                                 let connections = connections.clone();
+                                #[cfg(feature = "hook")]
+                                let hooks = hooks.clone();
+
+                                // Hook: on_connect
+                                #[cfg(feature = "hook")]
+                                let mut _conn_guards: Vec<Box<dyn crate::hook::ConnectionGuard>> = {
+                                    let ctx = crate::hook::RequestContext {
+                                        handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                        handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                        transport: "ws",
+                                        handler_id,
+                                        state: state.clone(),
+                                    };
+                                    hooks[handler_id].iter().filter_map(|h| h.on_connect(&ctx)).collect()
+                                };
 
                                 tokio::spawn(async move {
+                                    // Hook: before_request for call_stream
+                                    #[cfg(feature = "hook")]
+                                    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+                                        let ctx = crate::hook::RequestContext {
+                                            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                            transport: "ws",
+                                            handler_id,
+                                            state: state.clone(),
+                                        };
+                                        hooks[handler_id].iter().filter_map(|h| h.before_request(&ctx)).collect()
+                                    };
+
                                     let result = invoker.call_stream(&state, &payload, from_handler_tx, to_handler_rx).await;
+
+                                    // Hook: on_response / on_error for call_stream
+                                    #[cfg(feature = "hook")]
+                                    {
+                                        let ctx = crate::hook::RequestContext {
+                                            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                            transport: "ws",
+                                            handler_id,
+                                            state: state.clone(),
+                                        };
+                                        match &result {
+                                            Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },
+                                            Err(e) => for g in _guards.iter_mut().rev() { g.on_error(&ctx, e); },
+                                        }
+                                    }
 
                                     if let Err(ref e) = result {
                                         eprintln!("afast: stream handler error: {}", e);
@@ -361,6 +406,19 @@ pub async fn handle_websocket<S>(
                                         }
                                     }
 
+                                    // Hook: on_disconnect
+                                    #[cfg(feature = "hook")]
+                                    {
+                                        let ctx = crate::hook::RequestContext {
+                                            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                            transport: "ws",
+                                            handler_id,
+                                            state: state.clone(),
+                                        };
+                                        for g in &mut _conn_guards { g.on_disconnect(&ctx); }
+                                    }
+
                                     // Remove the connection when the handler
                                     // completes (normal exit or error).
                                     {
@@ -371,7 +429,38 @@ pub async fn handle_websocket<S>(
                             } else {
                                 // Regular handler: invoke synchronously within the
                                 // connection loop and write the response directly.
+
+                                // Hook: before_request
+                                #[cfg(feature = "hook")]
+                                let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+                                    let ctx = crate::hook::RequestContext {
+                                        handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                        handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                        transport: "ws",
+                                        handler_id,
+                                        state: state.clone(),
+                                    };
+                                    hooks[handler_id].iter().filter_map(|h| h.before_request(&ctx)).collect()
+                                };
+
                                 let result = invoker.call(&state, payload).await;
+
+                                // Hook: on_response / on_error
+                                #[cfg(feature = "hook")]
+                                {
+                                    let ctx = crate::hook::RequestContext {
+                                        handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
+                                        handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
+                                        transport: "ws",
+                                        handler_id,
+                                        state: state.clone(),
+                                    };
+                                    match &result {
+                                        Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },
+                                        Err(e) => for g in _guards.iter_mut().rev() { g.on_error(&ctx, e); },
+                                    }
+                                }
+
                                 let msg = match result {
                                     Ok(bytes) => make_success(req_id, &bytes),
                                     Err(e) => make_error(req_id, e.code(), e.message()),
@@ -407,6 +496,7 @@ pub async fn handle_connection(
     stream: TcpStream,
     state: Arc<StateMap>,
     handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    #[cfg(feature = "hook")] hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
 ) {
@@ -429,6 +519,8 @@ pub async fn handle_connection(
         ws,
         state,
         handlers,
+        #[cfg(feature = "hook")]
+        hooks,
         #[cfg(feature = "rate-limit")]
         conn_ctx,
         #[cfg(feature = "rate-limit")]
