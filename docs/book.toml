@@ -1,0 +1,12 @@
+[book]
+title = "AFast Documentation"
+authors = ["ahriknow"]
+language = "en"
+src = "src"
+description = "A high-performance Rust web backend framework"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/ahriknow/afast"

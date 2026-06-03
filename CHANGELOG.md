@@ -18,6 +18,10 @@
 ### Changed
 
 - **`RateLimitStore` trait 重构**: 简化为 `incr`/`get`/`set`/`delete` 四个基础 KV 操作，算法逻辑（固定窗口/滑动窗口/令牌桶）由框架内部实现。用户实现 Redis 等外部存储时只需实现四个原子操作。
+- **文档重构**: 将 README 拆分为 mdbook 多章节文档，README 精简为概览页并链接到完整文档。
+  - 新增 `docs/` 目录，包含 13 个章节（Quick Start、Core Concepts、Hooks、Rate Limiting、Code Generation 等）。
+  - 新增 `.github/workflows/docs.yml`，自动部署到 GitHub Pages。
+  - README.md / README_CN.md 精简为约 90 行概览，原始完整版备份为 README_FULL.md / README_CN_FULL.md。
 
 ## [0.1.8]
 
