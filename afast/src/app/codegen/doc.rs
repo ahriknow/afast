@@ -691,6 +691,48 @@ fn build_schema(svc: &Service) -> String {
         jb.raw(h);
     }
     jb.array_end();
+    jb.comma();
+
+    // Ordinary WebSocket routes.
+    jb.key("wsRoutes");
+    jb.array_start();
+    #[cfg(feature = "ordinary-ws")]
+    for (i, route) in svc.ws_routes.iter().enumerate() {
+        if i > 0 {
+            jb.comma();
+        }
+        jb.object_start();
+        jb.key("path");
+        jb.string(route.path);
+        jb.comma();
+        jb.key("handlerName");
+        jb.string(route.handler_name);
+        jb.object_end();
+    }
+    #[cfg(not(feature = "ordinary-ws"))]
+    {}
+    jb.array_end();
+    jb.comma();
+
+    // Ordinary SSE routes.
+    jb.key("sseRoutes");
+    jb.array_start();
+    #[cfg(feature = "ordinary-sse")]
+    for (i, route) in svc.sse_routes.iter().enumerate() {
+        if i > 0 {
+            jb.comma();
+        }
+        jb.object_start();
+        jb.key("path");
+        jb.string(route.path);
+        jb.comma();
+        jb.key("handlerName");
+        jb.string(route.handler_name);
+        jb.object_end();
+    }
+    #[cfg(not(feature = "ordinary-sse"))]
+    {}
+    jb.array_end();
 
     jb.object_end();
     jb.build()
@@ -2573,6 +2615,199 @@ customElements.define('af-array', AfArray);
         }
 }
     renderHandlers(schema.handlers, endpointsContainer, 0, schema.serviceName);
+
+    // ── Ordinary WebSocket routes (rendered as endpoint cards) ──
+    for (const route of (schema.wsRoutes || [])) {
+        const uid = 'ws-' + route.handlerName;
+        const card = document.createElement('div');
+        card.className = 'endpoint';
+        const hdr = document.createElement('div');
+        hdr.className = 'endpoint-header';
+        hdr.id = 'header-' + uid;
+        hdr.innerHTML = '<div class="endpoint-title">'
+            + '<span class="endpoint-method" style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);color:#fff;">WS</span>'
+            + '<span class="endpoint-name">' + route.path + '</span>'
+            + '<span class="endpoint-desc">' + route.handlerName + '</span>'
+            + '</div><span class="endpoint-toggle" id="toggle-' + uid + '">\u25b6</span>';
+        card.appendChild(hdr);
+        const body = document.createElement('div');
+        body.className = 'endpoint-body';
+        body.id = 'body-' + uid;
+        body.innerHTML = '<div style="margin-bottom:8px;font-size:13px;color:var(--text-secondary);">Path: <code>' + route.path + '</code> &nbsp; Handler: <code>' + route.handlerName + '</code></div>'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
+            + '<button class="btn btn-primary" id="' + uid + '-connect">Connect</button>'
+            + '<button class="btn btn-secondary" id="' + uid + '-disconnect" disabled>Disconnect</button>'
+            + '<span id="' + uid + '-status" style="font-size:13px;color:var(--text-secondary);">Disconnected</span>'
+            + '</div>'
+            + '<div style="display:flex;gap:8px;margin-bottom:8px;">'
+            + '<input id="' + uid + '-msg" placeholder="Message to send..." style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;">'
+            + '<button class="btn btn-sm btn-primary" id="' + uid + '-send" disabled>Send</button>'
+            + '</div>'
+            + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+            + '<span style="font-weight:600;font-size:13px;">Log</span>'
+            + '<button class="btn btn-sm btn-secondary" id="' + uid + '-clear">Clear</button>'
+            + '</div>'
+            + '<pre id="' + uid + '-log" class="response-body" style="max-height:300px;overflow-y:auto;min-height:60px;font-size:12px;"></pre>';
+        card.appendChild(body);
+        endpointsContainer.appendChild(card);
+
+        hdr.addEventListener('click', () => {
+            body.classList.toggle('open');
+            card.querySelector('#toggle-' + uid).classList.toggle('open');
+        });
+
+        let wsConn = null;
+        const connectBtn = card.querySelector('#' + uid + '-connect');
+        const disconnectBtn = card.querySelector('#' + uid + '-disconnect');
+        const sendBtn = card.querySelector('#' + uid + '-send');
+        const msgInput = card.querySelector('#' + uid + '-msg');
+        const statusEl = card.querySelector('#' + uid + '-status');
+        const logEl = card.querySelector('#' + uid + '-log');
+        const clearBtn = card.querySelector('#' + uid + '-clear');
+
+        function wsLog(type, text) {
+            const ts = new Date().toLocaleTimeString();
+            logEl.textContent += '[' + ts + '] ' + type + ' ' + text + '\n';
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const proto = secureCheck.checked ? 'wss' : 'ws';
+            const host = hostInput.value.trim() || 'localhost';
+            const port = portInput.value.trim() || '3000';
+            const url = proto + '://' + host + ':' + port + route.path;
+            wsLog('\u2192', 'Connecting to ' + url + ' ...');
+            wsConn = new WebSocket(url);
+            wsConn.addEventListener('open', () => {
+                statusEl.textContent = 'Connected';
+                statusEl.style.color = 'var(--success)';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+                wsLog('\u2713', 'Connected');
+            });
+            wsConn.addEventListener('message', (e) => {
+                wsLog('\u2190', typeof e.data === 'string' ? e.data : '[binary ' + e.data.byteLength + ' bytes]');
+            });
+            wsConn.addEventListener('close', (e) => {
+                statusEl.textContent = 'Disconnected (code=' + e.code + ')';
+                statusEl.style.color = 'var(--text-secondary)';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+                wsLog('\u2715', 'Closed (code=' + e.code + ')');
+                wsConn = null;
+            });
+            wsConn.addEventListener('error', () => { wsLog('\u2717', 'Connection error'); });
+        });
+
+        disconnectBtn.addEventListener('click', (ev) => { ev.stopPropagation(); if (wsConn) { wsConn.close(); wsConn = null; } });
+        sendBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (wsConn && wsConn.readyState === 1) { wsConn.send(msgInput.value); wsLog('\u2192', msgInput.value); msgInput.value = ''; }
+        });
+        msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !sendBtn.disabled) { e.stopPropagation(); sendBtn.click(); } });
+        clearBtn.addEventListener('click', (ev) => { ev.stopPropagation(); logEl.textContent = ''; });
+    }
+
+    // ── Ordinary SSE routes (rendered as endpoint cards) ──
+    for (const route of (schema.sseRoutes || [])) {
+        const uid = 'sse-' + route.handlerName;
+        const card = document.createElement('div');
+        card.className = 'endpoint';
+        const hdr = document.createElement('div');
+        hdr.className = 'endpoint-header';
+        hdr.id = 'header-' + uid;
+        hdr.innerHTML = '<div class="endpoint-title">'
+            + '<span class="endpoint-method" style="background:linear-gradient(135deg,#43e97b 0%,#38f9d7 100%);color:#000;">SSE</span>'
+            + '<span class="endpoint-name">' + route.path + '</span>'
+            + '<span class="endpoint-desc">' + route.handlerName + '</span>'
+            + '</div><span class="endpoint-toggle" id="toggle-' + uid + '">\u25b6</span>';
+        card.appendChild(hdr);
+        const body = document.createElement('div');
+        body.className = 'endpoint-body';
+        body.id = 'body-' + uid;
+        body.innerHTML = '<div style="margin-bottom:8px;font-size:13px;color:var(--text-secondary);">Path: <code>GET ' + route.path + '</code> &nbsp; Handler: <code>' + route.handlerName + '</code></div>'
+            + '<div style="margin-bottom:8px;font-size:12px;">'
+            + '<label style="color:var(--text-secondary);">Query: <input id="' + uid + '-query" placeholder="key=value&key2=value2" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;width:400px;margin-left:4px;"></label>'
+            + '</div>'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
+            + '<button class="btn btn-primary" id="' + uid + '-connect">Connect</button>'
+            + '<button class="btn btn-secondary" id="' + uid + '-disconnect" disabled>Disconnect</button>'
+            + '<span id="' + uid + '-status" style="font-size:13px;color:var(--text-secondary);">Disconnected</span>'
+            + '</div>'
+            + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+            + '<span style="font-weight:600;font-size:13px;">Events</span>'
+            + '<button class="btn btn-sm btn-secondary" id="' + uid + '-clear">Clear</button>'
+            + '</div>'
+            + '<pre id="' + uid + '-log" class="response-body" style="max-height:300px;overflow-y:auto;min-height:60px;font-size:12px;"></pre>';
+        card.appendChild(body);
+        endpointsContainer.appendChild(card);
+
+        hdr.addEventListener('click', () => {
+            body.classList.toggle('open');
+            card.querySelector('#toggle-' + uid).classList.toggle('open');
+        });
+
+        let esConn = null;
+        const connectBtn = card.querySelector('#' + uid + '-connect');
+        const disconnectBtn = card.querySelector('#' + uid + '-disconnect');
+        const queryInput = card.querySelector('#' + uid + '-query');
+        const statusEl = card.querySelector('#' + uid + '-status');
+        const logEl = card.querySelector('#' + uid + '-log');
+        const clearBtn = card.querySelector('#' + uid + '-clear');
+
+        function sseLog(type, text) {
+            const ts = new Date().toLocaleTimeString();
+            logEl.textContent += '[' + ts + '] ' + type + ' ' + text + '\n';
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const proto = secureCheck.checked ? 'https' : 'http';
+            const host = hostInput.value.trim() || 'localhost';
+            const port = location.port || '5000';
+            let url = proto + '://' + host + ':' + port + route.path;
+            const qs = queryInput.value.trim();
+            if (qs) url += '?' + qs;
+            sseLog('\u2192', 'Connecting to ' + url + ' ...');
+            esConn = new EventSource(url);
+            esConn.addEventListener('open', () => {
+                statusEl.textContent = 'Connected';
+                statusEl.style.color = 'var(--success)';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sseLog('\u2713', 'Connected');
+            });
+            esConn.addEventListener('message', (e) => { sseLog('\u2190', 'data: ' + e.data); });
+            ['connected', 'tick'].forEach(ev => { esConn.addEventListener(ev, (e) => { sseLog('\u2190', ev + ': ' + e.data); }); });
+            esConn.addEventListener('error', () => {
+                if (esConn && esConn.readyState === 2) {
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.style.color = 'var(--text-secondary)';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    sseLog('\u2715', 'Connection closed');
+                    esConn = null;
+                } else { sseLog('\u2717', 'Connection error'); }
+            });
+        });
+
+        disconnectBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (esConn) { esConn.close(); esConn = null; }
+            statusEl.textContent = 'Disconnected';
+            statusEl.style.color = 'var(--text-secondary)';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            sseLog('\u2715', 'Disconnected by user');
+        });
+
+        clearBtn.addEventListener('click', (ev) => { ev.stopPropagation(); logEl.textContent = ''; });
+    }
+
     updateLongConnHandlers();
     updateOrdinaryHandlers();
 

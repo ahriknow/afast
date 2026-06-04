@@ -7,15 +7,36 @@
 - **`ordinary-ws` feature — WebSocket 路由**: 新增基于路径的 WebSocket 端点，支持路径参数和查询参数提取。
   - `#[ws(desc("..."))]` 宏：声明 WebSocket 路由 handler。
   - `WsSender` / `WsReceiver` 提取器：分离收发，与二进制协议的 `Sender` / `Receiver` 风格一致。
-  - `WsQuery<T>` / `WsParam<T>` 提取器：从升级请求中提取查询参数和路径参数。
+  - `WsQuery<T>` / `WsParam<T>` 提取器（`Query<T>` / `Param<T>` 别名）：从升级请求中提取查询参数和路径参数。
   - `service!` 宏支持 `ws("/path/:param", handler)` 注册 WebSocket 路由。
   - 客户端 codegen 自动生成 WebSocket 连接方法（TS/JS/KT/RS），TS/JS 兼容 uni.connectSocket 和 wx.connectSocket。
   - 支持 rate-limit 和 lifecycle hook（before_request / on_connect / on_disconnect）。
   - `ordinary-ws` 独立于 `ordinary-http`，可单独启用。
+- **`ordinary-sse` feature — Server-Sent Events 路由**: 新增基于路径的 SSE 端点，支持路径参数和查询参数提取。
+  - `#[sse(desc("..."))]` 宏：声明 SSE 路由 handler。
+  - `SseSender` 提取器：通过 `send()` / `send_event()` 推送事件。
+  - `SseEvent` 结构体：支持 `event`、`data`、`id`、`retry` 字段。
+  - `service!` 宏支持 `sse("/path", handler)` 注册 SSE 路由。
+  - 客户端 codegen 自动生成 `EventSource` 方法（TS/JS），Kotlin 使用 OkHttp `EventSource` 或 `java.net.http.HttpClient`。
+  - 支持 rate-limit 和 lifecycle hook（before_request / on_response / on_error）。
+  - `ordinary-sse` 依赖 `ordinary-http`，可独立启用。
+- **统一提取器**: `Query<T>` / `Param<T>` 从 `ordinary-http` 的纯壳子升级为自带 `from_query()` / `from_params()` 方法的完整提取器，所有 transport（HTTP、WS、SSE）共用。`WsQuery` / `WsParam` 保留为类型别名，向后兼容。Feature gate 改为 `any(ordinary-http, ordinary-ws, ordinary-sse)`。
+- **`Header<T>` 提取器支持 WS/SSE**: `#[ws]` 和 `#[sse]` handler 现在支持 `Header<T>` 提取器，从 HTTP 升级请求中提取 headers。
+- **ordinary 路由 lifecycle hook 支持**: `before_request`、`on_response`、`on_error`、`on_connect`、`on_disconnect` hook 现在对所有 ordinary 路由（HTTP、WS、SSE）生效。
+  - Hook key 使用 `"service_name:route_path"` 格式，避免同 service 不同 group 同名 handler 冲突。
+  - 合并 service（同名 service）的 hook 自动去重。
+  - `on_response` / `on_error` 在 handler 返回后正确触发（修复了 guard 提前 drop 的问题）。
+- **HTTP 响应体重构为 `BoxBody`**: 支持固定体（`Full<Bytes>`）和流式体（`StreamBody`），为 SSE 流式推送提供基础。
 - **`binary` feature flag**: 二进制协议（`POST /_api`、WS 帧、TCP 帧）现在由 `binary` feature 控制。`ws` 和 `tcp` 依赖 `binary`，`http` 和 `ordinary-http` 不依赖。
 - **KT 客户端 `KtCallType::OkHttp`**: 新增 OkHttp 传输方式，兼容 Android 平台。使用 `OkHttpClient` 替代 `java.net.HttpURLConnection` 和 `java.net.http.WebSocket`。
 - **KT codegen 每个 service 独立包名**: 解决多 service 编译时类型重复定义问题。每个 service 生成到独立子目录（如 `check/check.kt`），包名如 `afast.generated.check`。
 - **TS/JS ordinary-ws codegen 兼容 uni/wx**: 生成的 WebSocket 方法根据 `this._transport` 自动选择 `new WebSocket()`、`uni.connectSocket()` 或 `wx.connectSocket()`。
+- **交互式文档支持 WS/SSE 调试**: API 文档页面（`/doc/{service}`）新增 WebSocket 和 SSE 路由的交互式调试面板。
+  - WS 路由：Connect/Disconnect 按钮、消息输入框、Send 按钮（支持 Enter 快捷键）、实时日志面板。
+  - SSE 路由：Query 参数输入、Connect/Disconnect 按钮、实时事件流日志。
+  - WS/SSE 路由渲染为独立 endpoint card，与 binary handler 样式一致（无额外分组标题）。
+  - WS/SSE 连接地址使用右上角配置面板的 host/port/TLS 设置，不再写死 `location.hostname`。
+  - 文档 schema 新增 `wsRoutes` 和 `sseRoutes` 字段，支持所有 service 的 WS/SSE 路由展示。
 
 ### Changed
 
@@ -24,6 +45,8 @@
 - **KT `Option<T>` 返回类型**: 修复 Option 返回类型的反序列化（先读 u8 标志位再反序列化内层类型），返回类型正确标记为 nullable（`GetArticle?`）。
 - **KT `chatWs` 修复**: 从 `host`/`port`/`tls` 构建 URL；`WebSocket.Listener` 用匿名对象替代不存在的 `create()`。
 - **TS/JS uni/wx `onMessage` 兼容**: `data` 类型从 `ArrayBuffer` 改为 `string | ArrayBuffer`，兼容文本帧。
+- **TS/JS codegen WS/SSE 方法改用箭头函数**: 修复 `this` 绑定问题，WS 和 SSE 方法从普通函数改为箭头函数，正确引用 `ChatClient` 实例。
+- **Proc macro `expand_ordinary` 简化**: Query/Param 提取从内联解析改为调用 `Query::from_query()` / `Param::from_params()`。
 - **GitHub Actions**: 移除第三方 `peaceiris/actions-mdbook`，改用 `cargo install mdbook` + `actions/cache`，消除 Node.js 废弃警告。
 
 ## [0.1.9]

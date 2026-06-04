@@ -3090,7 +3090,84 @@ pub(crate) fn generate_service_js(
 
             lines.push(format!("        /** WebSocket: {} */", path));
             lines.push(format!(
-                "        {}({}) {{\n{}        }},",
+                "        {}: ({}) => {{\n{}        }},",
+                handler_name, sig_params, body
+            ));
+        }
+    }
+
+    // ── Ordinary-sse routes ────────────────────────────────────
+    #[cfg(feature = "ordinary-sse")]
+    {
+        for sse_route in &svc.sse_routes {
+            let path = sse_route.path;
+            let handler_name = sse_route.handler_name;
+
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+            let has_params = segments.iter().any(|s| s.starts_with(':'));
+
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            let sig_params = if param_names.is_empty() {
+                "query".to_string()
+            } else {
+                let params_str = param_names
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}, query", params_str)
+            };
+
+            let mut path_expr = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    path_expr.push('/');
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    path_expr.push_str(&format!("${{encodeURIComponent({})}}", param));
+                } else {
+                    path_expr.push_str(seg);
+                }
+            }
+
+            let ind = "        ";
+            let mut body = String::new();
+            body.push_str(&format!(
+                "{}const scheme = this._tls ? 'https' : 'http';\n",
+                ind
+            ));
+            if has_params {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, path_expr
+                ));
+            } else {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, trimmed
+                ));
+            }
+            body.push_str(&format!("{}if (query) {{\n", ind));
+            body.push_str(&format!(
+                "    {}const qs = new URLSearchParams(query);\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}if (qs.toString()) url += '?' + qs.toString();\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+            body.push_str(&format!("{}const es = new EventSource(url);\n", ind));
+            body.push_str(&format!("{}return es;\n", ind));
+
+            lines.push(format!("        /** SSE: {} */", path));
+            lines.push(format!(
+                "        {}: ({}) => {{\n{}        }},",
                 handler_name, sig_params, body
             ));
         }

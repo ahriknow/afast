@@ -17,7 +17,6 @@ use std::pin::Pin;
 
 use tokio::sync::mpsc;
 
-use crate::app::ordinary::{from_value_lenient, parse_query_to_json, path_params_to_json};
 use crate::error::Error;
 
 // ─── WsMessage ────────────────────────────────────────────────────
@@ -153,47 +152,15 @@ impl WsReceiver {
     }
 }
 
-// ─── WsQuery extractor ────────────────────────────────────────────
+// ─── WsQuery / WsParam — aliases for shared Query/Param ──────
 
 /// Query parameter extractor for WebSocket upgrade requests.
-///
-/// Extracts typed query parameters from the URL of the WebSocket
-/// upgrade request (e.g. `ws://host/chat?token=abc`).
-pub struct WsQuery<T>(pub T);
-
-impl<T: serde::de::DeserializeOwned> WsQuery<T> {
-    /// Parses a query string into a `WsQuery<T>`.
-    pub fn from_query(query: &str) -> Result<Self, Error> {
-        let json = parse_query_to_json(query);
-        from_value_lenient(json)
-            .map(WsQuery)
-            .map_err(|e| Error::InvalidParam {
-                code: 400,
-                message: format!("query parse error: {e}"),
-            })
-    }
-}
-
-// ─── WsParam extractor ───────────────────────────────────────────
+/// Alias for [`crate::Query`].
+pub type WsQuery<T> = crate::app::extractors::Query<T>;
 
 /// Path parameter extractor for WebSocket upgrade requests.
-///
-/// Extracts typed path parameters from the matched route pattern
-/// (e.g. `/chat/:room` → `WsParam<ChatParams>`).
-pub struct WsParam<T>(pub T);
-
-impl<T: serde::de::DeserializeOwned> WsParam<T> {
-    /// Parses path parameters into a `WsParam<T>`.
-    pub fn from_params(params: &HashMap<String, String>) -> Result<Self, Error> {
-        let json = path_params_to_json(params);
-        from_value_lenient(json)
-            .map(WsParam)
-            .map_err(|e| Error::InvalidParam {
-                code: 400,
-                message: format!("path param parse error: {e}"),
-            })
-    }
-}
+/// Alias for [`crate::Param`].
+pub type WsParam<T> = crate::app::extractors::Param<T>;
 
 // ─── WsHandlerInvoker trait ──────────────────────────────────────
 
@@ -208,6 +175,7 @@ pub trait WsHandlerInvoker: Send + Sync {
         &'static self,
         query: &str,
         path_params: &HashMap<String, String>,
+        headers: serde_json::Value,
         sender: WsSender,
         receiver: WsReceiver,
         state: std::sync::Arc<crate::state::StateMap>,
@@ -224,8 +192,9 @@ pub struct WsRouteInfo {
     /// The handler name for logging/diagnostics.
     pub handler_name: &'static str,
     /// The compiled route pattern.
-    /// The compiled route pattern.
     pub(crate) pattern: crate::app::ordinary::RoutePattern,
     /// The ws handler invoker.
     pub invoker: &'static dyn WsHandlerInvoker,
+    /// The service this route belongs to.
+    pub service_name: String,
 }

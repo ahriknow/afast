@@ -197,6 +197,38 @@ pub fn register_ws(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Marks an async function as a Server-Sent Events (SSE) route handler.
+///
+/// The handler receives `SseSender` to push events and optionally
+/// `WsQuery<T>` / `WsParam<T>` for HTTP parameters from the request.
+///
+/// ```no_run
+/// use afast::sse;
+///
+/// #[sse(desc("Live events"))]
+/// async fn events(sender: afast::SseSender) -> afast::Result<()> {
+///     sender.send(&"hello").await?;
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn sse(attr: TokenStream, item: TokenStream) -> TokenStream {
+    handler::expand_sse(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Produces an SseHandlerDef for the given SSE handler.
+///
+/// `register_sse!(name)` expands to a call to the auto-generated entry function
+/// `name()`, which returns a `(&'static dyn SseHandlerInvoker, &'static str)` tuple.
+#[proc_macro]
+pub fn register_sse(input: TokenStream) -> TokenStream {
+    register::expand_sse(input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
 /// Derives the `Structure` trait for a struct or enum.
 ///
 /// Generates runtime type metadata (`TagMeta`) and implements `afast::Structure`,

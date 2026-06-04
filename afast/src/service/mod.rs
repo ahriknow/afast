@@ -15,6 +15,8 @@ pub struct OrdinaryRouteInfo {
     pub path: String,
     /// The handler entry containing name, invoker, metadata, and ordinary invoker.
     pub handler_entry: HandlerEntry,
+    /// The service this route belongs to.
+    pub service_name: String,
 }
 
 /// A named group of handlers representing an API service.
@@ -36,6 +38,9 @@ pub struct Service {
     /// Ordinary WebSocket routes registered in this service.
     #[cfg(feature = "ordinary-ws")]
     pub ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
+    /// Ordinary SSE routes registered in this service.
+    #[cfg(feature = "ordinary-sse")]
+    pub sse_routes: Vec<crate::app::ordinary_sse::SseRouteInfo>,
     /// Per-service lifecycle hooks. When non-empty, these override global
     /// hooks for handlers belonging to this service.
     #[cfg(feature = "hook")]
@@ -53,6 +58,8 @@ impl Service {
             ordinary_routes: Vec::new(),
             #[cfg(feature = "ordinary-ws")]
             ws_routes: Vec::new(),
+            #[cfg(feature = "ordinary-sse")]
+            sse_routes: Vec::new(),
             #[cfg(feature = "hook")]
             hooks: Vec::new(),
         }
@@ -102,6 +109,7 @@ impl Service {
             method,
             path: path.to_string(),
             handler_entry: entry,
+            service_name: self.name.clone(),
         });
         self
     }
@@ -120,7 +128,28 @@ impl Service {
             handler_name,
             pattern: crate::app::ordinary::RoutePattern::parse(path),
             invoker,
+            service_name: self.name.clone(),
         });
+        self
+    }
+
+    /// Registers an ordinary SSE route in this service.
+    #[doc(hidden)]
+    #[cfg(feature = "ordinary-sse")]
+    pub fn sse_route(
+        mut self,
+        path: &'static str,
+        invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
+        handler_name: &'static str,
+    ) -> Self {
+        self.sse_routes
+            .push(crate::app::ordinary_sse::SseRouteInfo {
+                path,
+                handler_name,
+                pattern: crate::app::ordinary::RoutePattern::parse(path),
+                invoker,
+                service_name: self.name.clone(),
+            });
         self
     }
 }

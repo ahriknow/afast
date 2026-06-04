@@ -18,6 +18,7 @@ use handler::article::{
 };
 use handler::auth::{create_token, get_user_id, login, register};
 use handler::chat::chat_echo;
+use handler::sse_stream::sse_stream;
 use handler::{health, info, ping};
 use state::AppState;
 
@@ -124,14 +125,16 @@ async fn main() {
                 delete("", delete_user_http),
             })
         })
-    });
+    })
+    .hook(CheckServiceHook);
 
     let auth_svc = service!("auth", "Auth Service" => {
         h(register),
         h(login),
         h(create_token),
         h(get_user_id),
-    });
+    })
+    .hook(CheckServiceHook);
 
     let article_svc = service!("article", "Article Service" => {
         h(create_article),
@@ -139,11 +142,13 @@ async fn main() {
         h(get_article),
         h(update_article),
         h(delete_article),
-    });
+    })
+    .hook(CheckServiceHook);
 
     let chat_svc = service!("chat", "Chat Service" => {
         h(chat_echo),
         ws("/chat/:room", handler::ws_chat::chat_ws),
+        sse("/sse", sse_stream),
     })
     .hook(CheckServiceHook);
 

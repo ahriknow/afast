@@ -15,6 +15,7 @@ HTTP server endpoints:
 | GET | `/doc/{service}` | Service-specific docs (requires `doc`) |
 | * | Ordinary routes | RESTful endpoints (requires `ordinary-http`) |
 | GET | `/path/:param` | WebSocket upgrade for ordinary-ws routes (requires `ordinary-ws`) |
+| GET | `/path` | SSE stream for ordinary-sse routes (requires `ordinary-sse`) |
 
 **HTTP Response Format:**
 - Success: `[0u8][0i64][data: bytes]`
@@ -114,6 +115,90 @@ let svc = service!("chat" => {
 Connect: `ws://host:port/chat/general?token=abc`
 
 TS/JS 客户端自动生成平台感知的 WebSocket 连接方法，兼容浏览器、UniApp 和微信小程序。
+
+## Server-Sent Events (SSE)
+
+Requires the `ordinary-sse` feature. Register SSE routes with `sse()`:
+
+```rust
+use afast::{SseSender, Query};
+
+#[derive(Deserialize)]
+struct SseQuery { room: Option<String> }
+
+#[afast::sse(desc("SSE event stream"))]
+async fn notifications(
+    query: Query<SseQuery>,
+    sender: SseSender,
+) -> afast::Result<()> {
+    let room = query.0.room.unwrap_or_default();
+
+    // Send named event
+    sender.send_event("connected", &serde_json::json!({"room": room})).await?;
+
+    // Send data event (auto-serialized as JSON)
+    let mut count = 0u64;
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        count += 1;
+        if sender.send_event("tick", &serde_json::json!({"count": count})).await.is_err() {
+            break;  // Client disconnected
+        }
+    }
+    Ok(())
+}
+
+let svc = service!("events" => {
+    sse("/notifications", notifications),
+});
+```
+
+Connect: `GET http://host:port/notifications?room=general`
+
+Response headers:
+- `Content-Type: text/event-stream; charset=utf-8`
+- `Cache-Control: no-cache`
+- `Connection: keep-alive`
+- `Transfer-Encoding: chunked`
+
+Wire format:
+```
+event: connected
+data: {"room":"general"}
+
+event: tick
+data: {"count":1}
+```
+
+### SseSender Methods
+
+| Method | Description |
+|--------|-------------|
+| `send<T: Serialize>(data)` | Send a `data:` event with JSON-serialized value |
+| `send_event<T: Serialize>(event, data)` | Send a named event with JSON-serialized value |
+
+### SseEvent Fields
+
+| Field | Type | Wire Format |
+|-------|------|-------------|
+| `event` | `Option<&str>` | `event: name\n` |
+| `data` | `String` | `data: ...\n` |
+| `id` | `Option<&str>` | `id: ...\n` |
+| `retry` | `Option<u64>` | `retry: ...\n` |
+
+### Client Codegen
+
+- **TS/JS**: Generates `EventSource`-based methods
+- **KT (OkHttp)**: Uses `okhttp3.sse.EventSource`
+- **KT (non-OkHttp)**: Uses `java.net.http.HttpClient` with `BodyHandlers.ofLines()`
+
+```typescript
+// TS/JS generated client
+const es = client.apis.sse_stream({ room: "general" });
+es.addEventListener("connected", (e) => console.log("Connected:", e.data));
+es.addEventListener("tick", (e) => console.log("Tick:", JSON.parse(e.data)));
+es.close();
+```
 
 ## Long Connections
 

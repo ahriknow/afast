@@ -20,6 +20,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use http_body_util::BodyExt;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::service::service_fn;
@@ -27,6 +28,9 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+
+/// Type alias for boxed response bodies — supports both fixed and streaming.
+type BoxBody = http_body_util::combinators::BoxBody<Bytes, std::convert::Infallible>;
 
 #[cfg(any(feature = "code", feature = "doc"))]
 use crate::Service;
@@ -58,6 +62,8 @@ pub struct HttpConfig {
     pub ordinary_routes: Vec<OrdinaryRouteInfo>,
     #[cfg(feature = "ordinary-ws")]
     pub ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
+    #[cfg(feature = "ordinary-sse")]
+    pub sse_routes: Vec<crate::app::ordinary_sse::SseRouteInfo>,
     #[cfg(all(feature = "ws", feature = "binary"))]
     pub enable_ws_upgrade: bool,
     #[cfg(feature = "tls")]
@@ -70,6 +76,11 @@ pub struct HttpConfig {
     /// Registered lifecycle hooks.
     #[cfg(feature = "hook")]
     pub hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    /// Name-based hook lookup for ordinary routes.
+    /// Key: `"service_name:handler_name"`, Value: merged hooks (global + service).
+    #[cfg(feature = "hook")]
+    pub named_hooks:
+        Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -106,6 +117,8 @@ pub async fn serve(
                 .ordinary_invoker
                 .expect("ordinary_invoker must be set for ordinary routes"),
             handler_name: r.handler_entry.name,
+            path: Box::leak(r.path.clone().into_boxed_str()),
+            service_name: r.service_name.clone(),
         })
         .collect();
 
@@ -118,6 +131,22 @@ pub async fn serve(
             pattern: RoutePattern::parse(r.path),
             invoker: r.invoker,
             handler_name: r.handler_name,
+            path: r.path,
+            service_name: r.service_name.clone(),
+        })
+        .collect();
+
+    // Compile ordinary-sse route patterns once at startup.
+    #[cfg(feature = "ordinary-sse")]
+    let compiled_sse_routes: Vec<CompiledSseRoute> = config
+        .sse_routes
+        .iter()
+        .map(|r| CompiledSseRoute {
+            pattern: RoutePattern::parse(r.path),
+            invoker: r.invoker,
+            handler_name: r.handler_name,
+            path: r.path,
+            service_name: r.service_name.clone(),
         })
         .collect();
 
@@ -136,6 +165,8 @@ pub async fn serve(
         ordinary_routes: compiled_routes,
         #[cfg(feature = "ordinary-ws")]
         ws_routes: compiled_ws_routes,
+        #[cfg(feature = "ordinary-sse")]
+        sse_routes: compiled_sse_routes,
         #[cfg(all(feature = "ws", feature = "binary"))]
         enable_ws_upgrade: config.enable_ws_upgrade,
         #[cfg(feature = "rate-limit")]
@@ -144,6 +175,8 @@ pub async fn serve(
         handler_names: config.handler_names,
         #[cfg(feature = "hook")]
         hooks: config.hooks,
+        #[cfg(feature = "hook")]
+        named_hooks: config.named_hooks,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -260,6 +293,8 @@ struct SharedState {
     ordinary_routes: Vec<CompiledOrdinaryRoute>,
     #[cfg(feature = "ordinary-ws")]
     ws_routes: Vec<CompiledWsRoute>,
+    #[cfg(feature = "ordinary-sse")]
+    sse_routes: Vec<CompiledSseRoute>,
     #[cfg(all(feature = "ws", feature = "binary"))]
     enable_ws_upgrade: bool,
     #[cfg(feature = "rate-limit")]
@@ -268,6 +303,9 @@ struct SharedState {
     handler_names: Vec<String>,
     #[cfg(feature = "hook")]
     hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    /// Name-based hook lookup for ordinary routes.
+    #[cfg(feature = "hook")]
+    named_hooks: Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -278,6 +316,8 @@ struct CompiledOrdinaryRoute {
     invoker: &'static dyn crate::handler::OrdinaryHandlerInvoker,
     #[cfg_attr(not(feature = "rate-limit"), allow(dead_code))]
     handler_name: &'static str,
+    path: &'static str,
+    service_name: String,
 }
 
 /// A pre-compiled ordinary-ws route ready for WebSocket upgrade matching.
@@ -286,6 +326,18 @@ struct CompiledWsRoute {
     pattern: RoutePattern,
     invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
     handler_name: &'static str,
+    path: &'static str,
+    service_name: String,
+}
+
+/// A pre-compiled ordinary-sse route ready for SSE stream matching.
+#[cfg(feature = "ordinary-sse")]
+struct CompiledSseRoute {
+    pattern: RoutePattern,
+    invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
+    handler_name: &'static str,
+    path: &'static str,
+    service_name: String,
 }
 
 /// Dispatches an incoming HTTP request to the correct handler.
@@ -301,7 +353,7 @@ async fn handle_request(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
     client_ip: &str,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path = uri.path().to_string();
@@ -340,7 +392,7 @@ async fn handle_request(
                             .status(status)
                             .header("content-type", "application/json; charset=utf-8")
                             .header("retry-after", "60")
-                            .body(Full::new(Bytes::from(body)))
+                            .body(Full::new(Bytes::from(body)).boxed())
                             .expect("valid response builder"));
                     }
                 }
@@ -348,11 +400,53 @@ async fn handle_request(
                 let query_string = uri.query().unwrap_or("");
                 let state = shared.state.clone();
                 let invoker = compiled.invoker;
-                return match invoker
+
+                // Hook: before_request
+                #[cfg(feature = "hook")]
+                let hook_ctx = crate::hook::RequestContext {
+                    handler_name: compiled.handler_name,
+                    handler_desc: "",
+                    transport: "http",
+                    handler_id: 0,
+                    state: state.clone(),
+                };
+                #[cfg(feature = "hook")]
+                let hook_key = format!("{}:{}", compiled.service_name, compiled.path);
+                #[cfg(feature = "hook")]
+                let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+                    shared
+                        .named_hooks
+                        .get(&hook_key)
+                        .map(|hooks| {
+                            hooks
+                                .iter()
+                                .filter_map(|h| h.before_request(&hook_ctx))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+
+                let result = invoker
                     .call_ordinary(req, &path_params, query_string, &state)
-                    .await
-                {
-                    Ok(response) => Ok(response),
+                    .await;
+
+                // Hook: on_response / on_error
+                #[cfg(feature = "hook")]
+                match &result {
+                    Ok(_) => {
+                        for g in &mut _guards {
+                            g.on_response(&hook_ctx, &[]);
+                        }
+                    }
+                    Err(e) => {
+                        for g in &mut _guards {
+                            g.on_error(&hook_ctx, e);
+                        }
+                    }
+                }
+
+                return match result {
+                    Ok(response) => Ok(response.map(|b| b.boxed())),
                     Err(e) => {
                         let code = e.code();
                         let message = e.message();
@@ -368,10 +462,33 @@ async fn handle_request(
                         Ok(Response::builder()
                             .status(status)
                             .header("content-type", "application/json; charset=utf-8")
-                            .body(Full::new(Bytes::from(body)))
+                            .body(Full::new(Bytes::from(body)).boxed())
                             .expect("valid response builder"))
                     }
                 };
+            }
+        }
+    }
+
+    // Try ordinary-sse routes (SSE stream with path matching)
+    #[cfg(feature = "ordinary-sse")]
+    if method == hyper::Method::GET {
+        for compiled in &shared.sse_routes {
+            if let Some(path_params) = compiled.pattern.matches(&path) {
+                let query_string = uri.query().unwrap_or("");
+                let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
+                return handle_sse(
+                    shared,
+                    compiled.invoker,
+                    compiled.handler_name,
+                    &compiled.service_name,
+                    compiled.path,
+                    query_string.to_string(),
+                    path_params,
+                    headers_json,
+                    client_ip,
+                )
+                .await;
             }
         }
     }
@@ -411,7 +528,7 @@ async fn handle_request(
                                 .status(status)
                                 .header("content-type", "application/json; charset=utf-8")
                                 .header("retry-after", "60")
-                                .body(Full::new(Bytes::from(body)))
+                                .body(Full::new(Bytes::from(body)).boxed())
                                 .expect("valid response builder"));
                         }
                     }
@@ -422,6 +539,8 @@ async fn handle_request(
                         shared,
                         compiled.invoker,
                         compiled.handler_name,
+                        &compiled.service_name,
+                        compiled.path,
                         query_string,
                         path_params,
                         client_ip,
@@ -481,7 +600,7 @@ async fn handle_api(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
     client_ip: &str,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     use http_body_util::BodyExt;
     let headers = req.headers().clone();
     let body = req.into_body().collect().await?.to_bytes();
@@ -593,7 +712,7 @@ async fn handle_api(
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "application/octet-stream")
-                .body(Full::new(Bytes::from(resp)))
+                .body(Full::new(Bytes::from(resp)).boxed())
                 .expect("valid response builder"))
         }
         Err(e) => error_response(StatusCode::OK, e.code(), e.message()),
@@ -612,7 +731,7 @@ fn handle_code(
     segments: &[&str],
     query: Option<&str>,
     shared: &SharedState,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     // segments: ["code", service_name, lang]
     if segments.len() != 3 {
         return error_response(
@@ -755,7 +874,7 @@ fn handle_code(
         Ok(code) => Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", content_type)
-            .body(Full::new(Bytes::from(code)))
+            .body(Full::new(Bytes::from(code)).boxed())
             .expect("valid response builder")),
         Err(e) => error_response(StatusCode::NOT_FOUND, CODE_HTTP, &e.to_string()),
     }
@@ -767,10 +886,7 @@ fn handle_code(
 /// returns the documentation page for a single service, including an inline
 /// API tester that can send real requests to the server.
 #[cfg(feature = "doc")]
-fn handle_doc(
-    segments: &[&str],
-    shared: &SharedState,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+fn handle_doc(segments: &[&str], shared: &SharedState) -> Result<Response<BoxBody>, hyper::Error> {
     match segments.len() {
         1 => {
             // GET /doc → index.html
@@ -781,7 +897,7 @@ fn handle_doc(
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html; charset=utf-8")
-                .body(Full::new(Bytes::from(html)))
+                .body(Full::new(Bytes::from(html)).boxed())
                 .expect("valid response builder"))
         }
         2 => {
@@ -796,7 +912,7 @@ fn handle_doc(
                 Ok(html) => Ok(Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "text/html; charset=utf-8")
-                    .body(Full::new(Bytes::from(html)))
+                    .body(Full::new(Bytes::from(html)).boxed())
                     .expect("valid response builder")),
                 Err(e) => error_response(StatusCode::NOT_FOUND, CODE_HTTP, &e.to_string()),
             }
@@ -820,7 +936,7 @@ async fn handle_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
     _client_ip: &str,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::tungstenite::protocol::Role;
 
@@ -907,7 +1023,7 @@ async fn handle_ws_upgrade(
         .header("upgrade", "websocket")
         .header("connection", "upgrade")
         .header("sec-websocket-accept", accept_key)
-        .body(Full::new(Bytes::new()))
+        .body(Full::new(Bytes::new()).boxed())
         .expect("valid response builder"))
 }
 
@@ -917,15 +1033,18 @@ async fn handle_ws_upgrade(
 /// `WsReceiver` and invokes the matched handler. The handler runs in a
 /// spawned task so the 101 response is returned immediately.
 #[cfg(feature = "ordinary-ws")]
+#[allow(clippy::too_many_arguments)]
 async fn handle_ordinary_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
     handler_name: &str,
+    service_name: &str,
+    route_path: &str,
     query_string: &str,
     path_params: std::collections::HashMap<String, String>,
     _client_ip: &str,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::tungstenite::protocol::Role;
 
@@ -952,13 +1071,46 @@ async fn handle_ordinary_ws_upgrade(
         ws_key.expect("ws_key checked above").as_bytes(),
     );
 
+    // Extract request headers as JSON before the request is consumed by upgrade.
+    let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
+
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let query_owned = query_string.to_string();
+    // Leak to get &'static str for RequestContext (handler names are compile-time constants).
+    let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
     let handler_name_owned = handler_name.to_string();
 
-    // TODO: Add hook support (before_request, on_connect, on_disconnect)
-    // when the lifetime issues with spawned tasks are resolved.
+    // Hook: before_request
+    #[cfg(feature = "hook")]
+    let hook_ctx = crate::hook::RequestContext {
+        handler_name: handler_name_static,
+        handler_desc: "",
+        transport: "ws",
+        handler_id: 0,
+        state: state.clone(),
+    };
+    #[cfg(feature = "hook")]
+    let hook_key = format!("{}:{}", service_name, route_path);
+    #[cfg(feature = "hook")]
+    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+        shared
+            .named_hooks
+            .get(&hook_key)
+            .map(|hooks| {
+                hooks
+                    .iter()
+                    .filter_map(|h| h.before_request(&hook_ctx))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // Clone hook data for use inside the spawned task.
+    #[cfg(feature = "hook")]
+    let hook_key = hook_key.clone();
+    #[cfg(feature = "hook")]
+    let named_hooks_for_spawn = shared.named_hooks.clone();
 
     tokio::spawn(async move {
         match on_upgrade.await {
@@ -978,6 +1130,27 @@ async fn handle_ordinary_ws_upgrade(
 
                 let ws_sender = crate::app::ordinary_ws::WsSender::new(user_tx);
                 let ws_receiver = crate::app::ordinary_ws::WsReceiver::new(incoming_rx);
+
+                // Hook: on_connect
+                #[cfg(feature = "hook")]
+                let _hooks_for_spawn = named_hooks_for_spawn
+                    .get(&hook_key)
+                    .cloned()
+                    .unwrap_or_default();
+                #[cfg(feature = "hook")]
+                let mut _conn_guards: Vec<Box<dyn crate::hook::ConnectionGuard>> = {
+                    let ctx = crate::hook::RequestContext {
+                        handler_name: handler_name_static,
+                        handler_desc: "",
+                        transport: "ws",
+                        handler_id: 0,
+                        state: state.clone(),
+                    };
+                    _hooks_for_spawn
+                        .iter()
+                        .filter_map(|h| h.on_connect(&ctx))
+                        .collect()
+                };
 
                 // Spawn a task to forward outgoing messages from user → WebSocket.
                 let mut ws_tx = ws_tx;
@@ -1044,16 +1217,64 @@ async fn handle_ordinary_ws_upgrade(
                 });
 
                 // Call the user's handler.
-                if let Err(e) = invoker
-                    .call_ws(&query_owned, &path_params, ws_sender, ws_receiver, state)
-                    .await
+                let state_for_handler = state.clone();
+                let handler_result = invoker
+                    .call_ws(
+                        &query_owned,
+                        &path_params,
+                        headers_json.clone(),
+                        ws_sender,
+                        ws_receiver,
+                        state_for_handler,
+                    )
+                    .await;
+
+                // Hook: on_response / on_error for before_request guards
+                #[cfg(feature = "hook")]
                 {
+                    let ctx = crate::hook::RequestContext {
+                        handler_name: handler_name_static,
+                        handler_desc: "",
+                        transport: "ws",
+                        handler_id: 0,
+                        state: state.clone(),
+                    };
+                    match &handler_result {
+                        Ok(_) => {
+                            for g in &mut _guards {
+                                g.on_response(&ctx, &[]);
+                            }
+                        }
+                        Err(e) => {
+                            for g in &mut _guards {
+                                g.on_error(&ctx, e);
+                            }
+                        }
+                    }
+                }
+
+                if let Err(e) = handler_result {
                     eprintln!("afast: ws handler '{}' error: {}", handler_name_owned, e);
                 }
 
                 // Clean up forwarding tasks.
                 send_task.abort();
                 recv_task.abort();
+
+                // Hook: on_disconnect
+                #[cfg(feature = "hook")]
+                {
+                    let ctx = crate::hook::RequestContext {
+                        handler_name: handler_name_static,
+                        handler_desc: "",
+                        transport: "ws",
+                        handler_id: 0,
+                        state: state.clone(),
+                    };
+                    for g in &mut _conn_guards {
+                        g.on_disconnect(&ctx);
+                    }
+                }
             }
             Err(e) => {
                 eprintln!(
@@ -1069,23 +1290,117 @@ async fn handle_ordinary_ws_upgrade(
         .header("upgrade", "websocket")
         .header("connection", "upgrade")
         .header("sec-websocket-accept", accept_key)
-        .body(Full::new(Bytes::new()))
+        .body(Full::new(Bytes::new()).boxed())
+        .expect("valid response builder"))
+}
+
+/// Handles SSE routes — returns a `text/event-stream` response and spawns
+/// the handler to push events over the connection lifetime.
+#[cfg(feature = "ordinary-sse")]
+#[allow(clippy::too_many_arguments)]
+async fn handle_sse(
+    shared: &SharedState,
+    invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
+    handler_name: &str,
+    service_name: &str,
+    route_path: &str,
+    query_string: String,
+    path_params: std::collections::HashMap<String, String>,
+    headers_json: serde_json::Value,
+    _client_ip: &str,
+) -> Result<Response<BoxBody>, hyper::Error> {
+    // Create channel for SSE events
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);
+    let sender = crate::app::ordinary_sse::SseSender::new(tx);
+    let state = shared.state.clone();
+    // Leak to get &'static str for RequestContext (handler names are compile-time constants).
+    let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
+    let handler_name_owned = handler_name.to_string();
+
+    // Hook: before_request
+    #[cfg(feature = "hook")]
+    let hook_ctx = crate::hook::RequestContext {
+        handler_name: handler_name_static,
+        handler_desc: "",
+        transport: "sse",
+        handler_id: 0,
+        state: state.clone(),
+    };
+    #[cfg(feature = "hook")]
+    let hook_key = format!("{}:{}", service_name, route_path);
+    #[cfg(feature = "hook")]
+    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+        shared
+            .named_hooks
+            .get(&hook_key)
+            .map(|hooks| {
+                hooks
+                    .iter()
+                    .filter_map(|h| h.before_request(&hook_ctx))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // Spawn the handler — it pushes events into `tx` via the SseSender.
+    // When `tx` is dropped (handler returns), the `rx` stream ends.
+    tokio::spawn(async move {
+        let handler_result = invoker
+            .call_sse(&query_string, &path_params, headers_json, sender, state)
+            .await;
+
+        if let Err(e) = handler_result {
+            eprintln!("afast: sse handler '{}' error: {}", handler_name_owned, e);
+        }
+        // sender (tx) is dropped here → rx stream will end
+    });
+
+    // Hook: on_response (HTTP 200 is being sent with streaming body)
+    #[cfg(feature = "hook")]
+    for g in &mut _guards {
+        g.on_response(&hook_ctx, &[]);
+    }
+
+    // Build a streaming body from the receiver channel
+    let stream = futures_util::stream::unfold(rx, |mut rx| async {
+        match rx.recv().await {
+            Some(event) if event.is_empty() => None,
+            Some(event) => Some((
+                Ok::<_, std::convert::Infallible>(hyper::body::Frame::data(
+                    hyper::body::Bytes::from(event),
+                )),
+                rx,
+            )),
+            None => None,
+        }
+    });
+
+    let body = http_body_util::StreamBody::new(stream).boxed();
+
+    // Build the SSE response
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream; charset=utf-8")
+        .header("cache-control", "no-cache")
+        .header("connection", "keep-alive")
+        .header("x-accel-buffering", "no")
+        .body(body)
         .expect("valid response builder"))
 }
 
 /// Builds a 405 Method Not Allowed response.
-fn method_not_allowed() -> Result<Response<Full<Bytes>>, hyper::Error> {
+fn method_not_allowed() -> Result<Response<BoxBody>, hyper::Error> {
     Ok(Response::builder()
         .status(StatusCode::METHOD_NOT_ALLOWED)
-        .body(Full::new(Bytes::from("method not allowed")))
+        .body(Full::new(Bytes::from("method not allowed")).boxed())
         .expect("valid response builder"))
 }
 
 /// Builds a 404 Not Found response.
-fn not_found() -> Result<Response<Full<Bytes>>, hyper::Error> {
+fn not_found() -> Result<Response<BoxBody>, hyper::Error> {
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(Full::new(Bytes::from("not found")))
+        .body(Full::new(Bytes::from("not found")).boxed())
         .expect("valid response builder"))
 }
 
@@ -1098,7 +1413,7 @@ fn error_response(
     status: StatusCode,
     code: i64,
     message: &str,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     let msg_bytes = message.as_bytes();
     let mut resp = Vec::with_capacity(1 + 8 + msg_bytes.len());
     resp.push(1u8);
@@ -1107,7 +1422,7 @@ fn error_response(
     Ok(Response::builder()
         .status(status)
         .header("content-type", "application/octet-stream")
-        .body(Full::new(Bytes::from(resp)))
+        .body(Full::new(Bytes::from(resp)).boxed())
         .expect("valid response builder"))
 }
 

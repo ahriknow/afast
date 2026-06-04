@@ -184,16 +184,29 @@ pub use serde_json;
 /// Extracts URL query parameters into `T`.
 ///
 /// `T` must implement `serde::de::DeserializeOwned`. The query string is parsed
-/// as `key=value&key=value` and deserialized with `serde_json`.
-#[cfg(feature = "ordinary-http")]
-pub struct Query<T>(pub T);
+/// as `key=value&key=value` and deserialized with lenient coercion
+/// (e.g. string-to-int conversion).
+///
+/// Use [`Query::from_query`] to parse from a raw query string.
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
+pub use crate::app::extractors::Query;
 
 /// Extracts route path parameters (`:id`, `:name`) into `T`.
 ///
 /// `T` must implement `serde::de::DeserializeOwned`. Path parameters are
-/// collected into a JSON object and deserialized.
-#[cfg(feature = "ordinary-http")]
-pub struct Param<T>(pub T);
+/// collected into a JSON object and deserialized with lenient coercion.
+///
+/// Use [`Param::from_params`] to parse from a path parameter map.
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
+pub use crate::app::extractors::Param;
 
 /// Extracts the JSON request body into `T`.
 ///
@@ -260,7 +273,11 @@ pub fn is_standard_header(name: &str) -> bool {
 pub use crate::app::ordinary::{
     fill_standard_header_defaults, header_name_to_field, read_body_bytes, req_headers_to_json,
 };
-#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
 pub use crate::app::ordinary::{from_value_lenient, parse_query_to_json, path_params_to_json};
 
 // ─── Ordinary HTTP response types ─────────────────────────────────
@@ -423,8 +440,12 @@ impl<T: IntoResponse> IntoResponse for Result<T> {
     }
 }
 
+#[cfg(feature = "ordinary-sse")]
+pub use afast_macros::register_sse;
 #[cfg(feature = "ordinary-ws")]
 pub use afast_macros::register_ws;
+#[cfg(feature = "ordinary-sse")]
+pub use afast_macros::sse;
 #[cfg(feature = "ordinary-ws")]
 pub use afast_macros::ws;
 pub use afast_macros::{Tag, handler, register, register_ordinary};
@@ -530,6 +551,15 @@ macro_rules! service {
             $($rest)*
         )
     };
+    (@svc $svc:expr, sse($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc
+            {
+                let (__sse_invoker, __sse_name) = $crate::register_sse!($($fn)+);
+                $svc.sse_route($path, __sse_invoker, __sse_name)
+            }
+            $($rest)*
+        )
+    };
 
     // ── Group building ────────────────────────────────────────
 
@@ -601,8 +631,14 @@ pub use app::KtCallType;
 pub use app::RsCallType;
 #[cfg(feature = "tls")]
 pub use app::TlsConfig;
-#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
 pub use app::ordinary;
+#[cfg(feature = "ordinary-sse")]
+pub use app::ordinary_sse::{SseEvent, SseSender};
 #[cfg(feature = "ordinary-ws")]
 pub use app::ordinary_ws;
 #[cfg(feature = "ordinary-ws")]

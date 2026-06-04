@@ -14,6 +14,7 @@
 | `doc` | Interactive API docs at `/doc` endpoint | `http`, `js` |
 | `ordinary-http` | RESTful JSON endpoints (GET/POST/PUT/DELETE) | `http`, serde, serde_json |
 | `ordinary-ws` | Path-based WebSocket endpoints with `WsSender`/`WsReceiver` | `ws`, `ordinary-http` |
+| `ordinary-sse` | Server-Sent Events endpoints with `SseSender` | `ordinary-http`, `futures-util` |
 | `seq64` | WS request ID uses `i64` (default `i32`) | — |
 | `len64` | WS payload length uses `u64` (default `u32`) | — |
 | `tag-u8` | Enum tag uses `u8` (default) | afastdata/tag-u8 |

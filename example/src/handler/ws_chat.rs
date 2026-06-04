@@ -1,4 +1,4 @@
-use afast::{WsParam, WsQuery, WsReceiver, WsSender};
+use afast::{Param, Query, WsReceiver, WsSender};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -17,8 +17,8 @@ pub struct ChatParam {
 /// Sends back each received message prefixed with the room name.
 #[afast::ws(desc("WebSocket chat echo"))]
 pub async fn chat_ws(
-    query: WsQuery<ChatQuery>,
-    param: WsParam<ChatParam>,
+    query: Query<ChatQuery>,
+    param: Param<ChatParam>,
     sender: WsSender,
     mut receiver: WsReceiver,
 ) -> afast::Result<()> {

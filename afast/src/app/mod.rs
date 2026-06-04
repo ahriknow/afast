@@ -296,6 +296,9 @@ pub struct AFast {
     /// Ordinary WebSocket routes extracted from registered services.
     #[cfg(feature = "ordinary-ws")]
     ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
+    /// Ordinary SSE routes extracted from registered services.
+    #[cfg(feature = "ordinary-sse")]
+    sse_routes: Vec<crate::app::ordinary_sse::SseRouteInfo>,
     /// TLS configuration for HTTPS, if enabled.
     #[cfg(feature = "tls")]
     tls_config: Option<TlsConfig>,
@@ -335,6 +338,8 @@ impl AFast {
             ordinary_routes: Vec::new(),
             #[cfg(feature = "ordinary-ws")]
             ws_routes: Vec::new(),
+            #[cfg(feature = "ordinary-sse")]
+            sse_routes: Vec::new(),
             #[cfg(feature = "tls")]
             tls_config: None,
             #[cfg(feature = "tls")]
@@ -464,7 +469,12 @@ impl AFast {
                 for route in &service.ordinary_routes {
                     self.ordinary_routes.push(route.clone());
                 }
-                collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
+                collect_ordinary_from_tree(
+                    &service.handlers,
+                    "",
+                    &service.name,
+                    &mut self.ordinary_routes,
+                );
                 // Also add to the existing service for code generation
                 existing
                     .ordinary_routes
@@ -479,9 +489,25 @@ impl AFast {
                         handler_name: route.handler_name,
                         pattern: route.pattern.clone(),
                         invoker: route.invoker,
+                        service_name: route.service_name.clone(),
                     });
                 }
                 existing.ws_routes.append(&mut service.ws_routes);
+            }
+
+            #[cfg(feature = "ordinary-sse")]
+            {
+                for route in &service.sse_routes {
+                    self.sse_routes
+                        .push(crate::app::ordinary_sse::SseRouteInfo {
+                            path: route.path,
+                            handler_name: route.handler_name,
+                            pattern: route.pattern.clone(),
+                            invoker: route.invoker,
+                            service_name: route.service_name.clone(),
+                        });
+                }
+                existing.sse_routes.append(&mut service.sse_routes);
             }
 
             existing.handlers.append(&mut service.handlers);
@@ -504,7 +530,12 @@ impl AFast {
             for route in &service.ordinary_routes {
                 self.ordinary_routes.push(route.clone());
             }
-            collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
+            collect_ordinary_from_tree(
+                &service.handlers,
+                "",
+                &service.name,
+                &mut self.ordinary_routes,
+            );
         }
 
         #[cfg(feature = "ordinary-ws")]
@@ -515,7 +546,22 @@ impl AFast {
                     handler_name: route.handler_name,
                     pattern: route.pattern.clone(),
                     invoker: route.invoker,
+                    service_name: route.service_name.clone(),
                 });
+            }
+        }
+
+        #[cfg(feature = "ordinary-sse")]
+        {
+            for route in &service.sse_routes {
+                self.sse_routes
+                    .push(crate::app::ordinary_sse::SseRouteInfo {
+                        path: route.path,
+                        handler_name: route.handler_name,
+                        pattern: route.pattern.clone(),
+                        invoker: route.invoker,
+                        service_name: route.service_name.clone(),
+                    });
             }
         }
 
@@ -655,6 +701,63 @@ impl AFast {
                     }
 
                     std::sync::Arc::new(handler_hooks)
+                };
+
+                // Build name-based hook table for ordinary routes.
+                // Key: "service_name:handler_name", Value: merged hooks (global + service).
+                #[cfg(feature = "hook")]
+                let named_hooks = {
+                    use std::collections::HashSet;
+                    let mut map: std::collections::HashMap<
+                        String,
+                        Vec<std::sync::Arc<dyn crate::hook::Hook>>,
+                    > = std::collections::HashMap::new();
+
+                    for svc in &self.services {
+                        let svc_hooks = &svc.hooks;
+                        let mut all_hooks = self.hooks.clone();
+                        all_hooks.extend(svc_hooks.iter().cloned());
+
+                        // Register hooks for ordinary HTTP routes
+                        // Use self.ordinary_routes filtered by service_name,
+                        // because routes collected from the tree may not be in svc.ordinary_routes.
+                        #[cfg(feature = "ordinary-http")]
+                        {
+                            let mut seen = HashSet::new();
+                            for route in self
+                                .ordinary_routes
+                                .iter()
+                                .filter(|r| r.service_name == svc.name)
+                            {
+                                let key = format!("{}:{}", svc.name, route.path);
+                                if seen.insert(key.clone()) {
+                                    map.entry(key)
+                                        .or_default()
+                                        .extend(all_hooks.iter().cloned());
+                                }
+                            }
+                        }
+
+                        // Register hooks for ordinary WS routes
+                        #[cfg(feature = "ordinary-ws")]
+                        for route in &svc.ws_routes {
+                            let key = format!("{}:{}", svc.name, route.path);
+                            map.entry(key)
+                                .or_default()
+                                .extend(all_hooks.iter().cloned());
+                        }
+
+                        // Register hooks for ordinary SSE routes
+                        #[cfg(feature = "ordinary-sse")]
+                        for route in &svc.sse_routes {
+                            let key = format!("{}:{}", svc.name, route.path);
+                            map.entry(key)
+                                .or_default()
+                                .extend(all_hooks.iter().cloned());
+                        }
+                    }
+
+                    std::sync::Arc::new(map)
                 };
 
                 let handlers = std::sync::Arc::new(self.handler_table);
@@ -801,6 +904,8 @@ impl AFast {
                     let handlers_clone = handlers.clone();
                     #[cfg(feature = "hook")]
                     let hooks_clone = hooks.clone();
+                    #[cfg(feature = "hook")]
+                    let named_hooks_clone = named_hooks.clone();
                     let shutdown_rx = shutdown_tx.subscribe();
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
@@ -810,6 +915,8 @@ impl AFast {
                     let ordinary_routes = self.ordinary_routes.clone();
                     #[cfg(feature = "ordinary-ws")]
                     let ws_routes = self.ws_routes.clone();
+                    #[cfg(feature = "ordinary-sse")]
+                    let sse_routes = self.sse_routes.clone();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
@@ -823,6 +930,8 @@ impl AFast {
                                 handlers: handlers_clone,
                                 #[cfg(feature = "hook")]
                                 hooks: hooks_clone,
+                                #[cfg(feature = "hook")]
+                                named_hooks: named_hooks_clone,
                                 #[cfg(any(feature = "code", feature = "doc"))]
                                 services: http_services,
                                 #[cfg(feature = "doc")]
@@ -833,6 +942,8 @@ impl AFast {
                                 ordinary_routes,
                                 #[cfg(feature = "ordinary-ws")]
                                 ws_routes,
+                                #[cfg(feature = "ordinary-sse")]
+                                sse_routes,
                                 #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
@@ -860,6 +971,8 @@ impl AFast {
                     let handlers_clone = handlers.clone();
                     #[cfg(feature = "hook")]
                     let hooks_clone = hooks.clone();
+                    #[cfg(feature = "hook")]
+                    let named_hooks_clone = named_hooks.clone();
                     let shutdown_rx = shutdown_tx.subscribe();
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
@@ -869,6 +982,8 @@ impl AFast {
                     let ordinary_routes = self.ordinary_routes.clone();
                     #[cfg(feature = "ordinary-ws")]
                     let ws_routes = self.ws_routes.clone();
+                    #[cfg(feature = "ordinary-sse")]
+                    let sse_routes = self.sse_routes.clone();
                     let tls_config = self.tls_config.clone();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
@@ -883,6 +998,8 @@ impl AFast {
                                 handlers: handlers_clone,
                                 #[cfg(feature = "hook")]
                                 hooks: hooks_clone,
+                                #[cfg(feature = "hook")]
+                                named_hooks: named_hooks_clone,
                                 #[cfg(any(feature = "code", feature = "doc"))]
                                 services: https_services,
                                 #[cfg(feature = "doc")]
@@ -893,6 +1010,8 @@ impl AFast {
                                 ordinary_routes,
                                 #[cfg(feature = "ordinary-ws")]
                                 ws_routes,
+                                #[cfg(feature = "ordinary-sse")]
+                                sse_routes,
                                 #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
@@ -1069,6 +1188,7 @@ impl Default for AFast {
 fn collect_ordinary_from_tree(
     handlers: &[Handler],
     prefix: &str,
+    service_name: &str,
     routes: &mut Vec<OrdinaryRouteInfo>,
 ) {
     for h in handlers {
@@ -1092,6 +1212,7 @@ fn collect_ordinary_from_tree(
                 method: h.method,
                 path: full_path,
                 handler_entry: def.clone(),
+                service_name: service_name.to_string(),
             });
         } else {
             // Group or binary leaf: name contributes to child path prefix
@@ -1100,14 +1221,26 @@ fn collect_ordinary_from_tree(
             } else {
                 format!("{}/{}", prefix, h.name)
             };
-            collect_ordinary_from_tree(&h.children, &child_prefix, routes);
+            collect_ordinary_from_tree(&h.children, &child_prefix, service_name, routes);
         }
     }
 }
 
 mod codegen;
-#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
+pub mod extractors;
+#[cfg(any(
+    feature = "ordinary-http",
+    feature = "ordinary-ws",
+    feature = "ordinary-sse"
+))]
 pub mod ordinary;
+#[cfg(feature = "ordinary-sse")]
+pub mod ordinary_sse;
 #[cfg(feature = "ordinary-ws")]
 pub mod ordinary_ws;
 mod transport;

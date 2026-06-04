@@ -2637,6 +2637,108 @@ pub(crate) fn generate_service_kt(
         }
     }
 
+    // ── Ordinary-sse routes ────────────────────────────────────
+    #[cfg(feature = "ordinary-sse")]
+    {
+        for sse_route in &svc.sse_routes {
+            let path = sse_route.path;
+            let handler_name = sse_route.handler_name;
+
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            let sig_params = if param_names.is_empty() {
+                "query: Map<String, String>? = null".to_string()
+            } else {
+                let params_str = param_names
+                    .iter()
+                    .map(|p| format!("{}: String", p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}, query: Map<String, String>? = null", params_str)
+            };
+
+            let mut path_expr = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    path_expr.push('/');
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    path_expr.push_str(&format!("${{{}}}", param));
+                } else {
+                    path_expr.push_str(seg);
+                }
+            }
+
+            let camel_name = handler_name;
+
+            let ind = "        ";
+            let mut body = String::new();
+            body.push_str(&format!(
+                "{}val scheme = if (this@{class_name}Client.tls) \"https\" else \"http\"\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "{}var url = \"$scheme://${{this@{class_name}Client.host}}:${{this@{class_name}Client.port}}/{}\"\n",
+                ind, path_expr
+            ));
+            body.push_str(&format!("{}if (query != null) {{\n", ind));
+            body.push_str(&format!(
+                "    {}val qs = query.entries.joinToString(\"&\") {{ \"${{it.key}}=${{it.value}}\" }}\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}if (qs.isNotEmpty()) url += \"?\" + qs\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+
+            if has_okhttp {
+                body.push_str(&format!(
+                    "{}val request = okhttp3.Request.Builder().url(url).build()\n",
+                    ind
+                ));
+                body.push_str(&format!(
+                    "{}val listener = okhttp3.sse.EventSourceListener()\n",
+                    ind
+                ));
+                body.push_str(&format!(
+                    "{}return okhttp3.sse.EventSources.createFactory(this@{class_name}Client.okHttpClient).newEventSource(request, listener)\n",
+                    ind
+                ));
+                lines.push(format!("        /** SSE: {} */", path));
+                lines.push(format!(
+                    "        fun {}({}): okhttp3.sse.EventSource {{\n{}        }}",
+                    camel_name, sig_params, body
+                ));
+            } else {
+                body.push_str(&format!(
+                    "{}val client = java.net.http.HttpClient.newHttpClient()\n",
+                    ind
+                ));
+                body.push_str(&format!(
+                    "{}val request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).header(\"Accept\", \"text/event-stream\").build()\n",
+                    ind
+                ));
+                body.push_str(&format!(
+                    "{}val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofLines())\n",
+                    ind
+                ));
+                body.push_str(&format!("{}return response\n", ind));
+                lines.push(format!("        /** SSE: {} */", path));
+                lines.push(format!(
+                    "        fun {}({}): java.net.http.HttpResponse<java.util.stream.Stream<String>> {{\n{}        }}",
+                    camel_name, sig_params, body
+                ));
+            }
+        }
+    }
+
     lines.push("    }".to_string());
     lines.push(format!("    val apis = {}()", apis_class_name));
 

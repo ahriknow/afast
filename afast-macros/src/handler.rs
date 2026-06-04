@@ -507,6 +507,9 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_ordinary && is_ws_receiver_type(&pat_type.ty) {
                     let ws_type: Type = syn::parse_quote!(WsReceiver);
                     ("WsReceiver".to_string(), "WsReceiver".to_string(), ws_type)
+                } else if is_ordinary && is_sse_sender_type(&pat_type.ty) {
+                    let sse_type: Type = syn::parse_quote!(SseSender);
+                    ("SseSender".to_string(), "SseSender".to_string(), sse_type)
                 } else if is_receiver_type(&pat_type.ty) {
                     let receiver_type: Type = syn::parse_quote!(Receiver);
                     (
@@ -635,6 +638,11 @@ fn is_ws_sender_type(ty: &Type) -> bool {
 /// Returns true when the outermost identifier of the type is `WsReceiver`.
 fn is_ws_receiver_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "WsReceiver")
+}
+
+/// Returns true when the outermost identifier of the type is `SseSender`.
+fn is_sse_sender_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "SseSender")
 }
 
 /// Extracts the last path segment identifier from a `Type::Path`, if any.
@@ -1211,16 +1219,8 @@ fn build_ordinary_invoker_impl(
     if has_query {
         let var_name = query_var.as_ref().unwrap();
         let inner = query_inner.as_ref().unwrap();
-        let err_var = syn::Ident::new(&format!("__err_{}", var_name), Span::call_site());
         async_extractions.push(quote! {
-            let __query_json = afast::parse_query_to_json(&query_string);
-            let #var_name: afast::Query<#inner> = match afast::from_value_lenient(__query_json) {
-                Ok(v) => afast::Query(v),
-                Err(e) => {
-                    let #err_var = afast::Error::Custom { code: 400, message: format!("query parse error: {}", e) };
-                    return Err(#err_var);
-                }
-            };
+            let #var_name: afast::Query<#inner> = afast::Query::from_query(&query_string)?;
         });
     }
 
@@ -1229,16 +1229,8 @@ fn build_ordinary_invoker_impl(
     if has_param {
         let var_name = param_var.as_ref().unwrap();
         let inner = param_inner.as_ref().unwrap();
-        let err_var = syn::Ident::new(&format!("__err_{}", var_name), Span::call_site());
         async_extractions.push(quote! {
-            let __param_json = afast::path_params_to_json(&path_params);
-            let #var_name: afast::Param<#inner> = match afast::from_value_lenient(__param_json) {
-                Ok(v) => afast::Param(v),
-                Err(e) => {
-                    let #err_var = afast::Error::Custom { code: 400, message: format!("path param parse error: {}", e) };
-                    return Err(#err_var);
-                }
-            };
+            let #var_name: afast::Param<#inner> = afast::Param::from_params(&path_params)?;
         });
     }
 
@@ -1364,13 +1356,14 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
     // Validate: ws handlers cannot use Body/Custom/Data/Receiver/Sender
     for p in &params {
         match p.extractor.as_str() {
-            "State" | "WsQuery" | "WsParam" | "WsSender" | "WsReceiver" => {}
+            "State" | "WsQuery" | "WsParam" | "Query" | "Param" | "Header" | "WsSender"
+            | "WsReceiver" => {}
             other => {
                 return Err(syn::Error::new(
                     Span::call_site(),
                     format!(
                         "extractor '{}' is not supported in #[ws] handlers. \
-                         Allowed: State, WsQuery, WsParam, WsSender, WsReceiver",
+                         Allowed: State, Query, Param, Header, WsSender, WsReceiver",
                         other
                     ),
                 ));
@@ -1446,12 +1439,15 @@ fn build_ws_invoker_impl(
     let mut state_extractions: Vec<TokenStream> = Vec::new();
     let mut has_query = false;
     let mut has_param = false;
+    let mut has_header = false;
     let mut has_sender = false;
     let mut has_receiver = false;
     let mut query_var: Option<syn::Ident> = None;
     let mut param_var: Option<syn::Ident> = None;
+    let mut header_var: Option<syn::Ident> = None;
     let mut query_inner: Option<Type> = None;
     let mut param_inner: Option<Type> = None;
+    let mut header_inner: Option<Type> = None;
 
     for p in params {
         let var_name = syn::Ident::new(&p.name, Span::call_site());
@@ -1471,15 +1467,20 @@ fn build_ws_invoker_impl(
                     };
                 });
             }
-            "WsQuery" => {
+            "WsQuery" | "Query" => {
                 has_query = true;
                 query_var = Some(var_name);
                 query_inner = Some(inner.clone());
             }
-            "WsParam" => {
+            "WsParam" | "Param" => {
                 has_param = true;
                 param_var = Some(var_name);
                 param_inner = Some(inner.clone());
+            }
+            "Header" => {
+                has_header = true;
+                header_var = Some(var_name);
+                header_inner = Some(inner.clone());
             }
             "WsSender" => {
                 has_sender = true;
@@ -1497,7 +1498,7 @@ fn build_ws_invoker_impl(
         let var_name = query_var.as_ref().unwrap();
         let inner = query_inner.as_ref().unwrap();
         extractions.push(quote! {
-            let #var_name: afast::WsQuery<#inner> = afast::WsQuery::from_query(&query_owned)?;
+            let #var_name: afast::Query<#inner> = afast::Query::from_query(&query_owned)?;
         });
     }
 
@@ -1505,7 +1506,20 @@ fn build_ws_invoker_impl(
         let var_name = param_var.as_ref().unwrap();
         let inner = param_inner.as_ref().unwrap();
         extractions.push(quote! {
-            let #var_name: afast::WsParam<#inner> = afast::WsParam::from_params(&path_params_owned)?;
+            let #var_name: afast::Param<#inner> = afast::Param::from_params(&path_params_owned)?;
+        });
+    }
+
+    if has_header {
+        let var_name = header_var.as_ref().unwrap();
+        let inner = header_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let mut __header_json = headers_owned.clone();
+            afast::fill_standard_header_defaults(&mut __header_json, || <#inner as afast::Structure>::structure());
+            let #var_name: afast::Header<#inner> = match serde_json::from_value(__header_json) {
+                Ok(v) => afast::Header(v),
+                Err(e) => return Err(afast::Error::Custom { code: 400, message: format!("header parse error: {}", e) }),
+            };
         });
     }
 
@@ -1544,6 +1558,7 @@ fn build_ws_invoker_impl(
                 &'static self,
                 query: &str,
                 path_params: &std::collections::HashMap<String, String>,
+                headers: serde_json::Value,
                 sender: afast::WsSender,
                 receiver: afast::WsReceiver,
                 state: std::sync::Arc<afast::StateMap>,
@@ -1556,6 +1571,232 @@ fn build_ws_invoker_impl(
             > {
                 let query_owned = query.to_string();
                 let path_params_owned = path_params.clone();
+                let headers_owned = headers;
+
+                Box::pin(async move {
+                    #( #state_extractions )*
+                    #( #extractions )*
+                    #fn_name( #( #all_call_args ),* ).await
+                })
+            }
+        }
+    }
+}
+
+/// Entry point for the `#[sse]` proc-macro attribute.
+///
+/// Generates an `SseHandlerInvoker` implementation for SSE route handlers.
+/// The handler receives `SseSender` to push events and optionally
+/// `WsQuery<T>` / `WsParam<T>` for HTTP parameters.
+pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let input_fn: ItemFn = syn::parse2(item)?;
+    let fn_name = &input_fn.sig.ident;
+    let fn_name_str = fn_name.to_string();
+
+    let (desc, api_name, _cache_seconds, _rate_limit_policy) =
+        parse_handler_attrs_from_tokens(&attr)?;
+    let params = parse_handler_params(&input_fn, Some("SSE"))?;
+
+    // Validate: sse handlers support State, SseSender, Query, Param, WsQuery, WsParam
+    for p in &params {
+        match p.extractor.as_str() {
+            "State" | "SseSender" | "WsQuery" | "WsParam" | "Query" | "Param" | "Header" => {}
+            other => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!(
+                        "extractor '{}' is not supported in #[sse] handlers. \
+                         Allowed: State, SseSender, Query, Param, Header, WsQuery, WsParam",
+                        other
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Build the implementation function (renamed to __impl_<name>).
+    let impl_fn_name = syn::Ident::new(&format!("__impl_{}", fn_name_str), Span::call_site());
+    let mut impl_sig = input_fn.sig.clone();
+    impl_sig.ident = impl_fn_name.clone();
+    let impl_fn = {
+        let block = &input_fn.block;
+        let attrs: Vec<_> = input_fn
+            .attrs
+            .iter()
+            .filter(|a| !a.path().is_ident("sse"))
+            .collect();
+        quote! {
+            #(#attrs)*
+            #impl_sig #block
+        }
+    };
+
+    let invoker_ident =
+        syn::Ident::new(&format!("__SseInvoker_{}", fn_name_str), Span::call_site());
+    let invoker_const =
+        syn::Ident::new(&format!("__SSE_INVOKER_{}", fn_name_str), Span::call_site());
+    let meta_ident = syn::Ident::new(&format!("__META_{}", fn_name_str), Span::call_site());
+
+    let desc_str = desc;
+    let name_str = if api_name.is_empty() {
+        fn_name_str.clone()
+    } else {
+        api_name
+    };
+
+    let sse_invoker_impl = build_sse_invoker_impl(&invoker_ident, &impl_fn_name, &params);
+
+    Ok(quote! {
+        #impl_fn
+
+        const #meta_ident: afast::HandlerMeta = afast::HandlerMeta {
+            name: #name_str,
+            desc: #desc_str,
+            api_name: "",
+            params: &[],
+            return_type: "()",
+            return_structure: None,
+            long_connection: false,
+            is_ordinary: true,
+            method: "SSE",
+            path: "",
+            cache_seconds: 0,
+            rate_limit_policy: "",
+        };
+
+        #sse_invoker_impl
+
+        const #invoker_const: #invoker_ident = #invoker_ident;
+
+        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_sse::SseHandlerInvoker, &'static str) {
+            (&#invoker_const, #name_str)
+        }
+    })
+}
+
+/// Builds the `SseHandlerInvoker` implementation for an SSE handler.
+fn build_sse_invoker_impl(
+    invoker_ident: &syn::Ident,
+    fn_name: &syn::Ident,
+    params: &[ParamInfo],
+) -> TokenStream {
+    let mut state_extractions: Vec<TokenStream> = Vec::new();
+    let mut has_query = false;
+    let mut has_param = false;
+    let mut has_header = false;
+    let mut _has_sender = false;
+    let mut query_var: Option<syn::Ident> = None;
+    let mut param_var: Option<syn::Ident> = None;
+    let mut header_var: Option<syn::Ident> = None;
+    let mut query_inner: Option<Type> = None;
+    let mut param_inner: Option<Type> = None;
+    let mut header_inner: Option<Type> = None;
+
+    for p in params {
+        let var_name = syn::Ident::new(&p.name, Span::call_site());
+        let full_type = &p.full_type;
+        let inner = &p.inner_type;
+
+        match p.extractor.as_str() {
+            "State" => {
+                state_extractions.push(quote! {
+                    let #var_name: #full_type = match state.get::<#inner>() {
+                        Some(v) => afast::State(v.clone()),
+                        None => {
+                            return Err(afast::Error::StateNotFound {
+                                message: stringify!(#inner).to_string()
+                            });
+                        }
+                    };
+                });
+            }
+            "SseSender" => {
+                _has_sender = true;
+            }
+            "WsQuery" | "Query" => {
+                has_query = true;
+                query_var = Some(var_name);
+                query_inner = Some(inner.clone());
+            }
+            "WsParam" | "Param" => {
+                has_param = true;
+                param_var = Some(var_name);
+                param_inner = Some(inner.clone());
+            }
+            "Header" => {
+                has_header = true;
+                header_var = Some(var_name);
+                header_inner = Some(inner.clone());
+            }
+            _ => {}
+        }
+    }
+
+    let mut extractions: Vec<TokenStream> = Vec::new();
+
+    if has_query {
+        let var_name = query_var.as_ref().unwrap();
+        let inner = query_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let #var_name: afast::Query<#inner> = afast::Query::from_query(&query_owned)?;
+        });
+    }
+
+    if has_param {
+        let var_name = param_var.as_ref().unwrap();
+        let inner = param_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let #var_name: afast::Param<#inner> = afast::Param::from_params(&path_params_owned)?;
+        });
+    }
+
+    if has_header {
+        let var_name = header_var.as_ref().unwrap();
+        let inner = header_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let mut __header_json = headers_owned.clone();
+            afast::fill_standard_header_defaults(&mut __header_json, || <#inner as afast::Structure>::structure());
+            let #var_name: afast::Header<#inner> = match serde_json::from_value(__header_json) {
+                Ok(v) => afast::Header(v),
+                Err(e) => return Err(afast::Error::Custom { code: 400, message: format!("header parse error: {}", e) }),
+            };
+        });
+    }
+
+    // Build call args: extracted vars + sender
+    let all_call_args: Vec<TokenStream> = {
+        let mut args = Vec::new();
+        for p in params {
+            let var_name = syn::Ident::new(&p.name, Span::call_site());
+            match p.extractor.as_str() {
+                "SseSender" => args.push(quote! { sender }),
+                _ => args.push(quote! { #var_name }),
+            }
+        }
+        args
+    };
+
+    quote! {
+        pub struct #invoker_ident;
+
+        impl afast::app::ordinary_sse::SseHandlerInvoker for #invoker_ident {
+            fn call_sse(
+                &'static self,
+                query: &str,
+                path_params: &std::collections::HashMap<String, String>,
+                headers: serde_json::Value,
+                sender: afast::SseSender,
+                state: std::sync::Arc<afast::StateMap>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                        Output = Result<(), afast::Error>,
+                    > + Send + 'static,
+                >,
+            > {
+                let query_owned = query.to_string();
+                let path_params_owned = path_params.clone();
+                let headers_owned = headers;
 
                 Box::pin(async move {
                     #( #state_extractions )*
