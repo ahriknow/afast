@@ -168,6 +168,24 @@ pub fn register(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Produces a `HandlerEntry` with a stable ID computed from the full handler path.
+///
+/// `register_with_path!(name, "service_name")` expands to a call to the
+/// auto-generated entry function `name()`, computes `fnv1a_32("service_name/name")`,
+/// and sets the stable ID on the returned `HandlerEntry`.
+///
+/// ```no_run
+/// use afast::register_with_path;
+///
+/// let entry = register_with_path!(health, "api");
+/// ```
+#[proc_macro]
+pub fn register_with_path(input: TokenStream) -> TokenStream {
+    register::expand_with_path(input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
 /// Produces an `OrdinaryHandlerDef` for the given ordinary HTTP handler.
 ///
 /// `register_ordinary!(name)` expands to a call to `__ordinary_entry_name()`,

@@ -1296,7 +1296,7 @@ fn handler_method_kt(
         meta.name
     };
     let cache_seconds = meta.cache_seconds;
-    let id = handler.offset;
+    let id = handler.stable_id;
     let indent = format!("{}    ", base_indent);
 
     let mut custom_indices: Vec<(usize, &str, Option<fn() -> &'static TagMeta>)> = Vec::new();
@@ -1473,9 +1473,10 @@ fn handler_method_kt(
     // Finalise the binary payload from the writer.
     body_lines.push(format!("{}val data = w.toBytes()", ind));
 
-    // Dispatch through the transport layer.  handler_id (offset) is a
+    // Dispatch through the transport layer.  handler_id (stable_id) is a
     // u32 that identifies the target handler on the server.
-    body_lines.push(format!("{}val resp = _call({}, data)", ind, id));
+    // Append 'L' to the literal because u32 values can exceed Int.MAX_VALUE.
+    body_lines.push(format!("{}val resp = _call({}L, data)", ind, id));
 
     if meta.long_connection {
         body_lines.push(format!("{}val r = BinaryReader(resp)", ind));
@@ -2102,24 +2103,65 @@ pub(crate) fn generate_service_kt(
         );
     }
     lines.b();
-    // TCP connection init — must come after scope is initialized
-    if has_tcp {
+    // TCP and WS connection init — must come after scope is initialized
+    if has_tcp || has_ws {
         lines.push("    init {".to_string());
-        lines.push("        if (transport == Transport.Tcp) {".to_string());
-        lines.push("            val s = Socket(host, port)".to_string());
-        lines.push("            tcpSocket = s".to_string());
-        lines.push(
-            "            tcpIn = DataInputStream(java.io.BufferedInputStream(s.getInputStream()))"
-                .to_string(),
-        );
-        lines.push("            tcpOut = DataOutputStream(java.io.BufferedOutputStream(s.getOutputStream()))".to_string());
-        lines.push("            _startTcpReader()".to_string());
-        lines.push("        }".to_string());
+        if has_tcp {
+            lines.push("        if (transport == Transport.Tcp) {".to_string());
+            lines.push("            val s = Socket(host, port)".to_string());
+            lines.push("            tcpSocket = s".to_string());
+            lines.push(
+                "            tcpIn = DataInputStream(java.io.BufferedInputStream(s.getInputStream()))"
+                    .to_string(),
+            );
+            lines.push("            tcpOut = DataOutputStream(java.io.BufferedOutputStream(s.getOutputStream()))".to_string());
+            lines.push("            _startTcpReader()".to_string());
+            lines.push("        }".to_string());
+        }
+        if has_ws {
+            lines.push("        if (transport == Transport.Ws) {".to_string());
+            lines.push(
+                "            val wsUrl = (if (tls) \"wss\" else \"ws\") + \"://$host:$port/_ws\""
+                    .to_string(),
+            );
+            lines
+                .push("            val latch = java.util.concurrent.CountDownLatch(1)".to_string());
+            lines.push(
+                "            wsClient = java.net.http.HttpClient.newHttpClient()".to_string(),
+            );
+            lines.push("                .newWebSocketBuilder()".to_string());
+            lines.push("                .buildAsync(java.net.URI(wsUrl), object : java.net.http.WebSocket.Listener {".to_string());
+            lines.push("                    private val buf = mutableListOf<Byte>()".to_string());
+            lines.push("                    override fun onBinary(webSocket: java.net.http.WebSocket, data: java.nio.ByteBuffer, last: Boolean): java.util.concurrent.CompletionStage<*>? {".to_string());
+            lines.push(
+                "                        val bytes = ByteArray(data.remaining())".to_string(),
+            );
+            lines.push("                        data.get(bytes)".to_string());
+            lines.push("                        buf.addAll(bytes.toList())".to_string());
+            lines.push("                        webSocket.request(1)".to_string());
+            lines.push("                        if (last) {".to_string());
+            lines.push("                            val raw = buf.toByteArray()".to_string());
+            lines.push("                            buf.clear()".to_string());
+            lines.push("                            _handleMessage(raw)".to_string());
+            lines.push("                        }".to_string());
+            lines.push("                        return null".to_string());
+            lines.push("                    }".to_string());
+            lines.push(
+                "                    override fun onOpen(webSocket: java.net.http.WebSocket) {"
+                    .to_string(),
+            );
+            lines.push("                        webSocket.request(Long.MAX_VALUE)".to_string());
+            lines.push("                        latch.countDown()".to_string());
+            lines.push("                    }".to_string());
+            lines.push("                }).join()".to_string());
+            lines.push("            latch.await()".to_string());
+            lines.push("        }".to_string());
+        }
         lines.push("    }".to_string());
         lines.b();
     }
     lines.push(
-        "    private suspend fun _call(handlerId: Int, payload: ByteArray): ByteArray {"
+        "    private suspend fun _call(handlerId: Long, payload: ByteArray): ByteArray {"
             .to_string(),
     );
     if debug {
@@ -2151,12 +2193,12 @@ pub(crate) fn generate_service_kt(
     lines.b();
     if has_http {
         lines.push(
-            "    private suspend fun callFetch(handlerId: Int, payload: ByteArray): ByteArray {"
+            "    private suspend fun callFetch(handlerId: Long, payload: ByteArray): ByteArray {"
                 .to_string(),
         );
         lines.push("        return withContext(Dispatchers.IO) {".to_string());
         lines.push("            val w = BinaryWriter()".to_string());
-        lines.push("            w.wU32(handlerId)".to_string());
+        lines.push("            w.wU32(handlerId.toInt())".to_string());
         lines.push("            w.wRaw(payload)".to_string());
         lines.push("            val body = w.toBytes()".to_string());
         lines.push("            val conn = java.net.URI(\"$url/_api\").toURL().openConnection() as java.net.HttpURLConnection".to_string());
@@ -2195,7 +2237,7 @@ pub(crate) fn generate_service_kt(
         );
         lines.push("        return withContext(Dispatchers.IO) {".to_string());
         lines.push("            val w = BinaryWriter()".to_string());
-        lines.push("            w.wU32(handlerId)".to_string());
+        lines.push("            w.wU32(handlerId.toInt())".to_string());
         lines.push("            w.wRaw(payload)".to_string());
         lines.push("            val body = w.toBytes()".to_string());
         lines.push(
@@ -2229,7 +2271,7 @@ pub(crate) fn generate_service_kt(
     }
     if has_ws {
         lines.push(
-            "    private suspend fun callWs(handlerId: Int, payload: ByteArray): ByteArray {"
+            "    private suspend fun callWs(handlerId: Long, payload: ByteArray): ByteArray {"
                 .to_string(),
         );
         lines.push("        val id = nextId.getAndIncrement()".to_string());
@@ -2254,7 +2296,7 @@ pub(crate) fn generate_service_kt(
         } else {
             lines.push("        w.wU32(id)".to_string());
         }
-        lines.push("        w.wU32(handlerId)".to_string());
+        lines.push("        w.wU32(handlerId.toInt())".to_string());
         if cfg!(feature = "len64") {
             lines.push("        w.wU64(payload.size.toLong())".to_string());
         } else {
@@ -2271,7 +2313,7 @@ pub(crate) fn generate_service_kt(
     }
     if has_tcp {
         lines.push(
-            "    private suspend fun callTcp(handlerId: Int, payload: ByteArray): ByteArray {"
+            "    private suspend fun callTcp(handlerId: Long, payload: ByteArray): ByteArray {"
                 .to_string(),
         );
         lines.push("        val id = nextId.getAndIncrement()".to_string());
@@ -2296,7 +2338,7 @@ pub(crate) fn generate_service_kt(
         } else {
             lines.push("        inner.wU32(id)".to_string());
         }
-        lines.push("        inner.wU32(handlerId)".to_string());
+        lines.push("        inner.wU32(handlerId.toInt())".to_string());
         if cfg!(feature = "len64") {
             lines.push("        inner.wU64(payload.size.toLong())".to_string());
         } else {

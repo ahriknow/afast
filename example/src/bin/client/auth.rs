@@ -190,11 +190,14 @@ impl AuthClient {
         w.write_str(&request.name);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=14 payloadLen={}",
+            "[afast:debug] → call handlerId=3349770761 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 14, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=14 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 3349770761, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=3349770761 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(RegisterResponse {
             user: User {
@@ -315,11 +318,14 @@ impl AuthClient {
         w.write_str(&request.password);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=15 payloadLen={}",
+            "[afast:debug] → call handlerId=4001979405 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 15, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=15 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 4001979405, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=4001979405 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(LoginResponse {
             user: User {
@@ -442,11 +448,14 @@ impl AuthClient {
         w.write_i64(request.user_id);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=16 payloadLen={}",
+            "[afast:debug] → call handlerId=1480583638 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 16, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=16 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 1480583638, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=1480583638 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(CreateTokenResponse {
             token: r.read_str(),
@@ -463,11 +472,14 @@ impl AuthClient {
         w.write_str(&_c0.token);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=17 payloadLen={}",
+            "[afast:debug] → call handlerId=1637061270 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 17, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=17 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 1637061270, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=1637061270 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(GetUserIdResponse {
             user_id: r.read_i64(),

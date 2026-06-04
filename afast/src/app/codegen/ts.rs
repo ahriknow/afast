@@ -1205,7 +1205,7 @@ fn handler_method(
         meta.name
     };
     let cache_seconds = meta.cache_seconds;
-    let id = handler.offset;
+    let id = handler.stable_id;
     let indent = format!("{}    ", base_indent);
 
     let mut custom_indices: Vec<(usize, &str, Option<fn() -> &'static TagMeta>)> = Vec::new();

@@ -95,9 +95,15 @@ impl CheckClient {
     pub async fn health(&self) -> Result<HealthTokenResponse, AfastError> {
         let mut w = BinaryWriter::new();
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=0 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 0, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=0 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=1897253294 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 1897253294, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=1897253294 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(HealthTokenResponse {
             version: r.read_str(),
@@ -126,9 +132,15 @@ impl<'a> CheckInnerApi<'a> {
         w.write_i64(request.id);
         w.write_str(&request2.name);
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=2 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 2, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=2 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=3952632036 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 3952632036, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=3952632036 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(InnerInfoResponst {
             message: r.read_str(),

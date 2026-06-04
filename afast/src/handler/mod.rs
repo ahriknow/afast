@@ -135,6 +135,10 @@ pub struct HandlerEntry {
     pub invoker: &'static dyn HandlerInvoker,
     /// Handler metadata for code generation and introspection.
     pub meta: &'static HandlerMeta,
+    /// Stable hash-based ID for binary protocol dispatch.
+    /// Computed from `fnv1a_32(service_name + "/" + handler_name)`.
+    /// Set by the `register!` proc macro when a service name is provided.
+    pub stable_id: u32,
     /// Ordinary HTTP invoker, set only for handlers defined with
     /// `#[get]`/`#[post]`/`#[put]`/`#[delete]`/`#[patch]`.
     #[cfg(feature = "ordinary-http")]
@@ -142,6 +146,12 @@ pub struct HandlerEntry {
 }
 
 impl HandlerEntry {
+    /// Sets the stable handler ID.
+    #[doc(hidden)]
+    pub fn set_stable_id(&mut self, id: u32) {
+        self.stable_id = id;
+    }
+
     /// Creates a `HandlerEntry` for a binary-protocol handler.
     ///
     /// The `ordinary_invoker` field (when present) is set to `None`.
@@ -157,6 +167,7 @@ impl HandlerEntry {
             name,
             invoker,
             meta,
+            stable_id: 0,
             #[cfg(feature = "ordinary-http")]
             ordinary_invoker: None,
         }
@@ -178,6 +189,7 @@ impl HandlerEntry {
             name,
             invoker,
             meta,
+            stable_id: 0,
             ordinary_invoker: Some(ordinary_invoker),
         }
     }
@@ -187,7 +199,9 @@ impl HandlerEntry {
 ///
 /// Handlers form a tree structure: leaf nodes represent actual handler
 /// functions, while group nodes (`Handler::group`) act as namespaces.
-/// The `offset` field is a global index used for binary protocol dispatch.
+/// The `stable_id` field is a hash-based identifier used for binary
+/// protocol dispatch, computed from the full handler path
+/// (`service_name + "/" + handler_name`).
 #[derive(Clone)]
 pub struct Handler {
     /// Handler or group name (one segment of the API path).
@@ -198,8 +212,9 @@ pub struct Handler {
     pub meta: &'static HandlerMeta,
     /// Child handlers or groups (empty for leaf nodes).
     pub children: Vec<Handler>,
-    /// Global offset index for binary protocol dispatch.
-    pub offset: usize,
+    /// Hash-based stable ID for binary protocol dispatch.
+    /// Computed from `fnv1a_32(service_name + "/" + handler_path)`.
+    pub stable_id: u32,
     /// HTTP method for ordinary routes. Empty for binary and group nodes.
     pub method: &'static str,
     /// Route path for ordinary routes. Empty for binary and group nodes.
@@ -255,7 +270,7 @@ impl Handler {
             invoker: entry.invoker,
             meta: entry.meta,
             children: Vec::new(),
-            offset: 0,
+            stable_id: entry.stable_id,
             method: "",
             path: "",
             #[cfg(feature = "ordinary-http")]
@@ -271,7 +286,7 @@ impl Handler {
             invoker: &DummyInvoker,
             meta: &DUMMY_META,
             children: Vec::new(),
-            offset: 0,
+            stable_id: 0,
             method: "",
             path: "",
             #[cfg(feature = "ordinary-http")]
@@ -313,7 +328,7 @@ impl Handler {
             invoker: &DummyInvoker,
             meta: entry.meta,
             children: Vec::new(),
-            offset: 0,
+            stable_id: entry.stable_id,
             method,
             path,
             ordinary_def: Some(entry),

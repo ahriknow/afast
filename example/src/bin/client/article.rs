@@ -183,11 +183,14 @@ impl ArticleClient {
         }
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=18 payloadLen={}",
+            "[afast:debug] → call handlerId=3956241899 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 18, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=18 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 3956241899, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=3956241899 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(CreateArticleResponse { id: r.read_i64() })
     }
@@ -202,11 +205,14 @@ impl ArticleClient {
         w.write_bool(request.published_only);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=19 payloadLen={}",
+            "[afast:debug] → call handlerId=461021296 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 19, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=19 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 461021296, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=461021296 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(ListArticlesResponse {
             total: r.read_i64(),
@@ -239,11 +245,14 @@ impl ArticleClient {
         w.write_i64(request.article_id);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=20 payloadLen={}",
+            "[afast:debug] → call handlerId=2365444723 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 20, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=20 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 2365444723, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=2365444723 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(if r.read_u8() == 1 {
             Some(GetArticle {
@@ -285,11 +294,14 @@ impl ArticleClient {
         }
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=21 payloadLen={}",
+            "[afast:debug] → call handlerId=2972302598 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 21, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=21 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 2972302598, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=2972302598 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(if r.read_u8() == 1 {
             Some(UpdateArticle {
@@ -324,11 +336,14 @@ impl ArticleClient {
         w.write_i64(request.article_id);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=22 payloadLen={}",
+            "[afast:debug] → call handlerId=4215862796 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 22, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=22 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 4215862796, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=4215862796 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(if r.read_u8() == 1 {
             Some(DeleteArticle {

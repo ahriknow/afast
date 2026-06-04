@@ -1,6 +1,6 @@
 use afast::{
     AFast, Algorithm, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, RateLimitConfig,
-    RateLimitKey, RateLimitPolicy, RsCallType, register, service,
+    RateLimitKey, RateLimitPolicy, RsCallType, service,
 };
 
 #[cfg(feature = "hook")]

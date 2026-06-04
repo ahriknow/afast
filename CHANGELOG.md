@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.11]
+
+### Added
+
+- **稳定 Handler ID（哈希替代顺序索引）**: Handler 分发 ID 从全局顺序索引改为基于路径的 FNV-1a u32 哈希值。
+  - `stable_id` 替代 `offset`：每个 handler 的 ID 由 `fnv1a_32(service_name + "/" + handler_name)` 在编译时计算。
+  - 添加/删除/重排序 handler 不影响其他 handler 的 ID，客户端无需全部重新部署。
+  - 分发表从 `Vec<Option<...>>` 改为 `HashMap<u32, ...>`，启动时自动检测哈希冲突并报错。
+  - 新增 `register_with_path!` proc macro，在 `service!` 宏内部传递服务名以计算完整路径哈希。
+  - Hook 表和 rate-limit 名称映射同步改为 `HashMap<u32, ...>` 索引。
+
+### Fixed
+
+- **KT WebSocket 初始化**: 修复 KT codegen 未在 `init` 块中初始化 WebSocket 连接导致 NPE 的问题。
+  - 使用 `java.net.http.HttpClient` + `WebSocket.Listener` 建立连接，`CountDownLatch` 确保连接就绪后再返回。
+  - 修复 `ByteBuffer` 处理：用 `data.get(bytes)` 替代 `data.array().take(data.remaining())`。
+- **KT codegen handler ID 类型**: `_call` 参数从 `Int` 改为 `Long`，字面量加 `L` 后缀，`wU32` 调用加 `.toInt()`。修复 u32 哈希值超过 `Int.MAX_VALUE` 时的编译错误。
+- **未使用代码警告**: 修复启用 `ordinary-http`/`ordinary-ws`/`ordinary-sse` 但未启用 `hook` 时的 dead_code 和 unused_variables 警告。
+  - `CompiledOrdinaryRoute` 的 `path`/`service_name` 字段添加 `cfg_attr(not(feature = "hook"), allow(dead_code))`。
+  - `handle_ordinary_ws_upgrade`/`handle_sse` 函数添加 `cfg_attr(not(feature = "hook"), allow(unused_variables))`。
+  - `handler_name_static` 变量改为仅在 `hook` 启用时编译，避免无意义的内存泄漏。
+
 ## [0.1.10]
 
 ### Added

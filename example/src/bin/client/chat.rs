@@ -85,11 +85,14 @@ impl ChatClient {
         w.write_str(&request.name);
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=23 payloadLen={}",
+            "[afast:debug] → call handlerId=222236102 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 23, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=23 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 222236102, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=222236102 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         let conn_id = r.read_u32();
         Ok(AfastSocket { conn_id })

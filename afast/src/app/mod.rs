@@ -265,10 +265,10 @@ pub struct TlsConfig {
 pub struct AFast {
     /// Registered service containers.
     services: Vec<Service>,
-    /// Pre-built handler invoker lookup table, indexed by handler offset.
+    /// Pre-built handler invoker lookup table, keyed by stable handler ID.
     /// Built incrementally as services are registered via [`service`](AFast::service).
     #[cfg(feature = "binary")]
-    handler_table: Vec<Option<&'static dyn HandlerInvoker>>,
+    handler_table: std::collections::HashMap<u32, &'static dyn HandlerInvoker>,
     /// Typed application state shared across all handlers.
     state: StateMap,
     /// Marker string for conditional serialization (`skip_with`).
@@ -321,7 +321,7 @@ impl AFast {
         Self {
             services: Vec::new(),
             #[cfg(feature = "binary")]
-            handler_table: Vec::new(),
+            handler_table: std::collections::HashMap::new(),
             state: StateMap::new(),
             marker: "afast".to_string(),
             #[cfg(any(feature = "ws", feature = "doc"))]
@@ -459,9 +459,9 @@ impl AFast {
             // Merge handlers: assign offsets for new handlers continuing
             // from the existing handler_table length.
             #[cfg(feature = "binary")]
-            build_handler_table(&mut service.handlers, &mut self.handler_table);
+            build_handler_table(&service.handlers, &mut self.handler_table);
             #[cfg(not(feature = "binary"))]
-            build_handler_table(&mut service.handlers, &mut 0);
+            build_handler_table(&service.handlers, &mut 0);
 
             #[cfg(feature = "ordinary-http")]
             {
@@ -521,9 +521,9 @@ impl AFast {
         }
 
         #[cfg(feature = "binary")]
-        build_handler_table(&mut service.handlers, &mut self.handler_table);
+        build_handler_table(&service.handlers, &mut self.handler_table);
         #[cfg(not(feature = "binary"))]
-        build_handler_table(&mut service.handlers, &mut 0);
+        build_handler_table(&service.handlers, &mut 0);
 
         #[cfg(feature = "ordinary-http")]
         {
@@ -683,11 +683,12 @@ impl AFast {
 
                 #[cfg(feature = "hook")]
                 let hooks = {
-                    // Build a per-handler hook table: handler_hooks[handler_id] is
+                    // Build a per-handler hook table: handler_hooks[stable_id] is
                     // the hooks for that handler (service-specific or global).
-                    let total = self.handler_table.len();
-                    let mut handler_hooks: Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>> =
-                        vec![Vec::new(); total];
+                    let mut handler_hooks: std::collections::HashMap<
+                        u32,
+                        Vec<std::sync::Arc<dyn crate::hook::Hook>>,
+                    > = std::collections::HashMap::new();
 
                     // Walk each service's handler tree and assign hooks.
                     for svc in &self.services {
@@ -786,22 +787,26 @@ impl AFast {
                                 cfg, &all_meta,
                             ))),
                             {
-                                // Build handler_id → handler_name mapping.
-                                let mut names = Vec::with_capacity(handlers.len());
-                                for i in 0..handlers.len() {
-                                    let name = self
-                                        .services
-                                        .iter()
-                                        .flat_map(|svc| svc.handlers.iter())
-                                        .find(|h| h.offset == i)
-                                        .map(|h| h.meta.name)
-                                        .unwrap_or("");
-                                    names.push(name.to_string());
+                                // Build stable_id → handler_name mapping.
+                                let mut names = std::collections::HashMap::new();
+                                for svc in &self.services {
+                                    fn collect_names(
+                                        handlers: &[crate::handler::Handler],
+                                        names: &mut std::collections::HashMap<u32, String>,
+                                    ) {
+                                        for h in handlers {
+                                            if h.stable_id != 0 && !h.meta.name.is_empty() {
+                                                names.insert(h.stable_id, h.meta.name.to_string());
+                                            }
+                                            collect_names(&h.children, names);
+                                        }
+                                    }
+                                    collect_names(&svc.handlers, &mut names);
                                 }
                                 names
                             },
                         ),
-                        None => (None, Vec::new()),
+                        None => (None, std::collections::HashMap::new()),
                     }
                 };
 
@@ -1117,38 +1122,49 @@ impl AFast {
     }
 }
 
-/// Assigns offsets and builds the handler invoker lookup table in a single
-/// depth-first pass over the handler tree.
+/// Builds the handler invoker lookup table from the handler tree.
 ///
-/// Each handler receives an `offset` field equal to its position in the
-/// global table. Binary-protocol handlers (non-ordinary leaves) have their
-/// invoker stored at that offset in the table; group nodes and ordinary
-/// leaves store `None`. Nesting is accounted for: parents before children.
+/// Each handler's `stable_id` (set by the `service!` macro via the `register!`
+/// proc macro) is used as the key. Binary-protocol handlers (non-ordinary
+/// leaves) have their invoker stored in the table. The function also detects
+/// hash collisions and panics with a clear error message.
 #[cfg(feature = "binary")]
 fn build_handler_table(
-    handlers: &mut [Handler],
-    table: &mut Vec<Option<&'static dyn HandlerInvoker>>,
+    handlers: &[Handler],
+    table: &mut std::collections::HashMap<u32, &'static dyn HandlerInvoker>,
 ) {
-    for h in handlers.iter_mut() {
-        h.offset = table.len();
+    for h in handlers {
         let is_binary_leaf = !h.meta.name.is_empty() && !h.meta.is_ordinary;
-        table.push(if is_binary_leaf {
-            Some(h.invoker)
-        } else {
-            None
-        });
-        build_handler_table(&mut h.children, table);
+        if is_binary_leaf && h.stable_id != 0 {
+            if let Some(existing) = table.get(&h.stable_id) {
+                // Hash collision detected — check if it's the same handler
+                let existing_meta = existing.meta();
+                let new_meta = h.invoker.meta();
+                if existing_meta.map(|m| m.name) != new_meta.map(|m| m.name) {
+                    panic!(
+                        "afast: handler ID collision detected! \
+                         Two different handlers have the same stable_id ({}). \
+                         This means their FNV-1a hashes collided. \
+                         Please rename one of the handlers to avoid this. \
+                         Conflicting handlers: '{}' and '{}'",
+                        h.stable_id,
+                        existing_meta.map(|m| m.name).unwrap_or("?"),
+                        new_meta.map(|m| m.name).unwrap_or("?"),
+                    );
+                }
+            }
+            table.insert(h.stable_id, h.invoker);
+        }
+        build_handler_table(&h.children, table);
     }
 }
 
-/// Assigns offsets only (no table building), used when no transport feature
-/// is enabled that requires the invoker lookup table.
+/// Walks the handler tree without building a table, used when no transport
+/// feature is enabled that requires the invoker lookup table.
 #[cfg(not(feature = "binary"))]
-fn build_handler_table(handlers: &mut [Handler], counter: &mut usize) {
-    for h in handlers.iter_mut() {
-        h.offset = *counter;
-        *counter += 1;
-        build_handler_table(&mut h.children, counter);
+fn build_handler_table(handlers: &[Handler], _counter: &mut usize) {
+    for h in handlers {
+        build_handler_table(&h.children, _counter);
     }
 }
 
@@ -1160,14 +1176,13 @@ fn assign_hooks_recursive(
     handlers: &[Handler],
     svc_hooks: &[std::sync::Arc<dyn crate::hook::Hook>],
     global_hooks: &[std::sync::Arc<dyn crate::hook::Hook>],
-    table: &mut [Vec<std::sync::Arc<dyn crate::hook::Hook>>],
+    table: &mut std::collections::HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>,
 ) {
     for h in handlers {
-        let idx = h.offset;
-        if idx < table.len() {
+        if h.stable_id != 0 {
             let mut hooks = global_hooks.to_vec();
             hooks.extend(svc_hooks.iter().cloned());
-            table[idx] = hooks;
+            table.insert(h.stable_id, hooks);
         }
         assign_hooks_recursive(&h.children, svc_hooks, global_hooks, table);
     }

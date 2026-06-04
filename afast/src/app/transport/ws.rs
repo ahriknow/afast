@@ -160,11 +160,11 @@ fn make_push(conn_id: u32, data: &[u8]) -> Message {
 pub async fn handle_websocket<S>(
     ws: tokio_tungstenite::WebSocketStream<S>,
     state: Arc<StateMap>,
-    handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
-    #[cfg(feature = "hook")] hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    handlers: Arc<HashMap<u32, &'static dyn HandlerInvoker>>,
+    #[cfg(feature = "hook")] hooks: Arc<HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] mut conn_ctx: Option<ConnectionContext>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
-    #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
+    #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -286,7 +286,7 @@ pub async fn handle_websocket<S>(
                                 let _ = sink.send(make_error(req_id, CODE_MSG_TOO_SHORT, "frame too short")).await;
                                 continue;
                             };
-                            let handler_id = u32::from_le_bytes(handler_id_bytes) as usize;
+                            let handler_id = u32::from_le_bytes(handler_id_bytes);
                             let Some(len_bytes) = read_array::<LEN_BYTES>(&data, SEQ_BYTES + 4) else {
                                 let _ = sink.send(make_error(req_id, CODE_MSG_TOO_SHORT, "frame too short")).await;
                                 continue;
@@ -300,8 +300,8 @@ pub async fn handle_websocket<S>(
 
                             let payload = &data[req_hdr..req_hdr + len];
 
-                            let invoker = match handlers.get(handler_id).and_then(|h| *h) {
-                                Some(invoker) => invoker,
+                            let invoker = match handlers.get(&handler_id) {
+                                Some(invoker) => *invoker,
                                 None => {
                                     let _ = sink.send(make_error(req_id, 102, &format!("handler not found (id={})", handler_id))).await;
                                     continue;
@@ -311,7 +311,7 @@ pub async fn handle_websocket<S>(
                             // Rate-limit check.
                             #[cfg(feature = "rate-limit")]
                             if let (Some(limiter), Some(ctx)) = (&rate_limiter, &mut conn_ctx) {
-                                let handler_name = handler_names.get(handler_id)
+                                let handler_name = handler_names.get(&handler_id)
                                     .map(|s| s.as_str())
                                     .unwrap_or("");
                                 if !handler_name.is_empty()
@@ -359,7 +359,7 @@ pub async fn handle_websocket<S>(
                                         handler_id,
                                         state: state.clone(),
                                     };
-                                    hooks[handler_id].iter().filter_map(|h| h.on_connect(&ctx)).collect()
+                                    hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.on_connect(&ctx)).collect()
                                 };
 
                                 tokio::spawn(async move {
@@ -373,7 +373,7 @@ pub async fn handle_websocket<S>(
                                             handler_id,
                                             state: state.clone(),
                                         };
-                                        hooks[handler_id].iter().filter_map(|h| h.before_request(&ctx)).collect()
+                                        hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                                     };
 
                                     let result = invoker.call_stream(&state, &payload, from_handler_tx, to_handler_rx).await;
@@ -440,7 +440,7 @@ pub async fn handle_websocket<S>(
                                         handler_id,
                                         state: state.clone(),
                                     };
-                                    hooks[handler_id].iter().filter_map(|h| h.before_request(&ctx)).collect()
+                                    hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                                 };
 
                                 let result = invoker.call(&state, payload).await;
@@ -495,10 +495,10 @@ pub async fn handle_websocket<S>(
 pub async fn handle_connection(
     stream: TcpStream,
     state: Arc<StateMap>,
-    handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
-    #[cfg(feature = "hook")] hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    handlers: Arc<HashMap<u32, &'static dyn HandlerInvoker>>,
+    #[cfg(feature = "hook")] hooks: Arc<HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
-    #[cfg(feature = "rate-limit")] handler_names: Vec<String>,
+    #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
 ) {
     let peer_ip = stream
         .peer_addr()

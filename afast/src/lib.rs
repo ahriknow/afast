@@ -448,7 +448,7 @@ pub use afast_macros::register_ws;
 pub use afast_macros::sse;
 #[cfg(feature = "ordinary-ws")]
 pub use afast_macros::ws;
-pub use afast_macros::{Tag, handler, register, register_ordinary};
+pub use afast_macros::{Tag, handler, register, register_ordinary, register_with_path};
 #[cfg(feature = "ordinary-http")]
 pub use afast_macros::{delete, get, patch, post, put};
 
@@ -484,66 +484,66 @@ macro_rules! service {
 
     // Service with items
     ($name:expr => { $($item:tt)* }) => {
-        $crate::service!(@svc $crate::Service::new($name), $($item)*)
+        $crate::service!(@svc $name, $crate::Service::new($name), $($item)*)
     };
 
     // Service with description and items
     ($name:expr, $desc:expr => { $($item:tt)* }) => {
-        $crate::service!(@svc $crate::Service::new($name).desc($desc), $($item)*)
+        $crate::service!(@svc $name, $crate::Service::new($name).desc($desc), $($item)*)
     };
 
     // ── Service-level accumulation ─────────────────────────────
 
-    (@svc $svc:expr) => { $svc };
-    (@svc $svc:expr,) => { $svc };
+    (@svc $sname:expr, $svc:expr) => { $svc };
+    (@svc $sname:expr, $svc:expr,) => { $svc };
 
-    (@svc $svc:expr, h($($handler:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
-            $svc.handler($crate::Handler::from_entry(register!($($handler)+)))
+    (@svc $sname:expr, $svc:expr, h($($handler:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
+            $svc.handler($crate::Handler::from_entry($crate::register_with_path!($($handler)+, $sname)))
             $($rest)*
         )
     };
 
-    (@svc $svc:expr, group($group_name:expr => { $($inner:tt)* }) $($rest:tt)*) => {
-        $crate::service!(@svc
-            $svc.handler($crate::service!(@group $group_name, $($inner)*))
+    (@svc $sname:expr, $svc:expr, group($group_name:expr => { $($inner:tt)* }) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
+            $svc.handler($crate::service!(@group $sname, $group_name, $($inner)*))
             $($rest)*
         )
     };
 
     // Ordinary HTTP routes at service level
-    (@svc $svc:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             $svc.ordinary_route("GET", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
-    (@svc $svc:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             $svc.ordinary_route("POST", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
-    (@svc $svc:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             $svc.ordinary_route("PUT", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
-    (@svc $svc:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             $svc.ordinary_route("PATCH", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
-    (@svc $svc:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             $svc.ordinary_route("DELETE", $path, $crate::register_ordinary!($($fn)+))
             $($rest)*
         )
     };
-    (@svc $svc:expr, ws($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, ws($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             {
                 let (__ws_invoker, __ws_name) = $crate::register_ws!($($fn)+);
                 $svc.ws_route($path, __ws_invoker, __ws_name)
@@ -551,8 +551,8 @@ macro_rules! service {
             $($rest)*
         )
     };
-    (@svc $svc:expr, sse($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@svc
+    (@svc $sname:expr, $svc:expr, sse($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc $sname,
             {
                 let (__sse_invoker, __sse_name) = $crate::register_sse!($($fn)+);
                 $svc.sse_route($path, __sse_invoker, __sse_name)
@@ -563,54 +563,54 @@ macro_rules! service {
 
     // ── Group building ────────────────────────────────────────
 
-    (@group $name:expr, $($item:tt)*) => {
-        $crate::service!(@group_chain $crate::Handler::group($name), $($item)*)
+    (@group $sname:expr, $name:expr, $($item:tt)*) => {
+        $crate::service!(@group_chain $sname, $crate::Handler::group($name), $($item)*)
     };
 
-    (@group_chain $grp:expr) => { $grp };
-    (@group_chain $grp:expr,) => { $grp };
+    (@group_chain $sname:expr, $grp:expr) => { $grp };
+    (@group_chain $sname:expr, $grp:expr,) => { $grp };
 
-    (@group_chain $grp:expr, h($($handler:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
-            $grp.handler($crate::Handler::from_entry(register!($($handler)+)))
+    (@group_chain $sname:expr, $grp:expr, h($($handler:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
+            $grp.handler($crate::Handler::from_entry($crate::register_with_path!($($handler)+, $sname)))
             $($rest)*
         )
     };
 
-    (@group_chain $grp:expr, group($group_name:expr => { $($inner:tt)* }) $($rest:tt)*) => {
-        $crate::service!(@group_chain
-            $grp.handler($crate::service!(@group $group_name, $($inner)*))
+    (@group_chain $sname:expr, $grp:expr, group($group_name:expr => { $($inner:tt)* }) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
+            $grp.handler($crate::service!(@group $sname, $group_name, $($inner)*))
             $($rest)*
         )
     };
 
     // Ordinary HTTP routes inside a group
-    (@group_chain $grp:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
+    (@group_chain $sname:expr, $grp:expr, get($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
             $grp.handler($crate::Handler::ordinary_leaf($path, "GET", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
-    (@group_chain $grp:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
+    (@group_chain $sname:expr, $grp:expr, post($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
             $grp.handler($crate::Handler::ordinary_leaf($path, "POST", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
-    (@group_chain $grp:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
+    (@group_chain $sname:expr, $grp:expr, put($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
             $grp.handler($crate::Handler::ordinary_leaf($path, "PUT", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
-    (@group_chain $grp:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
+    (@group_chain $sname:expr, $grp:expr, patch($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
             $grp.handler($crate::Handler::ordinary_leaf($path, "PATCH", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )
     };
-    (@group_chain $grp:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
-        $crate::service!(@group_chain
+    (@group_chain $sname:expr, $grp:expr, delete($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@group_chain $sname,
             $grp.handler($crate::Handler::ordinary_leaf($path, "DELETE", $crate::register_ordinary!($($fn)+)))
             $($rest)*
         )

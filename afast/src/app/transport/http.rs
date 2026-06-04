@@ -51,7 +51,7 @@ use crate::service::OrdinaryRouteInfo;
 pub struct HttpConfig {
     pub addr: SocketAddr,
     pub state: Arc<StateMap>,
-    pub handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    pub handlers: Arc<std::collections::HashMap<u32, &'static dyn HandlerInvoker>>,
     #[cfg(any(feature = "code", feature = "doc"))]
     pub services: Vec<Service>,
     #[cfg(feature = "doc")]
@@ -72,10 +72,10 @@ pub struct HttpConfig {
     pub rate_limiter: Option<Arc<RateLimiter>>,
     /// Handler names indexed by handler ID, for rate-limit lookups.
     #[cfg(feature = "rate-limit")]
-    pub handler_names: Vec<String>,
+    pub handler_names: std::collections::HashMap<u32, String>,
     /// Registered lifecycle hooks.
     #[cfg(feature = "hook")]
-    pub hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    pub hooks: Arc<std::collections::HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Name-based hook lookup for ordinary routes.
     /// Key: `"service_name:handler_name"`, Value: merged hooks (global + service).
     #[cfg(feature = "hook")]
@@ -280,7 +280,7 @@ async fn serve_connection<S>(
 /// Immutable shared state for all HTTP request handlers.
 struct SharedState {
     state: Arc<StateMap>,
-    handlers: Arc<Vec<Option<&'static dyn HandlerInvoker>>>,
+    handlers: Arc<std::collections::HashMap<u32, &'static dyn HandlerInvoker>>,
     #[cfg(any(feature = "code", feature = "doc"))]
     services: Vec<Service>,
     #[cfg(feature = "doc")]
@@ -300,9 +300,9 @@ struct SharedState {
     #[cfg(feature = "rate-limit")]
     rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")]
-    handler_names: Vec<String>,
+    handler_names: std::collections::HashMap<u32, String>,
     #[cfg(feature = "hook")]
-    hooks: Arc<Vec<Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    hooks: Arc<std::collections::HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Name-based hook lookup for ordinary routes.
     #[cfg(feature = "hook")]
     named_hooks: Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
@@ -316,7 +316,9 @@ struct CompiledOrdinaryRoute {
     invoker: &'static dyn crate::handler::OrdinaryHandlerInvoker,
     #[cfg_attr(not(feature = "rate-limit"), allow(dead_code))]
     handler_name: &'static str,
+    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
     path: &'static str,
+    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
     service_name: String,
 }
 
@@ -613,13 +615,11 @@ async fn handle_api(
         );
     }
 
-    let handler_id = body[0] as usize
-        | (body[1] as usize) << 8
-        | (body[2] as usize) << 16
-        | (body[3] as usize) << 24;
+    let handler_id =
+        body[0] as u32 | (body[1] as u32) << 8 | (body[2] as u32) << 16 | (body[3] as u32) << 24;
 
-    let invoker = match shared.handlers.get(handler_id).and_then(|h| *h) {
-        Some(invoker) => invoker,
+    let invoker = match shared.handlers.get(&handler_id) {
+        Some(invoker) => *invoker,
         None => {
             return error_response(
                 StatusCode::NOT_FOUND,
@@ -642,7 +642,7 @@ async fn handle_api(
     if let Some(ref limiter) = shared.rate_limiter {
         let handler_name = shared
             .handler_names
-            .get(handler_id)
+            .get(&handler_id)
             .map(|s| s.as_str())
             .unwrap_or("");
         if !handler_name.is_empty() {
@@ -671,7 +671,11 @@ async fn handle_api(
             handler_id,
             state: shared.state.clone(),
         };
-        shared.hooks[handler_id]
+        shared
+            .hooks
+            .get(&handler_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
             .iter()
             .filter_map(|h| h.before_request(&ctx))
             .collect()
@@ -1034,6 +1038,7 @@ async fn handle_ws_upgrade(
 /// spawned task so the 101 response is returned immediately.
 #[cfg(feature = "ordinary-ws")]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(feature = "hook"), allow(unused_variables))]
 async fn handle_ordinary_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
@@ -1078,6 +1083,7 @@ async fn handle_ordinary_ws_upgrade(
     let state = shared.state.clone();
     let query_owned = query_string.to_string();
     // Leak to get &'static str for RequestContext (handler names are compile-time constants).
+    #[cfg(feature = "hook")]
     let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
     let handler_name_owned = handler_name.to_string();
 
@@ -1298,6 +1304,7 @@ async fn handle_ordinary_ws_upgrade(
 /// the handler to push events over the connection lifetime.
 #[cfg(feature = "ordinary-sse")]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(feature = "hook"), allow(unused_variables))]
 async fn handle_sse(
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
@@ -1314,6 +1321,7 @@ async fn handle_sse(
     let sender = crate::app::ordinary_sse::SseSender::new(tx);
     let state = shared.state.clone();
     // Leak to get &'static str for RequestContext (handler names are compile-time constants).
+    #[cfg(feature = "hook")]
     let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
     let handler_name_owned = handler_name.to_string();
 

@@ -344,11 +344,14 @@ impl AdminClient {
         let mut w = BinaryWriter::new();
         let data = w.into_bytes();
         eprintln!(
-            "[afast:debug] → call handlerId=24 payloadLen={}",
+            "[afast:debug] → call handlerId=3593294227 payloadLen={}",
             data.len()
         );
-        let resp = _call_tcp(&self.stream, 24, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=24 respLen={}", resp.len());
+        let resp = _call_tcp(&self.stream, 3593294227, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=3593294227 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(HealthTokenResponse {
             version: r.read_str(),
@@ -381,9 +384,15 @@ impl<'a> AdminUserApi<'a> {
         w.write_str(&request.password);
         w.write_str(&request.name);
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=4 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 4, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=4 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=2053129421 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 2053129421, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=2053129421 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(UserCreateUserResponse { id: r.read_i64() })
     }
@@ -402,9 +411,15 @@ impl<'a> AdminUserApi<'a> {
         w.write_i64(request.page);
         w.write_i64(request.size);
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=5 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 5, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=5 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=4252064238 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 4252064238, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=4252064238 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(UserListUsersResponse {
             total: r.read_i64(),
@@ -540,9 +555,15 @@ impl<'a> AdminUserApi<'a> {
         w.write_i32(request.age);
         w.write_bool(request.active);
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=6 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 6, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=6 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=507809882 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 507809882, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=507809882 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(if r.read_u8() == 1 {
             Some(UserUpdateUser {
@@ -671,9 +692,15 @@ impl<'a> AdminUserApi<'a> {
         w.write_str(&_c0.token);
         w.write_i64(request.user_id);
         let data = w.into_bytes();
-        eprintln!("[afast:debug] → call handlerId=7 payloadLen={}", data.len());
-        let resp = _call_tcp(&self.stream, 7, data).await?;
-        eprintln!("[afast:debug] ← call handlerId=7 respLen={}", resp.len());
+        eprintln!(
+            "[afast:debug] → call handlerId=3470618184 payloadLen={}",
+            data.len()
+        );
+        let resp = _call_tcp(&self.stream, 3470618184, data).await?;
+        eprintln!(
+            "[afast:debug] ← call handlerId=3470618184 respLen={}",
+            resp.len()
+        );
         let mut r = BinaryReader::new(&resp);
         Ok(if r.read_u8() == 1 {
             Some(UserDeleteUser {

@@ -492,7 +492,7 @@ fn build_handler_tree(handlers: &[Handler], path_prefix: &[&str]) -> Vec<String>
         if h.meta.name.is_empty() {
             jb.number(-1);
         } else {
-            jb.number(h.offset as i64);
+            jb.number(h.stable_id as i64);
         }
         jb.comma();
 

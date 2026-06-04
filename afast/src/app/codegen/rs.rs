@@ -938,7 +938,7 @@ fn handler_method_rs(
     } else {
         to_snake_case(handler.meta.name)
     };
-    let id = handler.offset;
+    let id = handler.stable_id;
     let indent = format!("{}    ", base_indent);
     let ind = format!("{}    ", indent);
 

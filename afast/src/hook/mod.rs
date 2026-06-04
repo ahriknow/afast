@@ -40,8 +40,8 @@ pub struct RequestContext {
     pub handler_desc: &'static str,
     /// Transport that delivered this request: `"tcp"`, `"ws"`, or `"http"`.
     pub transport: &'static str,
-    /// Handler offset in the binary dispatch table.
-    pub handler_id: usize,
+    /// Hash-based stable handler ID in the binary dispatch table.
+    pub handler_id: u32,
     /// Shared application state.
     pub state: Arc<StateMap>,
 }
