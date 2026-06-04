@@ -14,6 +14,7 @@ HTTP server endpoints:
 | GET | `/doc` | API docs index (requires `doc`) |
 | GET | `/doc/{service}` | Service-specific docs (requires `doc`) |
 | * | Ordinary routes | RESTful endpoints (requires `ordinary-http`) |
+| GET | `/path/:param` | WebSocket upgrade for ordinary-ws routes (requires `ordinary-ws`) |
 
 **HTTP Response Format:**
 - Success: `[0u8][0i64][data: bytes]`
@@ -80,6 +81,39 @@ async fn get_user(
 | `File` | 200 | Custom + `Content-Disposition: attachment` |
 | `Status(code)` | Custom | — |
 | `Redirect(url)` | 302 | `Location` header |
+
+## Ordinary WebSocket
+
+With `ordinary-ws`, define WebSocket routes using `ws` inside the `service!` macro. These routes use text/JSON frames instead of the binary protocol:
+
+```rust
+use afast::{ws, WsSender, WsReceiver, WsParam};
+
+#[derive(Deserialize)]
+struct ChatParam { room: String }
+
+#[ws(desc("Chat room"))]
+async fn chat_ws(
+    param: WsParam<ChatParam>,
+    sender: WsSender,
+    mut receiver: WsReceiver,
+) -> afast::Result<()> {
+    while let Some(msg) = receiver.recv().await {
+        if let afast::WsMessage::Text(text) = msg {
+            sender.send_text(format!("[{}] {}", param.0.room, text)).await?;
+        }
+    }
+    Ok(())
+}
+
+let svc = service!("chat" => {
+    ws("/chat/:room", chat_ws),
+});
+```
+
+Connect: `ws://host:port/chat/general?token=abc`
+
+TS/JS 客户端自动生成平台感知的 WebSocket 连接方法，兼容浏览器、UniApp 和微信小程序。
 
 ## Long Connections
 

@@ -1,12 +1,11 @@
-#[cfg(feature = "code")]
+#[cfg(all(feature = "code", feature = "binary"))]
 use crate::{Lang, Service};
 
 /// Dispatches code generation for a single service to the appropriate language backend.
 ///
 /// Returns the generated source code as a string, or [`CodeError`] if the service
 /// is not found or the requested language backend is not compiled in.
-#[cfg(feature = "code")]
-#[allow(unused_variables)]
+#[cfg(all(feature = "code", feature = "binary"))]
 pub fn generate_code(
     services: &[Service],
     service_name: &str,
@@ -41,7 +40,7 @@ pub fn generate_code(
 }
 
 /// Errors from on-demand code generation via the `/code` endpoint.
-#[cfg(feature = "code")]
+#[cfg(all(feature = "code", feature = "binary"))]
 pub enum CodeError {
     /// The requested service name was not found in the registered services.
     ServiceNotFound(String),
@@ -50,7 +49,7 @@ pub enum CodeError {
     LangNotEnabled(String),
 }
 
-#[cfg(feature = "code")]
+#[cfg(all(feature = "code", feature = "binary"))]
 impl std::fmt::Display for CodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

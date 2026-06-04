@@ -2343,10 +2343,12 @@ pub(crate) fn generate_service_ts(
         init_parts.push("                this._wsTask.onError(() => { clearTimeout(failTimer); reject(new Error('UniApp WS connection failed')); });".to_string());
         init_parts.push("                this._wsTask.onClose(() => { clearTimeout(failTimer); reject(new Error('UniApp WS closed before open')); });".to_string());
         init_parts.push(
-            "                this._wsTask.onMessage((res: { data: ArrayBuffer }) => {".to_string(),
+            "                this._wsTask.onMessage((res: { data: string | ArrayBuffer }) => {"
+                .to_string(),
         );
         init_parts
-            .push("                    this._handleMessage(new Uint8Array(res.data));".to_string());
+            .push("                    const raw = typeof res.data === 'string' ? new TextEncoder().encode(res.data) : new Uint8Array(res.data);".to_string());
+        init_parts.push("                    this._handleMessage(raw);".to_string());
         init_parts.push("                });".to_string());
         init_parts.push("            });".to_string());
         init_parts.push("            this._ready.then(() => { if (this._heartbeatTimer) clearInterval(this._heartbeatTimer); this._heartbeatTimer = setInterval(() => this._sendHeartbeat(), 180_000); });".to_string());
@@ -2399,11 +2401,12 @@ pub(crate) fn generate_service_ts(
         init_parts.push("                this._wxSocketTask.onError(() => { clearTimeout(failTimer); reject(new Error('Wx WS connection failed')); });".to_string());
         init_parts.push("                this._wxSocketTask.onClose(() => { clearTimeout(failTimer); reject(new Error('Wx WS closed before open')); });".to_string());
         init_parts.push(
-            "                this._wxSocketTask.onMessage((res: { data: ArrayBuffer }) => {"
+            "                this._wxSocketTask.onMessage((res: { data: string | ArrayBuffer }) => {"
                 .to_string(),
         );
         init_parts
-            .push("                    this._handleMessage(new Uint8Array(res.data));".to_string());
+            .push("                    const raw = typeof res.data === 'string' ? new TextEncoder().encode(res.data) : new Uint8Array(res.data);".to_string());
+        init_parts.push("                    this._handleMessage(raw);".to_string());
         init_parts.push("                });".to_string());
         init_parts.push("            });".to_string());
         init_parts.push("            this._ready.then(() => { if (this._heartbeatTimer) clearInterval(this._heartbeatTimer); this._heartbeatTimer = setInterval(() => this._sendHeartbeat(), 180_000); });".to_string());
@@ -3243,6 +3246,100 @@ pub(crate) fn generate_service_ts(
         &class_name,
     );
     lines.push(handler_obj);
+
+    // ── Ordinary-ws routes ────────────────────────────────────
+    #[cfg(feature = "ordinary-ws")]
+    {
+        for ws_route in &svc.ws_routes {
+            let path = ws_route.path;
+            let handler_name = ws_route.handler_name;
+
+            // Parse path segments to extract params
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+            let has_params = segments.iter().any(|s| s.starts_with(':'));
+
+            // Collect param names
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            // Build function signature
+            let sig_params = if param_names.is_empty() {
+                "query?: Record<string, string>".to_string()
+            } else {
+                let params_str = param_names
+                    .iter()
+                    .map(|p| format!("{}: string", p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}, query?: Record<string, string>", params_str)
+            };
+
+            // Build path substitution
+            let mut path_expr = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    path_expr.push('/');
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    path_expr.push_str(&format!("${{encodeURIComponent({})}}", param));
+                } else {
+                    path_expr.push_str(seg);
+                }
+            }
+
+            let ind = "        ";
+            let mut body = String::new();
+            body.push_str(&format!(
+                "{}const scheme = this._tls ? 'wss' : 'ws';\n",
+                ind
+            ));
+            if has_params {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, path_expr
+                ));
+            } else {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, trimmed
+                ));
+            }
+            body.push_str(&format!("{}if (query) {{\n", ind));
+            body.push_str(&format!(
+                "    {}const qs = new URLSearchParams(query);\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}if (qs.toString()) url += '?' + qs.toString();\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+            body.push_str(&format!("{}if (this._transport === 'uniws') {{\n", ind));
+            body.push_str(&format!(
+                "    {}return (uni as any).connectSocket({{ url, complete: () => {{}} }});\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "{}}} else if (this._transport === 'wxws') {{\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}return (wx as any).connectSocket({{ url }});\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+            body.push_str(&format!("{}return new WebSocket(url);\n", ind));
+
+            lines.push(format!("        /** WebSocket: {} */", path));
+            lines.push(format!(
+                "        {}: ({}): any => {{\n{}        }},",
+                handler_name, sig_params, body
+            ));
+        }
+    }
 
     lines.push("    };".to_string());
     lines.push("}".to_string());

@@ -10,8 +10,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["ordinary-http", "hook"]
+default = ["ordinary-http", "ordinary-ws", "hook"]
 ordinary-http = ["afast/ordinary-http"]
+ordinary-ws = ["afast/ordinary-ws"]
 tls = ["afast/tls"]
 hook = ["afast/hook"]
 
@@ -24,6 +25,7 @@ afast = { path = "../afast", features = [
     "ts",
     "kt",
     "rs",
+    "code",
     "doc",
     "marker",
     "rate-limit",
@@ -36,6 +38,7 @@ serde_json.workspace = true
 tokio.workspace = true
 hyper.workspace = true
 http-body-util.workspace = true
+tokio-tungstenite = { workspace = true }
 
 [[bin]]
 name = "test_client"

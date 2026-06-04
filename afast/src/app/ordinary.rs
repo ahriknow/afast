@@ -1,12 +1,13 @@
-//! Route pattern matching and HTTP helper utilities for traditional
-//! RESTful endpoints (the `ordinary-http` feature).
+//! Route pattern matching, query/path parsing and lenient deserialization
+//! shared by `ordinary-http` and `ordinary-ws` features.
 //!
 //! This module provides:
 //! - Path pattern compilation and matching (exact and parameterized).
-//! - Header name normalization and JSON conversion for struct deserialization.
 //! - Query-string and path-parameter parsing into `serde_json::Value`.
 //! - A lenient JSON deserializer that coerces string values into numbers and
 //!   booleans, so that query/path string parameters can populate typed struct fields.
+//! - (`ordinary-http`) Header name normalization and JSON conversion.
+//! - (`ordinary-http`) Request body reading.
 
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ use std::collections::HashMap;
 
 /// A single segment within a compiled route pattern.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) enum RouteSegment {
     /// A literal string segment that must match exactly.
     Static(String),
@@ -27,6 +29,7 @@ pub(crate) enum RouteSegment {
 /// this is used by the HTTP server to dispatch ordinary (REST-style)
 /// requests to the correct handler.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) enum RoutePattern {
     /// A literal path with no parameters. Match is a simple string comparison.
     Exact(String),
@@ -35,6 +38,7 @@ pub(crate) enum RoutePattern {
     Parametric { segments: Vec<RouteSegment> },
 }
 
+#[allow(dead_code)]
 impl RoutePattern {
     /// Compiles a pattern string into a [`RoutePattern`].
     ///
@@ -117,13 +121,14 @@ impl RoutePattern {
     }
 }
 
-// ─── Header Helpers ────────────────────────────────────────────────
+// ─── Header Helpers (ordinary-http only) ─────────────────────────
 
 /// Converts an HTTP header name to a `snake_case` field name.
 ///
 /// `"Content-Type"` becomes `"content_type"`, `"Authorization"` becomes
 /// `"authorization"`. Hyphens are replaced with underscores and all
 /// characters are lowercased.
+#[cfg(feature = "ordinary-http")]
 pub fn header_name_to_field(header_name: &str) -> String {
     let mut result = String::with_capacity(header_name.len());
     for c in header_name.chars() {
@@ -142,6 +147,7 @@ pub fn header_name_to_field(header_name: &str) -> String {
 /// the resulting JSON keys match Rust struct field names (e.g.
 /// `content_type` rather than `Content-Type`). Header values that cannot
 /// be converted to UTF-8 are silently omitted.
+#[cfg(feature = "ordinary-http")]
 pub fn req_headers_to_json(headers: &hyper::HeaderMap) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for (name, value) in headers.iter() {
@@ -161,6 +167,7 @@ pub fn req_headers_to_json(headers: &hyper::HeaderMap) -> serde_json::Value {
 /// object fed to the lenient deserializer has every field the target
 /// struct expects, so deserialization succeeds even when optional standard
 /// headers are absent.
+#[cfg(feature = "ordinary-http")]
 pub fn fill_standard_header_defaults(
     json: &mut serde_json::Value,
     structure: fn() -> &'static crate::handler::TagMeta,
@@ -637,6 +644,7 @@ impl<'de, 'v> SeqAccess<'de> for LenientSeq<'v> {
 /// This standalone function exists so that generated ordinary handler code
 /// can call body reading without dealing with the `BodyExt` trait import
 /// or async combinator chains.
+#[cfg(feature = "ordinary-http")]
 pub async fn read_body_bytes(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<Vec<u8>, crate::Error> {

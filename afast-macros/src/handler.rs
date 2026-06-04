@@ -501,6 +501,12 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_data_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("Data".to_string(), extract_ident_name(&inner), inner)
+                } else if is_ordinary && is_ws_sender_type(&pat_type.ty) {
+                    let ws_type: Type = syn::parse_quote!(WsSender);
+                    ("WsSender".to_string(), "WsSender".to_string(), ws_type)
+                } else if is_ordinary && is_ws_receiver_type(&pat_type.ty) {
+                    let ws_type: Type = syn::parse_quote!(WsReceiver);
+                    ("WsReceiver".to_string(), "WsReceiver".to_string(), ws_type)
                 } else if is_receiver_type(&pat_type.ty) {
                     let receiver_type: Type = syn::parse_quote!(Receiver);
                     (
@@ -523,6 +529,12 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_ordinary && is_header_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("Header".to_string(), extract_ident_name(&inner), inner)
+                } else if is_ordinary && is_ws_query_type(&pat_type.ty) {
+                    let inner = extract_generic_inner(&pat_type.ty)?;
+                    ("WsQuery".to_string(), extract_ident_name(&inner), inner)
+                } else if is_ordinary && is_ws_param_type(&pat_type.ty) {
+                    let inner = extract_generic_inner(&pat_type.ty)?;
+                    ("WsParam".to_string(), extract_ident_name(&inner), inner)
                 } else {
                     return Err(syn::Error::new(
                         pat_type.ty.span(),
@@ -603,6 +615,26 @@ fn is_body_type(ty: &Type) -> bool {
 /// Returns true when the outermost identifier of the type is `Header`.
 fn is_header_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "Header")
+}
+
+/// Returns true when the outermost identifier of the type is `WsQuery`.
+fn is_ws_query_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "WsQuery")
+}
+
+/// Returns true when the outermost identifier of the type is `WsParam`.
+fn is_ws_param_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "WsParam")
+}
+
+/// Returns true when the outermost identifier of the type is `WsSender`.
+fn is_ws_sender_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "WsSender")
+}
+
+/// Returns true when the outermost identifier of the type is `WsReceiver`.
+fn is_ws_receiver_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "WsReceiver")
 }
 
 /// Extracts the last path segment identifier from a `Type::Path`, if any.
@@ -1304,4 +1336,233 @@ fn build_ordinary_invoker_impl(
 /// Converts a `syn::Type` to its string representation using `quote!`.
 fn type_to_string(ty: &Type) -> String {
     quote! { #ty }.to_string()
+}
+
+/// Entry point for the `#[ws]` proc-macro attribute.
+///
+/// Generates a `WsHandlerInvoker` implementation for WebSocket route handlers.
+/// The handler function receives `WsQuery<T>`, `WsParam<T>`, and
+/// `WsSender`/`WsReceiver` extractors, and returns `Result<()>`.
+///
+/// ```no_run
+/// use afast::ws;
+///
+/// #[ws(desc("Chat handler"))]
+/// async fn chat(sender: afast::WsSender, mut receiver: afast::WsReceiver) -> afast::Result<()> {
+///     Ok(())
+/// }
+/// ```
+pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let input_fn: ItemFn = syn::parse2(item)?;
+    let fn_name = &input_fn.sig.ident;
+    let fn_name_str = fn_name.to_string();
+
+    let (desc, api_name, _cache_seconds, _rate_limit_policy) =
+        parse_handler_attrs_from_tokens(&attr)?;
+    let params = parse_handler_params(&input_fn, Some("WS"))?;
+
+    // Validate: ws handlers cannot use Body/Custom/Data/Receiver/Sender
+    for p in &params {
+        match p.extractor.as_str() {
+            "State" | "WsQuery" | "WsParam" | "WsSender" | "WsReceiver" => {}
+            other => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!(
+                        "extractor '{}' is not supported in #[ws] handlers. \
+                         Allowed: State, WsQuery, WsParam, WsSender, WsReceiver",
+                        other
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Build the implementation function (renamed to __impl_<name>).
+    let impl_fn_name = syn::Ident::new(&format!("__impl_{}", fn_name_str), Span::call_site());
+    let mut impl_sig = input_fn.sig.clone();
+    impl_sig.ident = impl_fn_name.clone();
+    let impl_fn = {
+        let block = &input_fn.block;
+        let attrs: Vec<_> = input_fn
+            .attrs
+            .iter()
+            .filter(|a| !a.path().is_ident("ws"))
+            .collect();
+        quote! {
+            #(#attrs)*
+            #impl_sig #block
+        }
+    };
+
+    let invoker_ident = syn::Ident::new(&format!("__WsInvoker_{}", fn_name_str), Span::call_site());
+    let invoker_const =
+        syn::Ident::new(&format!("__WS_INVOKER_{}", fn_name_str), Span::call_site());
+    let meta_ident = syn::Ident::new(&format!("__META_{}", fn_name_str), Span::call_site());
+
+    let desc_str = desc;
+    let name_str = if api_name.is_empty() {
+        fn_name_str.clone()
+    } else {
+        api_name
+    };
+
+    let ws_invoker_impl = build_ws_invoker_impl(&invoker_ident, &impl_fn_name, &params);
+
+    Ok(quote! {
+        #impl_fn
+
+        const #meta_ident: afast::HandlerMeta = afast::HandlerMeta {
+            name: #name_str,
+            desc: #desc_str,
+            api_name: "",
+            params: &[],
+            return_type: "()",
+            return_structure: None,
+            long_connection: false,
+            is_ordinary: true,
+            method: "WS",
+            path: "",
+            cache_seconds: 0,
+            rate_limit_policy: "",
+        };
+
+        #ws_invoker_impl
+
+        const #invoker_const: #invoker_ident = #invoker_ident;
+
+        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_ws::WsHandlerInvoker, &'static str) {
+            (&#invoker_const, #name_str)
+        }
+    })
+}
+
+/// Builds the `WsHandlerInvoker` implementation for a WebSocket handler.
+fn build_ws_invoker_impl(
+    invoker_ident: &syn::Ident,
+    fn_name: &syn::Ident,
+    params: &[ParamInfo],
+) -> TokenStream {
+    let mut state_extractions: Vec<TokenStream> = Vec::new();
+    let mut has_query = false;
+    let mut has_param = false;
+    let mut has_sender = false;
+    let mut has_receiver = false;
+    let mut query_var: Option<syn::Ident> = None;
+    let mut param_var: Option<syn::Ident> = None;
+    let mut query_inner: Option<Type> = None;
+    let mut param_inner: Option<Type> = None;
+
+    for p in params {
+        let var_name = syn::Ident::new(&p.name, Span::call_site());
+        let full_type = &p.full_type;
+        let inner = &p.inner_type;
+
+        match p.extractor.as_str() {
+            "State" => {
+                state_extractions.push(quote! {
+                    let #var_name: #full_type = match state.get::<#inner>() {
+                        Some(v) => afast::State(v.clone()),
+                        None => {
+                            return Err(afast::Error::StateNotFound {
+                                message: stringify!(#inner).to_string()
+                            });
+                        }
+                    };
+                });
+            }
+            "WsQuery" => {
+                has_query = true;
+                query_var = Some(var_name);
+                query_inner = Some(inner.clone());
+            }
+            "WsParam" => {
+                has_param = true;
+                param_var = Some(var_name);
+                param_inner = Some(inner.clone());
+            }
+            "WsSender" => {
+                has_sender = true;
+            }
+            "WsReceiver" => {
+                has_receiver = true;
+            }
+            _ => {}
+        }
+    }
+
+    let mut extractions: Vec<TokenStream> = Vec::new();
+
+    if has_query {
+        let var_name = query_var.as_ref().unwrap();
+        let inner = query_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let #var_name: afast::WsQuery<#inner> = afast::WsQuery::from_query(&query_owned)?;
+        });
+    }
+
+    if has_param {
+        let var_name = param_var.as_ref().unwrap();
+        let inner = param_inner.as_ref().unwrap();
+        extractions.push(quote! {
+            let #var_name: afast::WsParam<#inner> = afast::WsParam::from_params(&path_params_owned)?;
+        });
+    }
+
+    // WsSender and WsReceiver are passed directly as function arguments.
+
+    // Determine which args need to be passed from the call_ws signature.
+    let mut extra_args = Vec::new();
+    if has_sender {
+        extra_args.push(quote! { sender });
+    }
+    if has_receiver {
+        extra_args.push(quote! { receiver });
+    }
+
+    // Build the call args: extracted vars first, then sender/receiver
+    let all_call_args: Vec<TokenStream> = {
+        let mut args = Vec::new();
+        // Add extracted params (State, WsQuery, WsParam) in order
+        for p in params {
+            let var_name = syn::Ident::new(&p.name, Span::call_site());
+            match p.extractor.as_str() {
+                "WsSender" | "WsReceiver" => {} // added via extra_args
+                _ => args.push(quote! { #var_name }),
+            }
+        }
+        // Add sender/receiver at the end
+        args.extend(extra_args);
+        args
+    };
+
+    quote! {
+        pub struct #invoker_ident;
+
+        impl afast::app::ordinary_ws::WsHandlerInvoker for #invoker_ident {
+            fn call_ws(
+                &'static self,
+                query: &str,
+                path_params: &std::collections::HashMap<String, String>,
+                sender: afast::WsSender,
+                receiver: afast::WsReceiver,
+                state: std::sync::Arc<afast::StateMap>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                        Output = Result<(), afast::Error>,
+                    > + Send + 'static,
+                >,
+            > {
+                let query_owned = query.to_string();
+                let path_params_owned = path_params.clone();
+
+                Box::pin(async move {
+                    #( #state_extractions )*
+                    #( #extractions )*
+                    #fn_name( #( #all_call_args ),* ).await
+                })
+            }
+        }
+    }
 }

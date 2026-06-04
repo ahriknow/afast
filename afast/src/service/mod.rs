@@ -33,6 +33,9 @@ pub struct Service {
     /// Ordinary HTTP routes registered in this service.
     #[cfg(feature = "ordinary-http")]
     pub ordinary_routes: Vec<OrdinaryRouteInfo>,
+    /// Ordinary WebSocket routes registered in this service.
+    #[cfg(feature = "ordinary-ws")]
+    pub ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
     /// Per-service lifecycle hooks. When non-empty, these override global
     /// hooks for handlers belonging to this service.
     #[cfg(feature = "hook")]
@@ -48,6 +51,8 @@ impl Service {
             handlers: Vec::new(),
             #[cfg(feature = "ordinary-http")]
             ordinary_routes: Vec::new(),
+            #[cfg(feature = "ordinary-ws")]
+            ws_routes: Vec::new(),
             #[cfg(feature = "hook")]
             hooks: Vec::new(),
         }
@@ -97,6 +102,24 @@ impl Service {
             method,
             path: path.to_string(),
             handler_entry: entry,
+        });
+        self
+    }
+
+    /// Registers an ordinary WebSocket route in this service.
+    #[doc(hidden)]
+    #[cfg(feature = "ordinary-ws")]
+    pub fn ws_route(
+        mut self,
+        path: &'static str,
+        invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
+        handler_name: &'static str,
+    ) -> Self {
+        self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
+            path,
+            handler_name,
+            pattern: crate::app::ordinary::RoutePattern::parse(path),
+            invoker,
         });
         self
     }

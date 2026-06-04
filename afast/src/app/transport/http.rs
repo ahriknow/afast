@@ -31,7 +31,7 @@ use tokio::sync::broadcast;
 #[cfg(any(feature = "code", feature = "doc"))]
 use crate::Service;
 use crate::StateMap;
-#[cfg(feature = "ordinary-http")]
+#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
 use crate::app::ordinary::RoutePattern;
 use crate::error::{CODE_HTTP, CODE_LONG_CONNECTION_NOT_SUPPORTED, Error};
 use crate::handler::HandlerInvoker;
@@ -56,7 +56,9 @@ pub struct HttpConfig {
     pub ws_addr_str: Option<String>,
     #[cfg(feature = "ordinary-http")]
     pub ordinary_routes: Vec<OrdinaryRouteInfo>,
-    #[cfg(feature = "ws")]
+    #[cfg(feature = "ordinary-ws")]
+    pub ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
+    #[cfg(all(feature = "ws", feature = "binary"))]
     pub enable_ws_upgrade: bool,
     #[cfg(feature = "tls")]
     pub tls_config: Option<crate::app::TlsConfig>,
@@ -107,6 +109,18 @@ pub async fn serve(
         })
         .collect();
 
+    // Compile ordinary-ws route patterns once at startup.
+    #[cfg(feature = "ordinary-ws")]
+    let compiled_ws_routes: Vec<CompiledWsRoute> = config
+        .ws_routes
+        .iter()
+        .map(|r| CompiledWsRoute {
+            pattern: RoutePattern::parse(r.path),
+            invoker: r.invoker,
+            handler_name: r.handler_name,
+        })
+        .collect();
+
     let shared = Arc::new(SharedState {
         state: config.state,
         handlers: config.handlers,
@@ -120,7 +134,9 @@ pub async fn serve(
         ws_addr: config.ws_addr_str,
         #[cfg(feature = "ordinary-http")]
         ordinary_routes: compiled_routes,
-        #[cfg(feature = "ws")]
+        #[cfg(feature = "ordinary-ws")]
+        ws_routes: compiled_ws_routes,
+        #[cfg(all(feature = "ws", feature = "binary"))]
         enable_ws_upgrade: config.enable_ws_upgrade,
         #[cfg(feature = "rate-limit")]
         rate_limiter: config.rate_limiter,
@@ -242,7 +258,9 @@ struct SharedState {
     ws_addr: Option<String>,
     #[cfg(feature = "ordinary-http")]
     ordinary_routes: Vec<CompiledOrdinaryRoute>,
-    #[cfg(feature = "ws")]
+    #[cfg(feature = "ordinary-ws")]
+    ws_routes: Vec<CompiledWsRoute>,
+    #[cfg(all(feature = "ws", feature = "binary"))]
     enable_ws_upgrade: bool,
     #[cfg(feature = "rate-limit")]
     rate_limiter: Option<Arc<RateLimiter>>,
@@ -259,6 +277,14 @@ struct CompiledOrdinaryRoute {
     pattern: RoutePattern,
     invoker: &'static dyn crate::handler::OrdinaryHandlerInvoker,
     #[cfg_attr(not(feature = "rate-limit"), allow(dead_code))]
+    handler_name: &'static str,
+}
+
+/// A pre-compiled ordinary-ws route ready for WebSocket upgrade matching.
+#[cfg(feature = "ordinary-ws")]
+struct CompiledWsRoute {
+    pattern: RoutePattern,
+    invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
     handler_name: &'static str,
 }
 
@@ -350,7 +376,64 @@ async fn handle_request(
         }
     }
 
+    // Try ordinary-ws routes (WebSocket upgrade with path matching)
+    #[cfg(feature = "ordinary-ws")]
+    if method == hyper::Method::GET {
+        // Check if this is a WebSocket upgrade request.
+        let is_ws_upgrade = req
+            .headers()
+            .get(hyper::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_lowercase().contains("websocket"))
+            .unwrap_or(false);
+
+        if is_ws_upgrade {
+            for compiled in &shared.ws_routes {
+                if let Some(path_params) = compiled.pattern.matches(&path) {
+                    // Rate-limit check for ordinary-ws routes.
+                    #[cfg(feature = "rate-limit")]
+                    if let Some(ref limiter) = shared.rate_limiter {
+                        let mut ctx = ConnectionContext::new(client_ip.to_string());
+                        for (name, value) in req.headers().iter() {
+                            if let Ok(v) = value.to_str() {
+                                ctx.header_cache
+                                    .insert(name.as_str().to_lowercase(), v.to_string());
+                            }
+                        }
+                        if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
+                            let status = StatusCode::TOO_MANY_REQUESTS;
+                            let body = format!(
+                                "{{\"code\":{},\"message\":\"{}\"}}",
+                                e.code(),
+                                e.message()
+                            );
+                            return Ok(Response::builder()
+                                .status(status)
+                                .header("content-type", "application/json; charset=utf-8")
+                                .header("retry-after", "60")
+                                .body(Full::new(Bytes::from(body)))
+                                .expect("valid response builder"));
+                        }
+                    }
+
+                    let query_string = uri.query().unwrap_or("");
+                    return handle_ordinary_ws_upgrade(
+                        req,
+                        shared,
+                        compiled.invoker,
+                        compiled.handler_name,
+                        query_string,
+                        path_params,
+                        client_ip,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
     match segments.first().copied() {
+        #[cfg(feature = "binary")]
         Some("_api") => {
             if method != hyper::Method::POST {
                 return method_not_allowed();
@@ -371,7 +454,7 @@ async fn handle_request(
             }
             handle_doc(&segments, shared)
         }
-        #[cfg(feature = "ws")]
+        #[cfg(all(feature = "ws", feature = "binary"))]
         Some("_ws") => {
             if shared.enable_ws_upgrade {
                 return handle_ws_upgrade(req, shared, client_ip).await;
@@ -392,6 +475,7 @@ async fn handle_request(
 /// Response format:
 /// - Success: `[0u8][0i64][data]` with `content-type: application/octet-stream`.
 /// - Error: `[1u8][code i64][message bytes]` with the same content type.
+#[cfg(feature = "binary")]
 #[allow(unused_variables)]
 async fn handle_api(
     req: Request<hyper::body::Incoming>,
@@ -731,11 +815,11 @@ fn handle_doc(
 /// WebSocket handshake on the existing HTTP connection. After the 101
 /// Switching Protocols response, the upgraded connection is handed off
 /// to [`handle_websocket`](crate::app::transport::handle_websocket).
-#[cfg(feature = "ws")]
+#[cfg(all(feature = "ws", feature = "binary"))]
 async fn handle_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
-    client_ip: &str,
+    _client_ip: &str,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::tungstenite::protocol::Role;
@@ -780,7 +864,7 @@ async fn handle_ws_upgrade(
     let hooks = shared.hooks.clone();
 
     #[cfg(feature = "rate-limit")]
-    let client_ip_owned = client_ip.to_string();
+    let client_ip_owned = _client_ip.to_string();
     #[cfg(feature = "rate-limit")]
     let rate_limiter = shared.rate_limiter.clone();
     #[cfg(feature = "rate-limit")]
@@ -814,6 +898,168 @@ async fn handle_ws_upgrade(
             }
             Err(e) => {
                 eprintln!("afast: ws upgrade error: {}", e);
+            }
+        }
+    });
+
+    Ok(Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("upgrade", "websocket")
+        .header("connection", "upgrade")
+        .header("sec-websocket-accept", accept_key)
+        .body(Full::new(Bytes::new()))
+        .expect("valid response builder"))
+}
+
+/// Handles WebSocket upgrade for ordinary-ws routes.
+///
+/// This performs the HTTP→WebSocket upgrade, then creates `WsSender` and
+/// `WsReceiver` and invokes the matched handler. The handler runs in a
+/// spawned task so the 101 response is returned immediately.
+#[cfg(feature = "ordinary-ws")]
+async fn handle_ordinary_ws_upgrade(
+    req: Request<hyper::body::Incoming>,
+    shared: &SharedState,
+    invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
+    handler_name: &str,
+    query_string: &str,
+    path_params: std::collections::HashMap<String, String>,
+    _client_ip: &str,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    let headers = req.headers();
+    let ws_key = headers
+        .get("sec-websocket-key")
+        .and_then(|v| v.to_str().ok());
+
+    let is_ws_upgrade = headers
+        .get(hyper::header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_lowercase().contains("websocket"))
+        .unwrap_or(false);
+
+    if !is_ws_upgrade || ws_key.is_none() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            CODE_HTTP,
+            "websocket upgrade required",
+        );
+    }
+
+    let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(
+        ws_key.expect("ws_key checked above").as_bytes(),
+    );
+
+    let on_upgrade = hyper::upgrade::on(req);
+    let state = shared.state.clone();
+    let query_owned = query_string.to_string();
+    let handler_name_owned = handler_name.to_string();
+
+    // TODO: Add hook support (before_request, on_connect, on_disconnect)
+    // when the lifetime issues with spawned tasks are resolved.
+
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                let io = hyper_util::rt::TokioIo::new(upgraded);
+                let ws = WebSocketStream::from_raw_socket(io, Role::Server, None).await;
+
+                // Split the WebSocket stream into sender/receiver.
+                let (ws_tx, mut ws_rx) = ws.split();
+                use futures_util::{SinkExt, StreamExt};
+
+                // Create channels for the WsSender/WsReceiver wrapper.
+                let (user_tx, mut user_rx) =
+                    tokio::sync::mpsc::channel::<crate::app::ordinary_ws::WsMessage>(32);
+                let (incoming_tx, incoming_rx) =
+                    tokio::sync::mpsc::channel::<crate::app::ordinary_ws::WsMessage>(32);
+
+                let ws_sender = crate::app::ordinary_ws::WsSender::new(user_tx);
+                let ws_receiver = crate::app::ordinary_ws::WsReceiver::new(incoming_rx);
+
+                // Spawn a task to forward outgoing messages from user → WebSocket.
+                let mut ws_tx = ws_tx;
+                let send_task = tokio::spawn(async move {
+                    while let Some(msg) = user_rx.recv().await {
+                        let ws_msg = match msg {
+                            crate::app::ordinary_ws::WsMessage::Text(t) => {
+                                tokio_tungstenite::tungstenite::Message::Text(t.into())
+                            }
+                            crate::app::ordinary_ws::WsMessage::Binary(b) => {
+                                tokio_tungstenite::tungstenite::Message::Binary(b.into())
+                            }
+                            crate::app::ordinary_ws::WsMessage::Close(reason) => {
+                                tokio_tungstenite::tungstenite::Message::Close(
+                                    reason.map(|r| {
+                                        tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                                            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+                                            reason: r.into(),
+                                        }
+                                    }),
+                                )
+                            }
+                            _ => continue,
+                        };
+                        if ws_tx.send(ws_msg).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                // Spawn a task to forward incoming messages from WebSocket → user.
+                let recv_task = tokio::spawn(async move {
+                    while let Some(result) = ws_rx.next().await {
+                        match result {
+                            Ok(tokio_tungstenite::tungstenite::Message::Text(t)) => {
+                                let _ = incoming_tx
+                                    .send(crate::app::ordinary_ws::WsMessage::Text(t.to_string()))
+                                    .await;
+                            }
+                            Ok(tokio_tungstenite::tungstenite::Message::Binary(b)) => {
+                                let _ = incoming_tx
+                                    .send(crate::app::ordinary_ws::WsMessage::Binary(b.to_vec()))
+                                    .await;
+                            }
+                            Ok(tokio_tungstenite::tungstenite::Message::Ping(d)) => {
+                                let _ = incoming_tx
+                                    .send(crate::app::ordinary_ws::WsMessage::Ping(d.to_vec()))
+                                    .await;
+                            }
+                            Ok(tokio_tungstenite::tungstenite::Message::Pong(d)) => {
+                                let _ = incoming_tx
+                                    .send(crate::app::ordinary_ws::WsMessage::Pong(d.to_vec()))
+                                    .await;
+                            }
+                            Ok(tokio_tungstenite::tungstenite::Message::Close(_)) | Err(_) => {
+                                let _ = incoming_tx
+                                    .send(crate::app::ordinary_ws::WsMessage::Close(None))
+                                    .await;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+                // Call the user's handler.
+                if let Err(e) = invoker
+                    .call_ws(&query_owned, &path_params, ws_sender, ws_receiver, state)
+                    .await
+                {
+                    eprintln!("afast: ws handler '{}' error: {}", handler_name_owned, e);
+                }
+
+                // Clean up forwarding tasks.
+                send_task.abort();
+                recv_task.abort();
+            }
+            Err(e) => {
+                eprintln!(
+                    "afast: ws upgrade error for '{}': {}",
+                    handler_name_owned, e
+                );
             }
         }
     });

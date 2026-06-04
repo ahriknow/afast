@@ -692,7 +692,8 @@ fn response_expr_kt(
     structure: Option<fn() -> &'static TagMeta>,
     override_name: Option<&str>,
 ) -> String {
-    match ty {
+    let ty = normalize_rust_type(ty);
+    match ty.as_str() {
         "i8" => format!("{}.rI8().toByte()", reader),
         "i16" => format!("{}.rI16().toShort()", reader),
         "i32" => format!("{}.rI32()", reader),
@@ -710,12 +711,19 @@ fn response_expr_kt(
         "Vec<u8>" => format!("{}.rBytes({}.rU32().toInt())", reader, reader),
         s if s.starts_with("Vec<") => {
             let inner = &s[4..s.len() - 1];
-            let elem = response_expr_kt(reader, inner, indent, structure, None);
+            let inner_override = override_name.map(|n| {
+                n.trim_end_matches('?')
+                    .trim_start_matches("List<")
+                    .trim_end_matches('>')
+            });
+            let elem = response_expr_kt(reader, inner, indent, structure, inner_override);
             format!("(0 until {}.rU32()).map {{ {} }}", reader, elem)
         }
         s if s.starts_with("Option<") => {
             let inner = &s[7..s.len() - 1];
-            let body = response_expr_kt(reader, inner, indent, structure, None);
+            // Strip trailing '?' from override_name for the inner type
+            let inner_override = override_name.map(|n| n.trim_end_matches('?'));
+            let body = response_expr_kt(reader, inner, indent, structure, inner_override);
             format!("if ({}.rU8() == 1) {} else null", reader, body)
         }
         _ => {
@@ -858,7 +866,8 @@ fn generate_request_serialize_kt(
     indent: &str,
     structure: Option<fn() -> &'static TagMeta>,
 ) {
-    match ty {
+    let ty = normalize_rust_type(ty);
+    match ty.as_str() {
         "i8" => lines.push(format!("{}w.wI8({});", indent, var)),
         "i16" => lines.push(format!("{}w.wI16({});", indent, var)),
         "i32" => lines.push(format!("{}w.wI32({});", indent, var)),
@@ -1000,7 +1009,8 @@ fn generate_validation_kt(
     indent: &str,
 ) {
     for field in included(fields) {
-        let is_option = field.ty.starts_with("Option<");
+        let field_ty = normalize_rust_type(field.ty);
+        let is_option = field_ty.starts_with("Option<");
         let field_path = format!("{}.{}", var_prefix, to_camel_case(field.name));
 
         if is_option && !field.validations.is_empty() {
@@ -1339,13 +1349,20 @@ fn handler_method_kt(
 
     // Determine the Kotlin return type.  Long-connection handlers
     // return AfastSocket; ordinary handlers return the deserialised
-    // response type (or Unit for void).
+    // response type (or Unit for void).  Option<T> maps to nullable T?.
+    let is_option_return =
+        meta.return_type.starts_with("Option<") || meta.return_type.starts_with("Option <");
     let return_type = if meta.long_connection {
         "AfastSocket".to_string()
     } else {
         if let Some(structure_fn) = meta.return_structure {
             let structure = structure_fn();
-            type_name_for(prefix, structure)
+            let base = type_name_for(prefix, structure);
+            if is_option_return {
+                format!("{}?", base)
+            } else {
+                base
+            }
         } else {
             "Unit".to_string()
         }
@@ -1399,17 +1416,17 @@ fn handler_method_kt(
 
     // Execute Custom provider functions to obtain authentication or
     // context values before serialisation begins.
-    for &(ci, ty, _structure) in &custom_indices {
-        let var = format!("_c{}", ci);
+    for &(_ci, ty, _structure) in &custom_indices {
+        let var = format!("_c{}", ty);
         body_lines.push(format!(
             "{}val {} = customs[\"{}\"]!!() as {}",
-            ind, var, ci, ty
+            ind, var, ty, ty
         ));
     }
 
     // Run client-side validation on Custom parameters.
-    for &(ci, _ty, structure) in &custom_indices {
-        let var = format!("_c{}", ci);
+    for &(_ci, ty, structure) in &custom_indices {
+        let var = format!("_c{}", ty);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
             if let TagKind::Struct(fields) = meta.kind {
@@ -1429,8 +1446,8 @@ fn handler_method_kt(
     }
 
     // Serialise Custom struct fields into the binary payload.
-    for &(ci, _ty, structure) in &custom_indices {
-        let var = format!("_c{}", ci);
+    for &(_ci, ty, structure) in &custom_indices {
+        let var = format!("_c{}", ty);
         if let Some(structure_fn) = structure {
             let meta = structure_fn();
             if let TagKind::Struct(fields) = meta.kind {
@@ -1954,16 +1971,29 @@ pub(crate) fn generate_service_kt(
     let has_http = calls.contains(&crate::KtCallType::Http);
     let has_ws = calls.contains(&crate::KtCallType::Ws);
     let has_tcp = calls.contains(&crate::KtCallType::Tcp);
+    let has_okhttp = calls.contains(&crate::KtCallType::OkHttp);
 
-    lines.push("package afast.generated".to_string());
+    lines.push(format!("package afast.generated.{}", svc.name));
     lines.b();
-    lines.push("import java.net.HttpURLConnection".to_string());
-    lines.push("import java.net.URI".to_string());
-    lines.push("import java.net.http.*".to_string());
-    lines.push("import java.net.Socket".to_string());
+    lines.push("import afast.generated.*".to_string());
     lines.push("import java.io.*".to_string());
     lines.push("import java.nio.ByteBuffer".to_string());
     lines.push("import java.nio.ByteOrder".to_string());
+    if has_okhttp {
+        lines.push("import okhttp3.*".to_string());
+        lines.push("import okhttp3.MediaType.Companion.toMediaType".to_string());
+        lines.push("import okhttp3.RequestBody.Companion.toRequestBody".to_string());
+        lines.push("import okio.ByteString.Companion.toByteString".to_string());
+    }
+    // HttpURLConnection is always needed for ordinary HTTP route handlers
+    lines.push("import java.net.HttpURLConnection".to_string());
+    lines.push("import java.net.URI".to_string());
+    if has_ws && !has_okhttp {
+        lines.push("import java.net.http.*".to_string());
+    }
+    if has_tcp || has_ws {
+        lines.push("import java.net.Socket".to_string());
+    }
     lines.push("import java.util.concurrent.ConcurrentHashMap".to_string());
     lines.push("import java.util.concurrent.atomic.AtomicInteger".to_string());
     lines.push("import kotlinx.coroutines.*".to_string());
@@ -1988,7 +2018,9 @@ pub(crate) fn generate_service_kt(
     let headers = collect_headers(&svc.handlers);
     lines.b();
     lines.push(format!("class {class_name}Client("));
-    lines.push("    private val url: String,".to_string());
+    lines.push("    private val host: String,".to_string());
+    lines.push("    private val port: Int,".to_string());
+    lines.push("    private val tls: Boolean = false,".to_string());
     lines.push("    private val transport: Transport = Transport.Http,".to_string());
     if debug {
         lines.push("    private val debug: Boolean = true,".to_string());
@@ -2029,7 +2061,9 @@ pub(crate) fn generate_service_kt(
         lines.b();
     }
 
-    lines.push("    enum class Transport { Http, Ws, Tcp }".to_string());
+    lines.push("    enum class Transport { Http, Ws, Tcp, OkHttp }".to_string());
+    lines.b();
+    lines.push("    private val url: String get() = (if (tls) \"https\" else \"http\") + \"://$host:$port\"".to_string());
     lines.b();
     #[cfg(feature = "ordinary-http")]
     {
@@ -2041,8 +2075,12 @@ pub(crate) fn generate_service_kt(
         lines.push("    internal var tcpIn: DataInputStream? = null".to_string());
         lines.push("    internal var tcpOut: DataOutputStream? = null".to_string());
     }
-    if has_ws {
+    if has_ws && !has_okhttp {
         lines.push("    internal var wsClient: java.net.http.WebSocket? = null".to_string());
+    }
+    if has_okhttp {
+        lines.push("    private val okHttpClient = OkHttpClient()".to_string());
+        lines.push("    internal var okHttpWs: okhttp3.WebSocket? = null".to_string());
     }
     if has_ws || has_tcp {
         lines.push(
@@ -2068,9 +2106,6 @@ pub(crate) fn generate_service_kt(
     if has_tcp {
         lines.push("    init {".to_string());
         lines.push("        if (transport == Transport.Tcp) {".to_string());
-        lines.push("            val parts = url.split(\":\")".to_string());
-        lines.push("            val host = parts[0]".to_string());
-        lines.push("            val port = parts.getOrNull(1)?.toIntOrNull() ?: 4001".to_string());
         lines.push("            val s = Socket(host, port)".to_string());
         lines.push("            tcpSocket = s".to_string());
         lines.push(
@@ -2091,9 +2126,22 @@ pub(crate) fn generate_service_kt(
         lines.push("        if (debug) println(\"[afast:debug] → call handlerId=$handlerId payloadLen=${payload.size}\")".to_string());
     }
     lines.push("        val resp = when (transport) {".to_string());
-    lines.push("            Transport.Http -> callFetch(handlerId, payload)".to_string());
-    lines.push("            Transport.Ws -> callWs(handlerId, payload)".to_string());
-    lines.push("            Transport.Tcp -> callTcp(handlerId, payload)".to_string());
+    if has_http {
+        lines.push("            Transport.Http -> callFetch(handlerId, payload)".to_string());
+    }
+    if has_ws {
+        lines.push("            Transport.Ws -> callWs(handlerId, payload)".to_string());
+    }
+    if has_tcp {
+        lines.push("            Transport.Tcp -> callTcp(handlerId, payload)".to_string());
+    }
+    if has_okhttp {
+        lines.push("            Transport.OkHttp -> callOkHttp(handlerId, payload)".to_string());
+    }
+    lines.push(
+        "            else -> throw RuntimeException(\"transport not enabled: $transport\")"
+            .to_string(),
+    );
     lines.push("        }".to_string());
     if debug {
         lines.push("        if (debug) println(\"[afast:debug] ← call handlerId=$handlerId respLen=${resp.size}\")".to_string());
@@ -2111,7 +2159,7 @@ pub(crate) fn generate_service_kt(
         lines.push("            w.wU32(handlerId)".to_string());
         lines.push("            w.wRaw(payload)".to_string());
         lines.push("            val body = w.toBytes()".to_string());
-        lines.push("            val conn = URI(\"$url/_api\").toURL().openConnection() as java.net.HttpURLConnection".to_string());
+        lines.push("            val conn = java.net.URI(\"$url/_api\").toURL().openConnection() as java.net.HttpURLConnection".to_string());
         lines.push("            conn.requestMethod = \"POST\"".to_string());
         lines.push(
             "            conn.setRequestProperty(\"Content-Type\", \"application/octet-stream\")"
@@ -2122,6 +2170,45 @@ pub(crate) fn generate_service_kt(
         lines.push("            conn.outputStream.flush()".to_string());
         lines.push("            val respBytes = conn.inputStream.readBytes()".to_string());
         lines.push("            conn.disconnect()".to_string());
+        lines.push(
+            "            if (respBytes.size < 9) throw RuntimeException(\"response too short\")"
+                .to_string(),
+        );
+        lines.push("            val status = respBytes[0].toInt() and 0xFF".to_string());
+        lines.push("            if (status == 1) {".to_string());
+        lines.push("                val code = ByteBuffer.wrap(respBytes, 1, 8).order(ByteOrder.LITTLE_ENDIAN).long".to_string());
+        lines.push(
+            "                val msg = String(respBytes, 9, respBytes.size - 9, Charsets.UTF_8)"
+                .to_string(),
+        );
+        lines.push("                throw RuntimeException(\"AfError($code): $msg\")".to_string());
+        lines.push("            }".to_string());
+        lines.push("            respBytes.copyOfRange(9, respBytes.size)".to_string());
+        lines.push("        }".to_string());
+        lines.push("    }".to_string());
+        lines.b();
+    }
+    if has_okhttp {
+        lines.push(
+            "    private suspend fun callOkHttp(handlerId: Int, payload: ByteArray): ByteArray {"
+                .to_string(),
+        );
+        lines.push("        return withContext(Dispatchers.IO) {".to_string());
+        lines.push("            val w = BinaryWriter()".to_string());
+        lines.push("            w.wU32(handlerId)".to_string());
+        lines.push("            w.wRaw(payload)".to_string());
+        lines.push("            val body = w.toBytes()".to_string());
+        lines.push(
+            "            val mediaType = \"application/octet-stream\".toMediaType()".to_string(),
+        );
+        lines.push("            val request = Request.Builder()".to_string());
+        lines.push("                .url(\"$url/_api\")".to_string());
+        lines.push("                .post(body.toRequestBody(mediaType))".to_string());
+        lines.push("                .build()".to_string());
+        lines.push(
+            "            val respBytes = okHttpClient.newCall(request).execute().body!!.bytes()"
+                .to_string(),
+        );
         lines.push(
             "            if (respBytes.size < 9) throw RuntimeException(\"response too short\")"
                 .to_string(),
@@ -2451,6 +2538,105 @@ pub(crate) fn generate_service_kt(
         debug,
         &mut lines,
     );
+
+    // ── Ordinary-ws routes ────────────────────────────────────
+    #[cfg(feature = "ordinary-ws")]
+    {
+        for ws_route in &svc.ws_routes {
+            let path = ws_route.path;
+            let handler_name = ws_route.handler_name;
+
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            // Build Kotlin function signature
+            let sig_params = if param_names.is_empty() {
+                "query: Map<String, String>? = null".to_string()
+            } else {
+                let params_str = param_names
+                    .iter()
+                    .map(|p| format!("{}: String", p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}, query: Map<String, String>? = null", params_str)
+            };
+
+            // Build path substitution
+            let mut path_expr = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    path_expr.push('/');
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    path_expr.push_str(&format!("${{{}}}", param));
+                } else {
+                    path_expr.push_str(seg);
+                }
+            }
+
+            let ind = "        ";
+            let mut body = String::new();
+            body.push_str(&format!(
+                "{}val scheme = if (this@{class_name}Client.tls) \"wss\" else \"ws\"\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "{}var url = \"$scheme://${{this@{class_name}Client.host}}:${{this@{class_name}Client.port}}/{}\"\n",
+                ind, path_expr
+            ));
+            body.push_str(&format!("{}if (query != null) {{\n", ind));
+            body.push_str(&format!(
+                "    {}val qs = query.entries.joinToString(\"&\") {{ \"${{it.key}}=${{it.value}}\" }}\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}if (qs.isNotEmpty()) url += \"?\" + qs\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+            if has_okhttp {
+                body.push_str(&format!(
+                    "{}return this@{class_name}Client.okHttpClient.newWebSocket(\n",
+                    ind
+                ));
+                body.push_str(&format!("{}    Request.Builder().url(url).build(),\n", ind));
+                body.push_str(&format!(
+                    "{}    object : okhttp3.WebSocketListener() {{}}\n",
+                    ind
+                ));
+                body.push_str(&format!("{})\n", ind));
+            } else {
+                body.push_str(&format!(
+                    "{}val wsBuilder = java.net.http.HttpClient.newHttpClient().newWebSocketBuilder()\n",
+                    ind
+                ));
+                body.push_str(&format!(
+                    "{}return wsBuilder.buildAsync(java.net.URI.create(url), object : java.net.http.WebSocket.Listener {{}}).get()\n",
+                    ind
+                ));
+            }
+
+            let camel_name = to_camel_case(handler_name);
+            lines.push(format!("        /** WebSocket: {} */", path));
+            if has_okhttp {
+                lines.push(format!(
+                    "        fun {}({}): okhttp3.WebSocket {{\n{}        }}",
+                    camel_name, sig_params, body
+                ));
+            } else {
+                lines.push(format!(
+                    "        fun {}({}): java.net.http.WebSocket {{\n{}        }}",
+                    camel_name, sig_params, body
+                ));
+            }
+        }
+    }
+
     lines.push("    }".to_string());
     lines.push(format!("    val apis = {}()", apis_class_name));
 
@@ -2493,8 +2679,13 @@ fn write_service_kt(
     use std::fs;
 
     let code = generate_service_kt(svc, calls, debug);
+    // Each service gets its own subdirectory and package
+    let svc_dir = dir.join(&svc.name);
+    fs::create_dir_all(&svc_dir).map_err(|e| Error::Io {
+        message: e.to_string(),
+    })?;
     let file_name = format!("{}.kt", svc.name);
-    let file_path = dir.join(&file_name);
+    let file_path = svc_dir.join(&file_name);
     fs::write(&file_path, &code).map_err(|e| Error::Io {
         message: e.to_string(),
     })?;

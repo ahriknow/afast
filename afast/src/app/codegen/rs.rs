@@ -1497,6 +1497,77 @@ pub(crate) fn generate_service_rs(
         }
     }
 
+    // ── Ordinary-ws routes (inside impl block) ──────────────
+    #[cfg(feature = "ordinary-ws")]
+    {
+        for ws_route in &svc.ws_routes {
+            let path = ws_route.path;
+            let handler_name = ws_route.handler_name;
+
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            let sig_params = if param_names.is_empty() {
+                "&self, query: Option<&std::collections::HashMap<String, String>>".to_string()
+            } else {
+                let params_str = param_names
+                    .iter()
+                    .map(|p| format!("{}: &str", p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "&self, {}, query: Option<&std::collections::HashMap<String, String>>",
+                    params_str
+                )
+            };
+
+            let path_fmt = segments
+                .iter()
+                .map(|s| {
+                    if let Some(p) = s.strip_prefix(':') {
+                        format!("{{{}}}", p)
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+
+            let fn_name = to_snake_case(handler_name);
+            lines.b();
+            lines.push(format!("    /// WebSocket connect: {}", path));
+            lines.push(format!(
+                "    pub async fn {}({}) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Box<dyn std::error::Error + Send + Sync>> {{",
+                fn_name, sig_params
+            ));
+            lines.push("        let scheme = if self.addr.starts_with(\"tls:\") || self.addr.starts_with(\"wss:\") { \"wss\" } else { \"ws\" };".to_string());
+            lines.push("        let addr = self.addr.trim_start_matches(\"tls:\").trim_start_matches(\"wss:\").trim_start_matches(\"ws:\").trim_start_matches(\"tcp:\");".to_string());
+            lines.push(format!(
+                "        let mut url = format!(\"{{}}://{{}}/{}\", scheme, addr);",
+                path_fmt
+            ));
+            lines.push("        if let Some(q) = query {".to_string());
+            lines.push("            let qs: String = q.iter()".to_string());
+            lines.push("                .map(|(k, v)| format!(\"{}={}\", k, v))".to_string());
+            lines.push("                .collect::<Vec<_>>()".to_string());
+            lines.push("                .join(\"&\");".to_string());
+            lines.push(
+                "            if !qs.is_empty() { url.push('?'); url.push_str(&qs); }".to_string(),
+            );
+            lines.push("        }".to_string());
+            lines.push(
+                "        let (ws, _) = tokio_tungstenite::connect_async(&url).await?;".to_string(),
+            );
+            lines.push("        Ok(ws)".to_string());
+            lines.push("    }".to_string());
+        }
+    }
+
     lines.push("}".to_string());
     lines.b();
 

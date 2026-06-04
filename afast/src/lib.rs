@@ -80,6 +80,7 @@ pub use handler::{
     EnumVariantMeta, FieldMeta, Structure, TagKind, TagMeta, ValidateRule, no_structure,
 };
 pub use handler::{HandlerEntry, HandlerInvoker, HandlerMeta, ParamMeta};
+#[cfg(feature = "binary")]
 pub use handler::{Receiver, Sender};
 pub use service::Service;
 pub use state::StateMap;
@@ -114,6 +115,8 @@ pub struct State<T>(pub T);
 /// `T` must implement [`AFastDeserialize`] and [`Structure`] (via `#[derive(Tag)]`)
 /// so that code generators can emit the corresponding type definitions.
 ///
+/// Only available with the `binary` feature.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -128,6 +131,7 @@ pub struct State<T>(pub T);
 ///     Ok(())
 /// }
 /// ```
+#[cfg(feature = "binary")]
 pub struct Data<T>(pub T);
 
 /// Deserializes custom authentication or context data into `T`.
@@ -162,6 +166,7 @@ impl<T: Structure> Custom<T> {
     }
 }
 
+#[cfg(feature = "binary")]
 impl<T: Structure> Data<T> {
     /// Returns the [`TagMeta`] for `T`, used by code generators.
     pub fn structure() -> &'static TagMeta {
@@ -253,9 +258,10 @@ pub fn is_standard_header(name: &str) -> bool {
 
 #[cfg(feature = "ordinary-http")]
 pub use crate::app::ordinary::{
-    fill_standard_header_defaults, from_value_lenient, header_name_to_field, parse_query_to_json,
-    path_params_to_json, read_body_bytes, req_headers_to_json,
+    fill_standard_header_defaults, header_name_to_field, read_body_bytes, req_headers_to_json,
 };
+#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
+pub use crate::app::ordinary::{from_value_lenient, parse_query_to_json, path_params_to_json};
 
 // ─── Ordinary HTTP response types ─────────────────────────────────
 
@@ -417,6 +423,10 @@ impl<T: IntoResponse> IntoResponse for Result<T> {
     }
 }
 
+#[cfg(feature = "ordinary-ws")]
+pub use afast_macros::register_ws;
+#[cfg(feature = "ordinary-ws")]
+pub use afast_macros::ws;
 pub use afast_macros::{Tag, handler, register, register_ordinary};
 #[cfg(feature = "ordinary-http")]
 pub use afast_macros::{delete, get, patch, post, put};
@@ -511,6 +521,15 @@ macro_rules! service {
             $($rest)*
         )
     };
+    (@svc $svc:expr, ws($path:expr, $($fn:tt)+) $($rest:tt)*) => {
+        $crate::service!(@svc
+            {
+                let (__ws_invoker, __ws_name) = $crate::register_ws!($($fn)+);
+                $svc.ws_route($path, __ws_invoker, __ws_name)
+            }
+            $($rest)*
+        )
+    };
 
     // ── Group building ────────────────────────────────────────
 
@@ -582,6 +601,10 @@ pub use app::KtCallType;
 pub use app::RsCallType;
 #[cfg(feature = "tls")]
 pub use app::TlsConfig;
-#[cfg(feature = "ordinary-http")]
+#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
 pub use app::ordinary;
+#[cfg(feature = "ordinary-ws")]
+pub use app::ordinary_ws;
+#[cfg(feature = "ordinary-ws")]
+pub use app::ordinary_ws::{WsMessage, WsParam, WsQuery, WsReceiver, WsSender};
 pub use app::{GenerateTarget, JsTsCallType, Lang};

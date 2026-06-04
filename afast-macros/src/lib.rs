@@ -129,6 +129,27 @@ pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Marks an async function as a WebSocket route handler.
+///
+/// Generates a `WsHandlerInvoker` implementation for path-based WebSocket
+/// endpoints. The handler receives `WsQuery<T>`, `WsParam<T>`, and `WsStream`
+/// extractors and returns `Result<()>`.
+///
+/// ```no_run
+/// use afast::ws;
+///
+/// #[ws(desc("Chat handler"))]
+/// async fn chat(stream: afast::WsStream) -> afast::Result<()> {
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn ws(attr: TokenStream, item: TokenStream) -> TokenStream {
+    handler::expand_ws(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
 /// Produces a `HandlerEntry` for the given handler function.
 ///
 /// `register!(name)` expands to a call to the auto-generated entry function
@@ -161,6 +182,17 @@ pub fn register(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn register_ordinary(input: TokenStream) -> TokenStream {
     register::expand_ordinary(input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Produces a WsHandlerDef for the given WebSocket handler.
+///
+/// `register_ws!(name)` expands to a call to the auto-generated entry function
+/// `name()`, which returns a `(&'static dyn WsHandlerInvoker, &'static str)` tuple.
+#[proc_macro]
+pub fn register_ws(input: TokenStream) -> TokenStream {
+    register::expand_ws(input.into())
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

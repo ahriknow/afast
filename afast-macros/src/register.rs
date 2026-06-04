@@ -29,3 +29,14 @@ pub fn expand_ordinary(input: TokenStream) -> syn::Result<TokenStream> {
         #path()
     })
 }
+
+/// Expands a `register_ws!(name)` invocation into a call to the
+/// auto-generated public entry function `name()`, which returns a
+/// `(&'static dyn WsHandlerInvoker, &'static str)` tuple.
+pub fn expand_ws(input: TokenStream) -> syn::Result<TokenStream> {
+    let path: syn::Path = syn::parse2(input)?;
+
+    Ok(quote! {
+        #path()
+    })
+}

@@ -2,9 +2,10 @@
 
 | Feature | Description | Dependencies |
 |---------|-------------|-------------|
+| `binary` | Binary protocol (POST `/_api`, WS framing, TCP framing) | — |
 | `http` | HTTP server | hyper, hyper-util, http-body-util |
-| `ws` | WebSocket server | tokio-tungstenite, futures-util |
-| `tcp` | TCP server (length-prefix framing) | — |
+| `ws` | WebSocket server | tokio-tungstenite, futures-util, `binary` |
+| `tcp` | TCP server (length-prefix framing) | `binary` |
 | `ts` | TypeScript client generation (ESM + full types) | — |
 | `js` | JavaScript client generation (ESM + JSDoc) | — |
 | `kt` | Kotlin client generation | — |
@@ -12,6 +13,7 @@
 | `code` | On-demand code generation at `/code/{service}/{lang}` | `http` |
 | `doc` | Interactive API docs at `/doc` endpoint | `http`, `js` |
 | `ordinary-http` | RESTful JSON endpoints (GET/POST/PUT/DELETE) | `http`, serde, serde_json |
+| `ordinary-ws` | Path-based WebSocket endpoints with `WsSender`/`WsReceiver` | `ws`, `ordinary-http` |
 | `seq64` | WS request ID uses `i64` (default `i32`) | — |
 | `len64` | WS payload length uses `u64` (default `u32`) | — |
 | `tag-u8` | Enum tag uses `u8` (default) | afastdata/tag-u8 |

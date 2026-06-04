@@ -8,42 +8,18 @@ pub struct BinaryWriter {
 }
 
 impl BinaryWriter {
-    pub fn new() -> Self {
-        Self { buf: Vec::new() }
-    }
-    pub fn write_u8(&mut self, n: u8) {
-        self.buf.push(n);
-    }
-    pub fn write_i8(&mut self, n: i8) {
-        self.buf.push(n as u8);
-    }
-    pub fn write_u16(&mut self, n: u16) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_i16(&mut self, n: i16) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_u32(&mut self, n: u32) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_i32(&mut self, n: i32) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_u64(&mut self, n: u64) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_i64(&mut self, n: i64) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_f32(&mut self, n: f32) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_f64(&mut self, n: f64) {
-        self.buf.extend_from_slice(&n.to_le_bytes());
-    }
-    pub fn write_bool(&mut self, b: bool) {
-        self.buf.push(if b { 1 } else { 0 });
-    }
+    pub fn new() -> Self { Self { buf: Vec::new() } }
+    pub fn write_u8(&mut self, n: u8) { self.buf.push(n); }
+    pub fn write_i8(&mut self, n: i8) { self.buf.push(n as u8); }
+    pub fn write_u16(&mut self, n: u16) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_i16(&mut self, n: i16) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_u32(&mut self, n: u32) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_i32(&mut self, n: i32) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_u64(&mut self, n: u64) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_i64(&mut self, n: i64) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_f32(&mut self, n: f32) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_f64(&mut self, n: f64) { self.buf.extend_from_slice(&n.to_le_bytes()); }
+    pub fn write_bool(&mut self, b: bool) { self.buf.push(if b { 1 } else { 0 }); }
     pub fn write_str(&mut self, s: &str) {
         let bytes = s.as_bytes();
         self.write_u32(bytes.len() as u32);
@@ -56,9 +32,7 @@ impl BinaryWriter {
     pub fn write_raw(&mut self, data: &[u8]) {
         self.buf.extend_from_slice(data);
     }
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.buf
-    }
+    pub fn into_bytes(self) -> Vec<u8> { self.buf }
 }
 
 /// Little-endian binary deserializer for the afast wire protocol.
@@ -68,46 +42,28 @@ pub struct BinaryReader<'a> {
 }
 
 impl<'a> BinaryReader<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
-    }
-    pub fn read_u8(&mut self) -> u8 {
-        let v = self.data[self.offset];
-        self.offset += 1;
-        v
-    }
-    pub fn read_i8(&mut self) -> i8 {
-        self.read_u8() as i8
-    }
+    pub fn new(data: &'a [u8]) -> Self { Self { data, offset: 0 } }
+    pub fn read_u8(&mut self) -> u8 { let v = self.data[self.offset]; self.offset += 1; v }
+    pub fn read_i8(&mut self) -> i8 { self.read_u8() as i8 }
     pub fn read_u16(&mut self) -> u16 {
         let v = u16::from_le_bytes([self.data[self.offset], self.data[self.offset + 1]]);
-        self.offset += 2;
-        v
+        self.offset += 2; v
     }
-    pub fn read_i16(&mut self) -> i16 {
-        self.read_u16() as i16
-    }
+    pub fn read_i16(&mut self) -> i16 { self.read_u16() as i16 }
     pub fn read_u32(&mut self) -> u32 {
         let v = u32::from_le_bytes([
-            self.data[self.offset],
-            self.data[self.offset + 1],
-            self.data[self.offset + 2],
-            self.data[self.offset + 3],
+            self.data[self.offset], self.data[self.offset + 1],
+            self.data[self.offset + 2], self.data[self.offset + 3],
         ]);
-        self.offset += 4;
-        v
+        self.offset += 4; v
     }
-    pub fn read_i32(&mut self) -> i32 {
-        self.read_u32() as i32
-    }
+    pub fn read_i32(&mut self) -> i32 { self.read_u32() as i32 }
     pub fn read_u64(&mut self) -> u64 {
         let lo = self.read_u32() as u64;
         let hi = self.read_u32() as u64;
         (hi << 32) | lo
     }
-    pub fn read_i64(&mut self) -> i64 {
-        self.read_u64() as i64
-    }
+    pub fn read_i64(&mut self) -> i64 { self.read_u64() as i64 }
     pub fn read_f32(&mut self) -> f32 {
         let mut bytes = [0u8; 4];
         bytes.copy_from_slice(&self.data[self.offset..self.offset + 4]);
@@ -120,9 +76,7 @@ impl<'a> BinaryReader<'a> {
         self.offset += 8;
         f64::from_le_bytes(bytes)
     }
-    pub fn read_bool(&mut self) -> bool {
-        self.read_u8() == 1
-    }
+    pub fn read_bool(&mut self) -> bool { self.read_u8() == 1 }
     pub fn read_str(&mut self) -> String {
         let len = self.read_u32() as usize;
         let s = String::from_utf8_lossy(&self.data[self.offset..self.offset + len]).into_owned();
@@ -139,11 +93,7 @@ impl<'a> BinaryReader<'a> {
 /// Error type for afast client operations.
 #[derive(Debug)]
 pub enum AfastError {
-    Validation {
-        code: i64,
-        field: String,
-        message: String,
-    },
+    Validation { code: i64, field: String, message: String },
     Network(String),
     Decode(String),
 }
@@ -151,11 +101,7 @@ pub enum AfastError {
 impl std::fmt::Display for AfastError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AfastError::Validation {
-                code,
-                field,
-                message,
-            } => {
+            AfastError::Validation { code, field, message } => {
                 write!(f, "AfastError({}): {} on field '{}'", code, message, field)
             }
             AfastError::Network(msg) => write!(f, "Network error: {}", msg),

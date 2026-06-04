@@ -2061,7 +2061,8 @@ pub(crate) fn generate_service_js(
         init_parts.push("                this._wsTask.onClose(() => { clearTimeout(failTimer); reject(new Error('UniApp WS closed before open')); });".into());
         init_parts.push("                this._wsTask.onMessage((res) => {".into());
         init_parts
-            .push("                    this._handleMessage(new Uint8Array(res.data));".into());
+            .push("                    const raw = typeof res.data === 'string' ? new TextEncoder().encode(res.data) : new Uint8Array(res.data);".into());
+        init_parts.push("                    this._handleMessage(raw);".into());
         init_parts.push("                });".into());
         init_parts.push("            });".into());
         init_parts.push("            this._ready.then(() => { if (this._heartbeatTimer) clearInterval(this._heartbeatTimer); this._heartbeatTimer = setInterval(() => this._sendHeartbeat(), 180_000); });".into());
@@ -2085,7 +2086,8 @@ pub(crate) fn generate_service_js(
         init_parts.push("                this._wxSocketTask.onClose(() => { clearTimeout(failTimer); reject(new Error('Wx WS closed before open')); });".into());
         init_parts.push("                this._wxSocketTask.onMessage((res) => {".into());
         init_parts
-            .push("                    this._handleMessage(new Uint8Array(res.data));".into());
+            .push("                    const raw = typeof res.data === 'string' ? new TextEncoder().encode(res.data) : new Uint8Array(res.data);".into());
+        init_parts.push("                    this._handleMessage(raw);".into());
         init_parts.push("                });".into());
         init_parts.push("            });".into());
         init_parts.push("            this._ready.then(() => { if (this._heartbeatTimer) clearInterval(this._heartbeatTimer); this._heartbeatTimer = setInterval(() => this._sendHeartbeat(), 180_000); });".into());
@@ -3010,6 +3012,89 @@ pub(crate) fn generate_service_js(
         &class_name,
     );
     lines.push(handler_obj);
+
+    // ── Ordinary-ws routes ────────────────────────────────────
+    #[cfg(feature = "ordinary-ws")]
+    {
+        for ws_route in &svc.ws_routes {
+            let path = ws_route.path;
+            let handler_name = ws_route.handler_name;
+
+            let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+            let segments: Vec<&str> = trimmed.split('/').collect();
+            let has_params = segments.iter().any(|s| s.starts_with(':'));
+
+            let param_names: Vec<&str> = segments
+                .iter()
+                .filter_map(|s| s.strip_prefix(':'))
+                .collect();
+
+            let sig_params = if param_names.is_empty() {
+                "query".to_string()
+            } else {
+                let params_str = param_names.join(", ");
+                format!("{}, query", params_str)
+            };
+
+            let mut path_expr = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    path_expr.push('/');
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    path_expr.push_str(&format!("${{encodeURIComponent({})}}", param));
+                } else {
+                    path_expr.push_str(seg);
+                }
+            }
+
+            let ind = "            ";
+            let mut body = String::new();
+            body.push_str(&format!(
+                "{}const scheme = this._tls ? 'wss' : 'ws';\n",
+                ind
+            ));
+            if has_params {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, path_expr
+                ));
+            } else {
+                body.push_str(&format!(
+                    "{}let url = `${{scheme}}://${{this._host}}:${{this._port}}/{}`;\n",
+                    ind, trimmed
+                ));
+            }
+            body.push_str(&format!("{}if (query) {{\n", ind));
+            body.push_str(&format!(
+                "    {}const qs = new URLSearchParams(query);\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "    {}if (qs.toString()) url += '?' + qs.toString();\n",
+                ind
+            ));
+            body.push_str(&format!("{}}}\n", ind));
+            body.push_str(&format!("{}if (this._transport === 'uniws') {{\n", ind));
+            body.push_str(&format!(
+                "    {}return uni.connectSocket({{ url, complete: () => {{}} }});\n",
+                ind
+            ));
+            body.push_str(&format!(
+                "{}}} else if (this._transport === 'wxws') {{\n",
+                ind
+            ));
+            body.push_str(&format!("    {}return wx.connectSocket({{ url }});\n", ind));
+            body.push_str(&format!("{}}}\n", ind));
+            body.push_str(&format!("{}return new WebSocket(url);\n", ind));
+
+            lines.push(format!("        /** WebSocket: {} */", path));
+            lines.push(format!(
+                "        {}({}) {{\n{}        }},",
+                handler_name, sig_params, body
+            ));
+        }
+    }
 
     lines.push("        };".into());
     lines.push("    }".into());

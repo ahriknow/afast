@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.10]
+
+### Added
+
+- **`ordinary-ws` feature — WebSocket 路由**: 新增基于路径的 WebSocket 端点，支持路径参数和查询参数提取。
+  - `#[ws(desc("..."))]` 宏：声明 WebSocket 路由 handler。
+  - `WsSender` / `WsReceiver` 提取器：分离收发，与二进制协议的 `Sender` / `Receiver` 风格一致。
+  - `WsQuery<T>` / `WsParam<T>` 提取器：从升级请求中提取查询参数和路径参数。
+  - `service!` 宏支持 `ws("/path/:param", handler)` 注册 WebSocket 路由。
+  - 客户端 codegen 自动生成 WebSocket 连接方法（TS/JS/KT/RS），TS/JS 兼容 uni.connectSocket 和 wx.connectSocket。
+  - 支持 rate-limit 和 lifecycle hook（before_request / on_connect / on_disconnect）。
+  - `ordinary-ws` 独立于 `ordinary-http`，可单独启用。
+- **`binary` feature flag**: 二进制协议（`POST /_api`、WS 帧、TCP 帧）现在由 `binary` feature 控制。`ws` 和 `tcp` 依赖 `binary`，`http` 和 `ordinary-http` 不依赖。
+- **KT 客户端 `KtCallType::OkHttp`**: 新增 OkHttp 传输方式，兼容 Android 平台。使用 `OkHttpClient` 替代 `java.net.HttpURLConnection` 和 `java.net.http.WebSocket`。
+- **KT codegen 每个 service 独立包名**: 解决多 service 编译时类型重复定义问题。每个 service 生成到独立子目录（如 `check/check.kt`），包名如 `afast.generated.check`。
+- **TS/JS ordinary-ws codegen 兼容 uni/wx**: 生成的 WebSocket 方法根据 `this._transport` 自动选择 `new WebSocket()`、`uni.connectSocket()` 或 `wx.connectSocket()`。
+
+### Changed
+
+- **KT 构造函数风格统一**: `url: String` 参数改为 `host: String, port: Int, tls: Boolean = false`，与 RS/JS/TS 客户端一致。
+- **KT customs key 改用类型名**: `customs["0"]` 改为 `customs["AuthCustom"]`，与 JS/TS 客户端一致。
+- **KT `Option<T>` 返回类型**: 修复 Option 返回类型的反序列化（先读 u8 标志位再反序列化内层类型），返回类型正确标记为 nullable（`GetArticle?`）。
+- **KT `chatWs` 修复**: 从 `host`/`port`/`tls` 构建 URL；`WebSocket.Listener` 用匿名对象替代不存在的 `create()`。
+- **TS/JS uni/wx `onMessage` 兼容**: `data` 类型从 `ArrayBuffer` 改为 `string | ArrayBuffer`，兼容文本帧。
+- **GitHub Actions**: 移除第三方 `peaceiris/actions-mdbook`，改用 `cargo install mdbook` + `actions/cache`，消除 Node.js 废弃警告。
+
 ## [0.1.9]
 
 ### Added

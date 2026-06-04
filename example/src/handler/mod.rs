@@ -2,6 +2,7 @@ pub mod admin;
 pub mod article;
 pub mod auth;
 pub mod chat;
+pub mod ws_chat;
 
 use afast::{AFastDeserialize, AFastSerialize, Tag, get, handler};
 use serde::Serialize;

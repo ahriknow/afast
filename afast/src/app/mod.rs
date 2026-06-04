@@ -1,5 +1,5 @@
 use crate::handler::Handler;
-#[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+#[cfg(feature = "binary")]
 use crate::handler::HandlerInvoker;
 #[cfg(feature = "ordinary-http")]
 use crate::service::OrdinaryRouteInfo;
@@ -66,12 +66,14 @@ impl JsTsCallType {
 /// Transport protocol variant for Kotlin generated clients.
 #[derive(Clone, Debug, PartialEq)]
 pub enum KtCallType {
-    /// HTTP via `java.net.HttpURLConnection`.
+    /// HTTP via `java.net.HttpURLConnection` (JVM only, not Android).
     Http,
-    /// WebSocket via `java.net.http.WebSocket`.
+    /// WebSocket via `java.net.http.WebSocket` (JVM 11+, not Android).
     Ws,
     /// Raw TCP via `java.net.Socket`.
     Tcp,
+    /// HTTP + WebSocket via OkHttp (Android-compatible).
+    OkHttp,
 }
 
 impl KtCallType {
@@ -83,6 +85,7 @@ impl KtCallType {
             "http" | "fetch" => Some(KtCallType::Http),
             "ws" => Some(KtCallType::Ws),
             "tcp" => Some(KtCallType::Tcp),
+            "okhttp" => Some(KtCallType::OkHttp),
             _ => None,
         }
     }
@@ -93,6 +96,7 @@ impl KtCallType {
             KtCallType::Http => "http",
             KtCallType::Ws => "ws",
             KtCallType::Tcp => "tcp",
+            KtCallType::OkHttp => "okhttp",
         }
     }
 }
@@ -263,7 +267,7 @@ pub struct AFast {
     services: Vec<Service>,
     /// Pre-built handler invoker lookup table, indexed by handler offset.
     /// Built incrementally as services are registered via [`service`](AFast::service).
-    #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+    #[cfg(feature = "binary")]
     handler_table: Vec<Option<&'static dyn HandlerInvoker>>,
     /// Typed application state shared across all handlers.
     state: StateMap,
@@ -272,6 +276,7 @@ pub struct AFast {
     marker: String,
     /// WebSocket listen address (`"host:port"`), if bound.
     #[cfg(any(feature = "ws", feature = "doc"))]
+    #[allow(dead_code)]
     ws_addr: Option<String>,
     /// HTTP listen address (`"host:port"`), if bound.
     #[cfg(any(feature = "http", feature = "doc"))]
@@ -288,6 +293,9 @@ pub struct AFast {
     /// Ordinary (REST-style) HTTP routes extracted from registered services.
     #[cfg(feature = "ordinary-http")]
     ordinary_routes: Vec<OrdinaryRouteInfo>,
+    /// Ordinary WebSocket routes extracted from registered services.
+    #[cfg(feature = "ordinary-ws")]
+    ws_routes: Vec<crate::app::ordinary_ws::WsRouteInfo>,
     /// TLS configuration for HTTPS, if enabled.
     #[cfg(feature = "tls")]
     tls_config: Option<TlsConfig>,
@@ -309,7 +317,7 @@ impl AFast {
     pub fn new() -> Self {
         Self {
             services: Vec::new(),
-            #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+            #[cfg(feature = "binary")]
             handler_table: Vec::new(),
             state: StateMap::new(),
             marker: "afast".to_string(),
@@ -325,6 +333,8 @@ impl AFast {
             code_config: None,
             #[cfg(feature = "ordinary-http")]
             ordinary_routes: Vec::new(),
+            #[cfg(feature = "ordinary-ws")]
+            ws_routes: Vec::new(),
             #[cfg(feature = "tls")]
             tls_config: None,
             #[cfg(feature = "tls")]
@@ -443,9 +453,9 @@ impl AFast {
         {
             // Merge handlers: assign offsets for new handlers continuing
             // from the existing handler_table length.
-            #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+            #[cfg(feature = "binary")]
             build_handler_table(&mut service.handlers, &mut self.handler_table);
-            #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
+            #[cfg(not(feature = "binary"))]
             build_handler_table(&mut service.handlers, &mut 0);
 
             #[cfg(feature = "ordinary-http")]
@@ -461,6 +471,19 @@ impl AFast {
                     .append(&mut service.ordinary_routes);
             }
 
+            #[cfg(feature = "ordinary-ws")]
+            {
+                for route in &service.ws_routes {
+                    self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
+                        path: route.path,
+                        handler_name: route.handler_name,
+                        pattern: route.pattern.clone(),
+                        invoker: route.invoker,
+                    });
+                }
+                existing.ws_routes.append(&mut service.ws_routes);
+            }
+
             existing.handlers.append(&mut service.handlers);
 
             // Update description only if the existing one is empty
@@ -471,9 +494,9 @@ impl AFast {
             return self;
         }
 
-        #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+        #[cfg(feature = "binary")]
         build_handler_table(&mut service.handlers, &mut self.handler_table);
-        #[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
+        #[cfg(not(feature = "binary"))]
         build_handler_table(&mut service.handlers, &mut 0);
 
         #[cfg(feature = "ordinary-http")]
@@ -482,6 +505,18 @@ impl AFast {
                 self.ordinary_routes.push(route.clone());
             }
             collect_ordinary_from_tree(&service.handlers, "", &mut self.ordinary_routes);
+        }
+
+        #[cfg(feature = "ordinary-ws")]
+        {
+            for route in &service.ws_routes {
+                self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
+                    path: route.path,
+                    handler_name: route.handler_name,
+                    pattern: route.pattern.clone(),
+                    invoker: route.invoker,
+                });
+            }
         }
 
         self.services.push(service);
@@ -570,10 +605,11 @@ impl AFast {
             }
         }
 
-        #[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+        #[cfg(feature = "binary")]
+        #[allow(unused_mut, unused_variables)]
         {
             let mut has_server = false;
-            #[cfg(feature = "ws")]
+            #[cfg(all(feature = "ws", feature = "binary"))]
             if self.ws_addr.is_some() {
                 has_server = true;
             }
@@ -675,7 +711,7 @@ impl AFast {
                 let rate_handler_names_outer = rate_handler_names.clone();
 
                 // Detect if WS and HTTP/HTTPS share the same address
-                #[cfg(all(feature = "ws", feature = "http"))]
+                #[cfg(all(feature = "ws", feature = "http", feature = "binary"))]
                 let ws_merged = self
                     .ws_addr
                     .as_ref()
@@ -687,11 +723,11 @@ impl AFast {
                         self.http_addr.as_ref().is_some_and(|h| w == h)
                     })
                     .unwrap_or(false);
-                #[cfg(all(feature = "ws", not(feature = "http")))]
+                #[cfg(all(feature = "ws", not(feature = "http"), feature = "binary"))]
                 let ws_merged = false;
 
                 // Start WS server (standalone, only if not merged with HTTP)
-                #[cfg(feature = "ws")]
+                #[cfg(all(feature = "ws", feature = "binary"))]
                 if let Some(addr) = &self.ws_addr {
                     if ws_merged {
                         println!("afast: ws merged with http on {}", addr);
@@ -772,6 +808,8 @@ impl AFast {
                     let ws_addr_clone = self.ws_addr.clone();
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
+                    #[cfg(feature = "ordinary-ws")]
+                    let ws_routes = self.ws_routes.clone();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
@@ -793,7 +831,9 @@ impl AFast {
                                 ws_addr_str: ws_addr_clone,
                                 #[cfg(feature = "ordinary-http")]
                                 ordinary_routes,
-                                #[cfg(feature = "ws")]
+                                #[cfg(feature = "ordinary-ws")]
+                                ws_routes,
+                                #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
                                 tls_config: None,
@@ -827,6 +867,8 @@ impl AFast {
                     let ws_addr_clone = self.ws_addr.clone();
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
+                    #[cfg(feature = "ordinary-ws")]
+                    let ws_routes = self.ws_routes.clone();
                     let tls_config = self.tls_config.clone();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
@@ -849,7 +891,9 @@ impl AFast {
                                 ws_addr_str: ws_addr_clone,
                                 #[cfg(feature = "ordinary-http")]
                                 ordinary_routes,
-                                #[cfg(feature = "ws")]
+                                #[cfg(feature = "ordinary-ws")]
+                                ws_routes,
+                                #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
                                 #[cfg(feature = "tls")]
                                 tls_config,
@@ -961,7 +1005,7 @@ impl AFast {
 /// global table. Binary-protocol handlers (non-ordinary leaves) have their
 /// invoker stored at that offset in the table; group nodes and ordinary
 /// leaves store `None`. Nesting is accounted for: parents before children.
-#[cfg(any(feature = "ws", feature = "http", feature = "tcp"))]
+#[cfg(feature = "binary")]
 fn build_handler_table(
     handlers: &mut [Handler],
     table: &mut Vec<Option<&'static dyn HandlerInvoker>>,
@@ -980,7 +1024,7 @@ fn build_handler_table(
 
 /// Assigns offsets only (no table building), used when no transport feature
 /// is enabled that requires the invoker lookup table.
-#[cfg(not(any(feature = "ws", feature = "http", feature = "tcp")))]
+#[cfg(not(feature = "binary"))]
 fn build_handler_table(handlers: &mut [Handler], counter: &mut usize) {
     for h in handlers.iter_mut() {
         h.offset = *counter;
@@ -992,7 +1036,7 @@ fn build_handler_table(handlers: &mut [Handler], counter: &mut usize) {
 /// Recursively assigns hooks to each handler's slot in the `handler_hooks`
 /// table.  If the service has its own hooks, they are **appended** after the
 /// global hooks so that both run (global first, then service-specific).
-#[cfg(feature = "hook")]
+#[cfg(all(feature = "hook", feature = "binary"))]
 fn assign_hooks_recursive(
     handlers: &[Handler],
     svc_hooks: &[std::sync::Arc<dyn crate::hook::Hook>],
@@ -1062,6 +1106,8 @@ fn collect_ordinary_from_tree(
 }
 
 mod codegen;
-#[cfg(feature = "ordinary-http")]
+#[cfg(any(feature = "ordinary-http", feature = "ordinary-ws"))]
 pub mod ordinary;
+#[cfg(feature = "ordinary-ws")]
+pub mod ordinary_ws;
 mod transport;

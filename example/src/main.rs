@@ -143,6 +143,7 @@ async fn main() {
 
     let chat_svc = service!("chat", "Chat Service" => {
         h(chat_echo),
+        ws("/chat/:room", handler::ws_chat::chat_ws),
     })
     .hook(CheckServiceHook);
 
