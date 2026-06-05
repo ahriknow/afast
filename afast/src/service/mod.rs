@@ -55,9 +55,9 @@ pub struct Service {
 
 impl Service {
     /// Creates a new service with the given name.
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl AsRef<str>) -> Self {
         Self {
-            name: name.into(),
+            name: name.as_ref().to_string(),
             desc: String::new(),
             handlers: Vec::new(),
             #[cfg(feature = "ordinary-http")]

@@ -204,7 +204,8 @@ async fn main() {
     //   GET  /user/:user_id  → get_user_http (REST)
     //   PUT  /user/:user_id  → update_user_http (REST)
     //   DELETE /user/:user_id → delete_user_http (REST)
-    let admin_svc = service!("admin", "Admin Service" => {
+    let admin_svc_name = "admin"; // &str or String works for service name
+    let admin_svc = service!(admin_svc_name, "Admin Service" => {
         group("user" => {
             // Binary protocol handlers
             h(handler::admin::create_user),

@@ -1,6 +1,23 @@
 use crate::{Handler, Service, TagKind};
 use std::collections::HashMap;
 
+/// Escapes HTML special characters to prevent XSS when embedding
+/// user-controlled values (service names, descriptions) into HTML output.
+fn html_escape(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#x27;"),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 /// Returns an iterator over fields that should be included in generated code,
 /// filtering out `skip` fields and `skip_with` fields whose marker matches.
 fn included(
@@ -3509,8 +3526,8 @@ customElements.define('af-array', AfArray);
 /// its dedicated documentation page at /doc/{service}.
 pub(crate) fn generate_index_html(services: &[Service], doc_title: Option<&str>) -> String {
     let theme_icon = "☀️";
-    let page_title = doc_title.unwrap_or("afast — API Documentation");
-    let h1_title = doc_title.unwrap_or("afast API Documentation");
+    let page_title = html_escape(doc_title.unwrap_or("afast — API Documentation"));
+    let h1_title = html_escape(doc_title.unwrap_or("afast API Documentation"));
     let mut cards = String::new();
     for svc in services {
         if svc.name.is_empty() {
@@ -3520,11 +3537,12 @@ pub(crate) fn generate_index_html(services: &[Service], doc_title: Option<&str>)
         let desc_html = if svc.desc.is_empty() {
             String::new()
         } else {
-            format!(r#"<p class="service-desc">{}</p>"#, svc.desc)
+            format!(r#"<p class="service-desc">{}</p>"#, html_escape(&svc.desc))
         };
+        let safe_name = html_escape(&svc.name);
         cards.push_str(&format!(
-            r#"<a href="/doc/{}" class="service-card"><h2>{}</h2>{}<p>{} handler(s)</p></a>"#,
-            svc.name, svc.name, desc_html, count
+            r#"<a href="/doc/{name}" class="service-card"><h2>{name}</h2>{desc}<p>{count} handler(s)</p></a>"#,
+            name = safe_name, desc = desc_html, count = count
         ));
     }
 
@@ -3588,10 +3606,11 @@ pub(crate) fn generate_service_html(
 
     let js_client = embed_js_client(svc, &[crate::JsTsCallType::Fetch, crate::JsTsCallType::Ws]);
     let schema_json = build_schema(svc);
-    let title = match doc_title {
+    let title = html_escape(&match doc_title {
         Some(t) => format!("{} — {}", svc.name, t),
         None => format!("{} — API Documentation", svc.name),
-    };
+    });
+    let safe_service_name = html_escape(service_name);
     let http_port = http_addr
         .rsplit(':')
         .next_back()
@@ -3607,7 +3626,7 @@ pub(crate) fn generate_service_html(
     } else {
         format!(
             r#"<p style="margin:0;color:var(--text-secondary);font-size:13px;">{}</p>"#,
-            svc.desc
+            html_escape(&svc.desc)
         )
     };
 
@@ -3627,7 +3646,7 @@ pub(crate) fn generate_service_html(
 <body>
 <div class="header">
     <div style="display:flex;align-items:baseline;">
-        <h1>{service_name}</h1>
+        <h1>{safe_service_name}</h1>
         <span class="subtitle">API Documentation</span>
     </div>
     {desc_line}
@@ -3730,7 +3749,7 @@ pub(crate) fn generate_service_html(
             ),
         schema_json = schema_json,
         title = title,
-        service_name = svc.name,
+        safe_service_name = safe_service_name,
     ))
 }
 

@@ -174,6 +174,30 @@ pub trait RateLimitStore: Send + Sync + 'static {
 
     /// Deletes `key`.  No-op if the key does not exist.
     fn delete<'a>(&'a self, key: &'a str) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+    /// Atomically decrements `key` by 1 if the value is > 0, and returns
+    /// the new value.  If the key does not exist or is already 0, returns 0
+    /// without modifying the key.  If `ttl_secs > 0`, resets the TTL.
+    ///
+    /// The default implementation uses `get` + `set` (non-atomic).  Custom
+    /// store backends should override this with an atomic operation to
+    /// prevent race conditions in the token-bucket algorithm.
+    fn decr<'a>(
+        &'a self,
+        key: &'a str,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>> {
+        Box::pin(async move {
+            let current = self.get(key).await;
+            if current > 0 {
+                let new_val = current - 1;
+                self.set(key, new_val, ttl_secs).await;
+                new_val
+            } else {
+                0
+            }
+        })
+    }
 }
 
 // ─── InMemoryStore ────────────────────────────────────────────────
@@ -279,6 +303,31 @@ impl RateLimitStore for InMemoryStore {
             map.remove(key);
         })
     }
+
+    fn decr<'a>(
+        &'a self,
+        key: &'a str,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = u64> + Send + 'a>> {
+        Box::pin(async move {
+            let now = now_secs();
+            let mut map = self.data.write().await;
+            let entry = map.entry(key.to_string()).or_insert((0, None));
+            // Expired → reset
+            if let Some(exp) = entry.1
+                && now >= exp
+            {
+                *entry = (0, None);
+            }
+            if entry.0 > 0 {
+                entry.0 -= 1;
+            }
+            if ttl_secs > 0 {
+                entry.1 = Some(now + ttl_secs);
+            }
+            entry.0
+        })
+    }
 }
 
 // ─── Algorithm implementation ─────────────────────────────────────
@@ -355,18 +404,17 @@ async fn try_acquire(
                 (current_tokens as f64 + elapsed * rate).min(max_requests as f64)
             };
 
-            if new_tokens >= 1.0 {
-                let remaining = (new_tokens - 1.0) as u64;
-                store.set(&tokens_key, remaining, window_secs * 2).await;
-                store.set(&refill_key, now, window_secs * 2).await;
-                true
-            } else {
-                store
-                    .set(&tokens_key, new_tokens as u64, window_secs * 2)
-                    .await;
-                store.set(&refill_key, now, window_secs * 2).await;
-                false
-            }
+            // Refill tokens and update the timestamp.
+            store
+                .set(&tokens_key, new_tokens as u64, window_secs * 2)
+                .await;
+            store.set(&refill_key, now, window_secs * 2).await;
+
+            // Atomically consume one token.  `decr` is a single operation
+            // on the store backend, so concurrent requests cannot both read
+            // the same token count and both succeed.
+            let remaining = store.decr(&tokens_key, window_secs * 2).await;
+            remaining < new_tokens as u64
         }
     }
 }

@@ -7,7 +7,11 @@
 mod http;
 #[cfg(feature = "tcp")]
 mod tcp;
-#[cfg(any(all(feature = "ws", feature = "binary"), feature = "tcp"))]
+#[cfg(any(
+    feature = "http",
+    all(feature = "ws", feature = "binary"),
+    feature = "tcp"
+))]
 pub(crate) mod util;
 #[cfg(all(feature = "ws", feature = "binary"))]
 mod ws;

@@ -533,7 +533,7 @@ impl<T: IntoResponse> IntoResponse for Result<T> {
                 } else {
                     hyper::StatusCode::INTERNAL_SERVER_ERROR
                 };
-                let body = format!("{{\"code\":{},\"message\":\"{}\"}}", code, message);
+                let body = crate::app::transport::util::json_error_body(code, message);
                 hyper::Response::builder()
                     .status(status)
                     .header("content-type", "application/json; charset=utf-8")
@@ -588,12 +588,12 @@ macro_rules! service {
 
     // Service with items
     ($name:expr => { $($item:tt)* }) => {
-        $crate::service!(@svc $name, $crate::Service::new($name), $($item)*)
+        $crate::service!(@svc $name, $crate::Service::new(&$name), $($item)*)
     };
 
     // Service with description and items
     ($name:expr, $desc:expr => { $($item:tt)* }) => {
-        $crate::service!(@svc $name, $crate::Service::new($name).desc($desc), $($item)*)
+        $crate::service!(@svc $name, $crate::Service::new(&$name).desc($desc), $($item)*)
     };
 
     // ── Service-level accumulation ─────────────────────────────

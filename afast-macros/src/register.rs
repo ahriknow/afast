@@ -28,39 +28,86 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
     })
 }
 
-/// Expands a `register_with_path!(name, "service_name")` invocation into code
+/// Expands a `register_with_path!(name, service_name)` invocation into code
 /// that calls the auto-generated entry function `name()` and computes a stable
 /// handler ID as `fnv1a_32(service_name + "/" + fn_name)`.
 ///
 /// The stable ID is set on the returned `HandlerEntry` via `set_stable_id`.
+///
+/// `service_name` can be a string literal (compile-time hash) or any expression
+/// that evaluates to `&str` / `String` (runtime hash via inline const fn).
 pub fn expand_with_path(input: TokenStream) -> syn::Result<TokenStream> {
     let args: RegisterArgs = syn::parse2(input)?;
     let path = &args.path;
-    let service_name = &args.service_name;
     let fn_name = path
         .segments
         .last()
         .map(|s| s.ident.to_string())
         .unwrap_or_default();
-    let full_path = format!("{}/{}", service_name.value(), fn_name);
-    let hash = fnv1a_32(full_path.as_bytes());
-    Ok(quote! {{
-        let mut __entry = #path();
-        __entry.set_stable_id(#hash);
-        __entry
-    }})
+
+    match &args.service_name {
+        ServiceName::Lit(lit) => {
+            // 字面量：编译期计算哈希（零运行时开销）
+            let full_path = format!("{}/{}", lit.value(), fn_name);
+            let hash = fnv1a_32(full_path.as_bytes());
+            Ok(quote! {{
+                let mut __entry = #path();
+                __entry.set_stable_id(#hash);
+                __entry
+            }})
+        }
+        ServiceName::Expr(expr) => {
+            // 表达式：内联 const fn 在运行时计算哈希
+            let fn_name_str = fn_name.as_str();
+            Ok(quote! {{
+                const fn __afast_fnv1a_32(bytes: &[u8]) -> u32 {
+                    let mut hash: u32 = 0x811c_9dc5u32;
+                    let mut i = 0;
+                    while i < bytes.len() {
+                        hash ^= bytes[i] as u32;
+                        hash = hash.wrapping_mul(0x0100_0193u32);
+                        i += 1;
+                    }
+                    hash
+                }
+                let __svc_name: &str = &#expr;
+                let __fn_name: &str = #fn_name_str;
+                let mut __buf = ::std::vec::Vec::with_capacity(
+                    __svc_name.len() + 1 + __fn_name.len()
+                );
+                __buf.extend_from_slice(__svc_name.as_bytes());
+                __buf.push(b'/');
+                __buf.extend_from_slice(__fn_name.as_bytes());
+                let __hash = __afast_fnv1a_32(&__buf);
+                let mut __entry = #path();
+                __entry.set_stable_id(__hash);
+                __entry
+            }})
+        }
+    }
+}
+
+enum ServiceName {
+    Lit(syn::LitStr),
+    Expr(syn::Expr),
 }
 
 struct RegisterArgs {
     path: syn::Path,
-    service_name: syn::LitStr,
+    service_name: ServiceName,
 }
 
 impl syn::parse::Parse for RegisterArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let path: syn::Path = input.parse()?;
         input.parse::<syn::Token![,]>()?;
-        let service_name: syn::LitStr = input.parse()?;
+        // 先尝试解析为字符串字面量（编译期哈希路径）
+        let service_name = if let Ok(lit) = input.parse::<syn::LitStr>() {
+            ServiceName::Lit(lit)
+        } else {
+            // 否则作为通用表达式（运行时哈希路径）
+            ServiceName::Expr(input.parse::<syn::Expr>()?)
+        };
         Ok(RegisterArgs { path, service_name })
     }
 }

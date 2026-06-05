@@ -66,6 +66,9 @@ pub struct HttpConfig {
     pub sse_routes: Vec<crate::app::ordinary_sse::SseRouteInfo>,
     #[cfg(all(feature = "ws", feature = "binary"))]
     pub enable_ws_upgrade: bool,
+    /// Allowed WebSocket origins for CSWSH protection.
+    #[cfg(feature = "ws")]
+    pub allowed_ws_origins: Vec<String>,
     #[cfg(feature = "tls")]
     pub tls_config: Option<crate::app::TlsConfig>,
     #[cfg(feature = "rate-limit")]
@@ -194,6 +197,8 @@ pub async fn serve(
         sse_routes: compiled_sse_routes,
         #[cfg(all(feature = "ws", feature = "binary"))]
         enable_ws_upgrade: config.enable_ws_upgrade,
+        #[cfg(feature = "ws")]
+        allowed_ws_origins: config.allowed_ws_origins,
         #[cfg(feature = "rate-limit")]
         rate_limiter: config.rate_limiter,
         #[cfg(feature = "rate-limit")]
@@ -253,8 +258,9 @@ pub async fn serve(
                             #[cfg(feature = "tls")]
                             match tls {
                                 Some(ref acceptor) => {
-                                    match acceptor.accept(stream).await {
-                                        Ok(tls_stream) => {
+                                    let tls_timeout = std::time::Duration::from_secs(10);
+                                    match tokio::time::timeout(tls_timeout, acceptor.accept(stream)).await {
+                                        Ok(Ok(tls_stream)) => {
                                             let client_ip = tls_stream.get_ref().0
                                                 .peer_addr()
                                                 .map(|a| a.ip().to_string())
@@ -262,8 +268,11 @@ pub async fn serve(
                                             let io = hyper_util::rt::TokioIo::new(tls_stream);
                                             serve_connection(io, shared, client_ip, timeout).await;
                                         }
-                                        Err(e) => {
+                                        Ok(Err(e)) => {
                                             eprintln!("afast: tls handshake error: {}", e);
+                                        }
+                                        Err(_) => {
+                                            eprintln!("afast: tls handshake timeout");
                                         }
                                     }
                                 }
@@ -360,6 +369,8 @@ struct SharedState {
     sse_routes: Vec<CompiledSseRoute>,
     #[cfg(all(feature = "ws", feature = "binary"))]
     enable_ws_upgrade: bool,
+    #[cfg(feature = "ws")]
+    allowed_ws_origins: Vec<String>,
     #[cfg(feature = "rate-limit")]
     rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")]
@@ -459,7 +470,7 @@ async fn handle_request(
                 if let Err(e) = limiter.check(handler_name, &mut ctx).await {
                     let retry = limiter.retry_after_secs(handler_name);
                     let status = StatusCode::TOO_MANY_REQUESTS;
-                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                    let body = super::util::json_error_body(e.code(), e.message());
                     return Ok(Response::builder()
                         .status(status)
                         .header("content-type", "application/json; charset=utf-8")
@@ -532,7 +543,7 @@ async fn handle_request(
                     } else {
                         StatusCode::INTERNAL_SERVER_ERROR
                     };
-                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", code, message);
+                    let body = super::util::json_error_body(code, message);
                     Ok(Response::builder()
                         .status(status)
                         .header("content-type", "application/json; charset=utf-8")
@@ -594,11 +605,7 @@ async fn handle_request(
                         if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
                             let retry = limiter.retry_after_secs(compiled.handler_name);
                             let status = StatusCode::TOO_MANY_REQUESTS;
-                            let body = format!(
-                                "{{\"code\":{},\"message\":\"{}\"}}",
-                                e.code(),
-                                e.message()
-                            );
+                            let body = super::util::json_error_body(e.code(), e.message());
                             return Ok(Response::builder()
                                 .status(status)
                                 .header("content-type", "application/json; charset=utf-8")
@@ -653,7 +660,7 @@ async fn handle_request(
                 }
                 if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
                     let retry = limiter.retry_after_secs(policy);
-                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                    let body = super::util::json_error_body(e.code(), e.message());
                     return Ok(Response::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
                         .header("content-type", "application/json; charset=utf-8")
@@ -683,7 +690,7 @@ async fn handle_request(
                 }
                 if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
                     let retry = limiter.retry_after_secs(policy);
-                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                    let body = super::util::json_error_body(e.code(), e.message());
                     return Ok(Response::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
                         .header("content-type", "application/json; charset=utf-8")
@@ -1115,6 +1122,27 @@ async fn handle_ws_upgrade(
         );
     }
 
+    // Origin validation for CSWSH protection.
+    if !shared.allowed_ws_origins.is_empty() {
+        let origin_valid = headers
+            .get(hyper::header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .map(|origin| {
+                shared
+                    .allowed_ws_origins
+                    .iter()
+                    .any(|allowed| origin == allowed.as_str())
+            })
+            .unwrap_or(false);
+        if !origin_valid {
+            return error_response(
+                StatusCode::FORBIDDEN,
+                CODE_HTTP,
+                "websocket origin not allowed",
+            );
+        }
+    }
+
     let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(
         ws_key.expect("ws_key checked above").as_bytes(),
     );
@@ -1227,6 +1255,27 @@ async fn handle_ordinary_ws_upgrade(
             CODE_HTTP,
             "websocket upgrade required",
         );
+    }
+
+    // Origin validation for CSWSH protection.
+    if !shared.allowed_ws_origins.is_empty() {
+        let origin_valid = headers
+            .get(hyper::header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .map(|origin| {
+                shared
+                    .allowed_ws_origins
+                    .iter()
+                    .any(|allowed| origin == allowed.as_str())
+            })
+            .unwrap_or(false);
+        if !origin_valid {
+            return error_response(
+                StatusCode::FORBIDDEN,
+                CODE_HTTP,
+                "websocket origin not allowed",
+            );
+        }
     }
 
     let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(

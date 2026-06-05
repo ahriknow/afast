@@ -57,6 +57,7 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::accept_hdr_async_with_config;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
@@ -436,6 +437,7 @@ pub async fn handle_websocket<S>(
 ///
 /// On successful upgrade, delegates to [`handle_websocket`] for the
 /// remainder of the connection lifetime.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     stream: TcpStream,
     state: Arc<StateMap>,
@@ -444,6 +446,7 @@ pub async fn handle_connection(
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
     body_size_limit: usize,
+    allowed_origins: Vec<String>,
 ) {
     let peer_ip = stream
         .peer_addr()
@@ -453,9 +456,41 @@ pub async fn handle_connection(
     let mut ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
     ws_config.max_message_size = Some(body_size_limit);
     ws_config.max_frame_size = Some(body_size_limit);
-    let ws = match accept_async_with_config(stream, Some(ws_config)).await {
-        Ok(ws) => ws,
-        Err(_) => return,
+
+    // Origin validation for CSWSH protection.
+    let ws = if allowed_origins.is_empty() {
+        match accept_async_with_config(stream, Some(ws_config)).await {
+            Ok(ws) => ws,
+            Err(_) => return,
+        }
+    } else {
+        let origins = allowed_origins;
+        #[allow(clippy::result_large_err)]
+        let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                        response: tokio_tungstenite::tungstenite::handshake::server::Response|
+         -> Result<
+            tokio_tungstenite::tungstenite::handshake::server::Response,
+            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+        > {
+            let origin_valid = req
+                .headers()
+                .get("origin")
+                .and_then(|v| v.to_str().ok())
+                .map(|origin| origins.iter().any(|allowed| origin == allowed.as_str()))
+                .unwrap_or(false);
+            if !origin_valid {
+                let resp = tokio_tungstenite::tungstenite::http::Response::builder()
+                    .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
+                    .body(Some("websocket origin not allowed".to_string()))
+                    .unwrap();
+                return Err(resp);
+            }
+            Ok(response)
+        };
+        match accept_hdr_async_with_config(stream, callback, Some(ws_config)).await {
+            Ok(ws) => ws,
+            Err(_) => return,
+        }
     };
 
     #[cfg(feature = "rate-limit")]

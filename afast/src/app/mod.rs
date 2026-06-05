@@ -323,6 +323,13 @@ pub struct AFast {
     /// Registered lifecycle hooks.
     #[cfg(feature = "hook")]
     hooks: Vec<std::sync::Arc<dyn crate::hook::Hook>>,
+    /// Allowed WebSocket origins for CSRF/CSWSH protection.
+    /// When non-empty, the `Origin` header of incoming WebSocket upgrade
+    /// requests is validated against this list. Requests with a missing or
+    /// non-matching `Origin` are rejected with 403 Forbidden.
+    /// When empty (the default), all origins are accepted.
+    #[cfg(feature = "ws")]
+    allowed_ws_origins: Vec<String>,
     /// Maximum request body size in bytes (default 10 MB).
     /// Applies to HTTP binary API, ordinary HTTP body reads,
     /// WebSocket messages, and TCP frames.
@@ -385,6 +392,8 @@ impl AFast {
             rate_limit_config: None,
             #[cfg(feature = "hook")]
             hooks: Vec::new(),
+            #[cfg(feature = "ws")]
+            allowed_ws_origins: Vec::new(),
             body_size_limit: 10 * 1024 * 1024, // 10 MB
             max_connections: 10_000,
             request_timeout_secs: 30,
@@ -526,6 +535,29 @@ impl AFast {
     #[cfg(feature = "ws")]
     pub fn ws(mut self, addr: &str) -> Self {
         self.ws_addr = Some(addr.to_string());
+        self
+    }
+
+    /// Sets the allowed WebSocket origins for CSRF/CSWSH protection.
+    ///
+    /// When non-empty, incoming WebSocket upgrade requests must have an
+    /// `Origin` header that matches one of the allowed origins. Requests
+    /// with a missing or non-matching origin are rejected with 403.
+    ///
+    /// When empty (the default), all origins are accepted.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// AFast::new()
+    ///     .ws_origins(vec!["https://example.com", "https://app.example.com"])
+    ///     .ws("0.0.0.0:3000")
+    ///     .run()
+    ///     .await
+    /// ```
+    #[cfg(feature = "ws")]
+    pub fn ws_origins(mut self, origins: Vec<impl Into<String>>) -> Self {
+        self.allowed_ws_origins = origins.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1000,6 +1032,8 @@ impl AFast {
                         let rl_base = rate_limiter_outer.clone();
                         #[cfg(feature = "rate-limit")]
                         let hn_base = rate_handler_names_outer.clone();
+                        #[cfg(feature = "ws")]
+                        let ws_origins_base = self.allowed_ws_origins.clone();
                         let mut shutdown_rx = shutdown_tx.subscribe();
                         let ws_semaphore =
                             std::sync::Arc::new(tokio::sync::Semaphore::new(max_connections));
@@ -1020,6 +1054,7 @@ impl AFast {
                                                 let hn = hn_base.clone();
                                                 let permit = ws_semaphore.clone().acquire_owned().await
                                                     .expect("semaphore closed");
+                                                let ws_origins = ws_origins_base.clone();
                                                 tokio::spawn(async move {
                                                     let _permit = permit;
                                                     crate::app::transport::handle_connection(
@@ -1033,6 +1068,7 @@ impl AFast {
                                                         #[cfg(feature = "rate-limit")]
                                                         hn,
                                                         body_size_limit,
+                                                        ws_origins,
                                                     )
                                                     .await;
                                                 });
@@ -1080,6 +1116,8 @@ impl AFast {
                     let security_headers_http = security_headers.clone();
                     #[cfg(feature = "rate-limit")]
                     let doc_code_rate_limit_policy_http = doc_code_rate_limit_policy.clone();
+                    #[cfg(feature = "ws")]
+                    let ws_origins_http = self.allowed_ws_origins.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1105,6 +1143,8 @@ impl AFast {
                                 sse_routes,
                                 #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
+                                #[cfg(feature = "ws")]
+                                allowed_ws_origins: ws_origins_http,
                                 #[cfg(feature = "tls")]
                                 tls_config: None,
                                 #[cfg(feature = "rate-limit")]
@@ -1155,6 +1195,8 @@ impl AFast {
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
                     let hn = rate_handler_names_outer.clone();
+                    #[cfg(feature = "ws")]
+                    let ws_origins_https = self.allowed_ws_origins.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1180,6 +1222,8 @@ impl AFast {
                                 sse_routes,
                                 #[cfg(all(feature = "ws", feature = "binary"))]
                                 enable_ws_upgrade: ws_merged,
+                                #[cfg(feature = "ws")]
+                                allowed_ws_origins: ws_origins_https,
                                 #[cfg(feature = "tls")]
                                 tls_config,
                                 #[cfg(feature = "rate-limit")]
@@ -1432,4 +1476,4 @@ pub mod ordinary;
 pub mod ordinary_sse;
 #[cfg(feature = "ordinary-ws")]
 pub mod ordinary_ws;
-mod transport;
+pub(crate) mod transport;
