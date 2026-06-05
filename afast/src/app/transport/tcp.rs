@@ -145,7 +145,10 @@ fn make_push(conn_id: u32, data: &[u8]) -> Vec<u8> {
 /// Returns `None` if the stream has ended (EOF) or if a recoverable
 /// connection error occurs. A zero-length payload is valid and returns
 /// `Some(Vec::new())`.
-async fn read_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> Option<Vec<u8>> {
+async fn read_frame(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+    max_frame_size: usize,
+) -> Option<Vec<u8>> {
     let mut len_buf = [0u8; std::mem::size_of::<Len>()];
     match reader.read_exact(&mut len_buf).await {
         Ok(_) => {}
@@ -164,6 +167,14 @@ async fn read_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> Option<Vec<u
     let len = Len::from_le_bytes(len_buf) as usize;
     if len == 0 {
         return Some(Vec::new());
+    }
+    // Reject oversized frames BEFORE allocating memory.
+    if len > max_frame_size {
+        eprintln!(
+            "afast: tcp frame too large ({} bytes, limit: {})",
+            len, max_frame_size
+        );
+        return None;
     }
     let mut data = vec![0u8; len];
     match reader.read_exact(&mut data).await {
@@ -203,6 +214,7 @@ pub async fn handle_connection(
     #[cfg(feature = "hook")] hooks: Arc<HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
+    body_size_limit: usize,
 ) {
     let peer_ip = stream
         .peer_addr()
@@ -224,7 +236,7 @@ pub async fn handle_connection(
 
     loop {
         tokio::select! {
-            frame = read_frame(&mut reader) => {
+            frame = read_frame(&mut reader, body_size_limit) => {
                 let data = match frame {
                     Some(d) => d,
                     None => break,

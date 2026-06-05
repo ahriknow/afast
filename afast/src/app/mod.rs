@@ -311,6 +311,10 @@ pub struct AFast {
     /// Registered lifecycle hooks.
     #[cfg(feature = "hook")]
     hooks: Vec<std::sync::Arc<dyn crate::hook::Hook>>,
+    /// Maximum request body size in bytes (default 10 MB).
+    /// Applies to HTTP binary API, ordinary HTTP body reads,
+    /// WebSocket messages, and TCP frames.
+    body_size_limit: usize,
 }
 
 impl AFast {
@@ -348,6 +352,7 @@ impl AFast {
             rate_limit_config: None,
             #[cfg(feature = "hook")]
             hooks: Vec::new(),
+            body_size_limit: 10 * 1024 * 1024, // 10 MB
         }
     }
 
@@ -361,6 +366,22 @@ impl AFast {
     /// Defaults to `"afast"` if never called.
     pub fn marker(mut self, marker: &str) -> Self {
         self.marker = marker.to_string();
+        self
+    }
+
+    /// Sets the maximum request/message body size in bytes.
+    ///
+    /// This limit applies to:
+    /// - HTTP binary API (`POST /_api`) request bodies
+    /// - Ordinary HTTP handler body reads (`Body<T>` extractor)
+    /// - WebSocket binary frame sizes (both standalone and HTTP-upgraded)
+    /// - TCP binary frame sizes
+    ///
+    /// Defaults to 10 MB (10 * 1024 * 1024). The check happens during
+    /// data reading, so oversized payloads are rejected before full
+    /// allocation.
+    pub fn body_size_limit(mut self, limit: usize) -> Self {
+        self.body_size_limit = limit;
         self
     }
 
@@ -619,6 +640,10 @@ impl AFast {
         // This is read immutably by should_include_field during code generation.
         crate::marker::set_codegen_marker(&self.marker);
 
+        // Set the global body size limit for request body reading.
+        #[cfg(feature = "ordinary-http")]
+        crate::app::ordinary::set_body_size_limit(self.body_size_limit);
+
         // Write doc HTML to output directory if configured
         #[cfg(feature = "doc")]
         if let Some(doc_cfg) = &self.doc_config
@@ -834,6 +859,8 @@ impl AFast {
                 #[cfg(all(feature = "ws", not(feature = "http"), feature = "binary"))]
                 let ws_merged = false;
 
+                let body_size_limit = self.body_size_limit;
+
                 // Start WS server (standalone, only if not merged with HTTP)
                 #[cfg(all(feature = "ws", feature = "binary"))]
                 if let Some(addr) = &self.ws_addr {
@@ -882,6 +909,7 @@ impl AFast {
                                                         rl,
                                                         #[cfg(feature = "rate-limit")]
                                                         hn,
+                                                        body_size_limit,
                                                     )
                                                     .await;
                                                 });
@@ -957,6 +985,7 @@ impl AFast {
                                 rate_limiter: rl,
                                 #[cfg(feature = "rate-limit")]
                                 handler_names: hn,
+                                body_size_limit: self.body_size_limit,
                             },
                             shutdown_rx,
                         )
@@ -1025,6 +1054,7 @@ impl AFast {
                                 rate_limiter: rl,
                                 #[cfg(feature = "rate-limit")]
                                 handler_names: hn,
+                                body_size_limit: self.body_size_limit,
                             },
                             shutdown_rx,
                         )
@@ -1082,6 +1112,7 @@ impl AFast {
                                                     rl,
                                                     #[cfg(feature = "rate-limit")]
                                                     hn,
+                                                    body_size_limit,
                                                 )
                                                 .await;
                                             });

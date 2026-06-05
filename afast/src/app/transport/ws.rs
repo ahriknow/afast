@@ -56,7 +56,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
@@ -499,13 +499,17 @@ pub async fn handle_connection(
     #[cfg(feature = "hook")] hooks: Arc<HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     #[cfg(feature = "rate-limit")] rate_limiter: Option<Arc<RateLimiter>>,
     #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
+    body_size_limit: usize,
 ) {
     let peer_ip = stream
         .peer_addr()
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let ws = match accept_async(stream).await {
+    let mut ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+    ws_config.max_message_size = Some(body_size_limit);
+    ws_config.max_frame_size = Some(body_size_limit);
+    let ws = match accept_async_with_config(stream, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(_) => return,
     };

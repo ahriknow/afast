@@ -11,6 +11,21 @@
 
 use std::collections::HashMap;
 
+// ─── Body Size Limit ─────────────────────────────────────────────
+
+/// Global body size limit (bytes) set once at startup.
+/// Read by [`read_body_bytes`] to enforce request body size limits
+/// during streaming, preventing OOM from oversized payloads.
+#[cfg(feature = "ordinary-http")]
+static BODY_SIZE_LIMIT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(10 * 1024 * 1024); // 10 MB default
+
+/// Sets the global body size limit. Called once at application startup.
+#[cfg(feature = "ordinary-http")]
+pub fn set_body_size_limit(limit: usize) {
+    BODY_SIZE_LIMIT.store(limit, std::sync::atomic::Ordering::Relaxed);
+}
+
 // ─── Route Pattern Matching ────────────────────────────────────────
 
 /// A single segment within a compiled route pattern.
@@ -641,24 +656,33 @@ impl<'de, 'v> SeqAccess<'de> for LenientSeq<'v> {
 
 /// Reads the full body of an HTTP request into a byte vector.
 ///
-/// This standalone function exists so that generated ordinary handler code
-/// can call body reading without dealing with the `BodyExt` trait import
-/// or async combinator chains.
+/// The body is streamed chunk-by-chunk and the total size is checked
+/// against the global body size limit (set via [`set_body_size_limit`]).
+/// This prevents OOM from oversized payloads — the check happens during
+/// reading, not after full allocation.
 #[cfg(feature = "ordinary-http")]
 pub async fn read_body_bytes(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<Vec<u8>, crate::Error> {
     use http_body_util::BodyExt;
-    let body = req
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| crate::Error::Custom {
+    let max = BODY_SIZE_LIMIT.load(std::sync::atomic::Ordering::Relaxed);
+    let mut collected = Vec::new();
+    let mut stream = req.into_body();
+    while let Some(chunk) = stream.frame().await {
+        let frame = chunk.map_err(|e| crate::Error::Custom {
             code: 400,
             message: format!("body read error: {}", e),
-        })?
-        .to_bytes();
-    Ok(body.to_vec())
+        })?;
+        if let Some(data) = frame.data_ref() {
+            if collected.len() + data.len() > max {
+                return Err(crate::Error::Http {
+                    message: format!("request body too large (limit: {} bytes)", max),
+                });
+            }
+            collected.extend_from_slice(data);
+        }
+    }
+    Ok(collected)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────

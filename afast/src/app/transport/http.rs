@@ -81,6 +81,8 @@ pub struct HttpConfig {
     #[cfg(feature = "hook")]
     pub named_hooks:
         Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    /// Maximum request/message body size in bytes.
+    pub body_size_limit: usize,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -177,6 +179,7 @@ pub async fn serve(
         hooks: config.hooks,
         #[cfg(feature = "hook")]
         named_hooks: config.named_hooks,
+        body_size_limit: config.body_size_limit,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -306,6 +309,8 @@ struct SharedState {
     /// Name-based hook lookup for ordinary routes.
     #[cfg(feature = "hook")]
     named_hooks: Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
+    /// Maximum request/message body size in bytes.
+    body_size_limit: usize,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -605,7 +610,33 @@ async fn handle_api(
 ) -> Result<Response<BoxBody>, hyper::Error> {
     use http_body_util::BodyExt;
     let headers = req.headers().clone();
-    let body = req.into_body().collect().await?.to_bytes();
+
+    // Read body with streaming size check to prevent OOM from oversized payloads.
+    let max = shared.body_size_limit;
+    let mut body = Vec::new();
+    let mut stream = req.into_body();
+    while let Some(chunk) = stream.frame().await {
+        let frame = match chunk {
+            Ok(f) => f,
+            Err(e) => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    CODE_HTTP,
+                    &format!("body read error: {}", e),
+                );
+            }
+        };
+        if let Some(data) = frame.data_ref() {
+            if body.len() + data.len() > max {
+                return error_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    CODE_HTTP,
+                    &format!("request body too large (limit: {} bytes)", max),
+                );
+            }
+            body.extend_from_slice(data);
+        }
+    }
 
     if body.len() < 4 {
         return error_response(
@@ -982,6 +1013,7 @@ async fn handle_ws_upgrade(
     let handlers = shared.handlers.clone();
     #[cfg(feature = "hook")]
     let hooks = shared.hooks.clone();
+    let body_size_limit = shared.body_size_limit;
 
     #[cfg(feature = "rate-limit")]
     let client_ip_owned = _client_ip.to_string();
@@ -994,7 +1026,11 @@ async fn handle_ws_upgrade(
         match on_upgrade.await {
             Ok(upgraded) => {
                 let io = hyper_util::rt::TokioIo::new(upgraded);
-                let ws = WebSocketStream::from_raw_socket(io, Role::Server, None).await;
+                let mut ws_config =
+                    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+                ws_config.max_message_size = Some(body_size_limit);
+                ws_config.max_frame_size = Some(body_size_limit);
+                let ws = WebSocketStream::from_raw_socket(io, Role::Server, Some(ws_config)).await;
                 #[cfg(feature = "rate-limit")]
                 let mut ctx = ConnectionContext::new(client_ip_owned);
                 #[cfg(feature = "rate-limit")]
@@ -1113,12 +1149,17 @@ async fn handle_ordinary_ws_upgrade(
     let hook_key = hook_key.clone();
     #[cfg(feature = "hook")]
     let named_hooks_for_spawn = shared.named_hooks.clone();
+    let body_size_limit = shared.body_size_limit;
 
     tokio::spawn(async move {
         match on_upgrade.await {
             Ok(upgraded) => {
                 let io = hyper_util::rt::TokioIo::new(upgraded);
-                let ws = WebSocketStream::from_raw_socket(io, Role::Server, None).await;
+                let mut ws_config =
+                    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+                ws_config.max_message_size = Some(body_size_limit);
+                ws_config.max_frame_size = Some(body_size_limit);
+                let ws = WebSocketStream::from_raw_socket(io, Role::Server, Some(ws_config)).await;
 
                 // Split the WebSocket stream into sender/receiver.
                 let (ws_tx, mut ws_rx) = ws.split();

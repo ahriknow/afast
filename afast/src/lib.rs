@@ -272,6 +272,7 @@ pub fn is_standard_header(name: &str) -> bool {
 #[cfg(feature = "ordinary-http")]
 pub use crate::app::ordinary::{
     fill_standard_header_defaults, header_name_to_field, read_body_bytes, req_headers_to_json,
+    set_body_size_limit,
 };
 #[cfg(any(
     feature = "ordinary-http",
