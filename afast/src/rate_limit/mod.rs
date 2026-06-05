@@ -191,11 +191,24 @@ pub struct InMemoryStore {
 }
 
 impl InMemoryStore {
-    /// Creates a new empty in-memory store.
+    /// Creates a new empty in-memory store and spawns a background
+    /// cleanup task that removes expired entries every 60 seconds.
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
-        }
+        #[allow(clippy::type_complexity)]
+        let data: Arc<RwLock<HashMap<String, (u64, Option<u64>)>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        // Background task: periodically purge expired keys so memory
+        // does not grow unboundedly for keys that are never accessed again.
+        let cleanup_data = data.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let now = now_secs();
+                let mut map = cleanup_data.write().await;
+                map.retain(|_, (_, exp)| exp.is_none_or(|e| now < e));
+            }
+        });
+        Self { data }
     }
 }
 
@@ -312,19 +325,19 @@ async fn try_acquire(
             let current_key = format!("{}:{}", prefix, current_window);
             let previous_key = format!("{}:{}", prefix, previous_window);
 
-            let current_count = store.get(&current_key).await;
+            // Atomic: incr first, then check. This eliminates the race
+            // condition where concurrent requests both read the same count
+            // before either increments. The trade-off is that rejected
+            // requests also increment the counter (slightly偏严), which is
+            // acceptable for rate limiting.
+            let current_count = store.incr(&current_key, window_secs * 2).await;
             let previous_count = store.get(&previous_key).await;
 
             let elapsed_in_window = now.saturating_sub(current_window);
             let weight = 1.0 - (elapsed_in_window as f64 / window_secs as f64);
             let estimated = previous_count as f64 * weight + current_count as f64;
 
-            if estimated < max_requests as f64 {
-                store.incr(&current_key, window_secs * 2).await;
-                true
-            } else {
-                false
-            }
+            estimated <= max_requests as f64
         }
         Algorithm::TokenBucket => {
             let now = now_secs();
