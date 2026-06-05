@@ -67,8 +67,7 @@ impl WsSender {
 
     /// Sends a JSON-serialized message as a text frame.
     pub async fn send_json<T: serde::Serialize>(&self, value: &T) -> Result<(), Error> {
-        let text = serde_json::to_string(value).map_err(|e| Error::Custom {
-            code: 500,
+        let text = serde_json::to_string(value).map_err(|e| Error::Serialize {
             message: format!("json error: {e}"),
         })?;
         self.send_text(text).await
@@ -145,8 +144,7 @@ impl WsReceiver {
     /// Returns `None` when the connection is closed.
     pub async fn recv_json<T: serde::de::DeserializeOwned>(&mut self) -> Option<Result<T, Error>> {
         let text = self.recv_text().await?;
-        Some(serde_json::from_str(&text).map_err(|e| Error::Custom {
-            code: 500,
+        Some(serde_json::from_str(&text).map_err(|e| Error::Serialize {
             message: format!("json decode error: {e}"),
         }))
     }

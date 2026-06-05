@@ -110,11 +110,34 @@ impl Error {
         }
     }
 
+    /// Returns a sanitized error message safe for client responses.
+    ///
+    /// System-level errors (Io, Serialize, StateNotFound, Ws, Http, Tcp)
+    /// are replaced with generic messages. User-defined errors (Custom,
+    /// Handler, InvalidParam, RateLimited) are returned as-is.
+    pub fn sanitized_message(&self) -> &str {
+        match self {
+            Error::Io { .. } => "internal server error",
+            Error::Serialize { .. } => "request processing error",
+            Error::StateNotFound { .. } => "internal configuration error",
+            Error::Ws { .. } => "transport error",
+            Error::Http { .. } => "transport error",
+            Error::Tcp { .. } => "transport error",
+            Error::Signal { .. } => "server shutting down",
+            Error::LongConnectionNotSupported => "long connection not supported in HTTP mode",
+            // User-defined errors: return the original message.
+            Error::Handler { message, .. }
+            | Error::InvalidParam { message, .. }
+            | Error::RateLimited { message, .. }
+            | Error::Custom { message, .. } => message,
+        }
+    }
+
     /// Creates a user-defined custom error.
     ///
-    /// # Panics
-    ///
-    /// Panics if `code` is in the reserved range `-90011..=-90000`.
+    /// In debug builds, panics if `code` is in the reserved range
+    /// `-90012..=-90000`. In release builds the check is skipped to
+    /// prevent server crashes in production.
     ///
     /// # Example
     ///
@@ -124,7 +147,7 @@ impl Error {
     /// assert_eq!(err.code(), 400);
     /// ```
     pub fn custom(code: i64, message: impl Into<String>) -> Self {
-        assert!(
+        debug_assert!(
             !is_reserved_code(code),
             "error code {} is reserved by the system",
             code

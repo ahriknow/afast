@@ -322,6 +322,15 @@ pub struct AFast {
     /// HTTP connection timeout in seconds (default 30).
     /// Connections that exceed this duration are silently closed.
     request_timeout_secs: u64,
+    /// When `true`, system-level error messages (Io, Serialize,
+    /// StateNotFound, Ws, Http, Tcp) are replaced with generic messages
+    /// in API responses. User errors (Custom, Handler, InvalidParam) are
+    /// returned as-is. Default `true`.
+    sanitize_errors: bool,
+    /// Security headers added to every HTTP response.
+    /// Defaults to `[("x-content-type-options", "nosniff"), ("x-frame-options", "DENY"),
+    /// ("x-xss-protection", "1; mode=block")]`.
+    security_headers: Vec<(&'static str, &'static str)>,
 }
 
 impl AFast {
@@ -362,6 +371,12 @@ impl AFast {
             body_size_limit: 10 * 1024 * 1024, // 10 MB
             max_connections: 10_000,
             request_timeout_secs: 30,
+            sanitize_errors: true,
+            security_headers: vec![
+                ("x-content-type-options", "nosniff"),
+                ("x-frame-options", "DENY"),
+                ("x-xss-protection", "1; mode=block"),
+            ],
         }
     }
 
@@ -416,6 +431,39 @@ impl AFast {
     /// Defaults to 30 seconds. Set to `0` to disable the timeout.
     pub fn request_timeout(mut self, secs: u64) -> Self {
         self.request_timeout_secs = secs;
+        self
+    }
+
+    /// Controls whether system-level error messages are sanitized before
+    /// being sent to clients.
+    ///
+    /// When `true` (default), errors from I/O, serialization, state lookup,
+    /// and transport layers are replaced with generic messages. User-defined
+    /// errors (`Custom`, `Handler`, `InvalidParam`) are always returned as-is.
+    ///
+    /// Set to `false` for development/debugging to see full error details.
+    pub fn sanitize_errors(mut self, sanitize: bool) -> Self {
+        self.sanitize_errors = sanitize;
+        self
+    }
+
+    /// Sets custom security headers for HTTP responses.
+    ///
+    /// Replaces the default security headers. Pass an empty `Vec` to
+    /// disable all security headers.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// AFast::new()
+    ///     .security_headers(vec![
+    ///         ("x-content-type-options", "nosniff"),
+    ///         ("x-frame-options", "SAMEORIGIN"),
+    ///         ("content-security-policy", "default-src 'self'"),
+    ///     ])
+    /// ```
+    pub fn security_headers(mut self, headers: Vec<(&'static str, &'static str)>) -> Self {
+        self.security_headers = headers;
         self
     }
 
@@ -895,6 +943,7 @@ impl AFast {
 
                 let body_size_limit = self.body_size_limit;
                 let max_connections = self.max_connections;
+                let security_headers = self.security_headers;
 
                 // Start WS server (standalone, only if not merged with HTTP)
                 #[cfg(all(feature = "ws", feature = "binary"))]
@@ -994,6 +1043,7 @@ impl AFast {
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
                     let hn = rate_handler_names_outer.clone();
+                    let security_headers_http = security_headers.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1028,6 +1078,8 @@ impl AFast {
                                 body_size_limit: self.body_size_limit,
                                 max_connections: self.max_connections,
                                 request_timeout_secs: self.request_timeout_secs,
+                                sanitize_errors: self.sanitize_errors,
+                                security_headers: security_headers_http,
                             },
                             shutdown_rx,
                         )
@@ -1099,6 +1151,8 @@ impl AFast {
                                 body_size_limit: self.body_size_limit,
                                 max_connections: self.max_connections,
                                 request_timeout_secs: self.request_timeout_secs,
+                                sanitize_errors: self.sanitize_errors,
+                                security_headers: security_headers.clone(),
                             },
                             shutdown_rx,
                         )

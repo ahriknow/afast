@@ -205,30 +205,35 @@ pub fn fill_standard_header_defaults(
 
 /// Performs percent-decoding and plus-to-space conversion on a
 /// URL-encoded string.
+///
+/// Decoded bytes are collected into a buffer and validated as UTF-8
+/// at the end, so multi-byte sequences (e.g. `%C3%A9` → `é`) are
+/// handled correctly. Invalid UTF-8 bytes are replaced with the
+/// Unicode replacement character (U+FFFD).
 fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
+    let mut result = Vec::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(hex) = u8::from_str_radix(
+            if let Ok(byte) = u8::from_str_radix(
                 std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
                 16,
             ) {
-                result.push(hex as char);
+                result.push(byte);
                 i += 3;
                 continue;
             }
         } else if bytes[i] == b'+' {
             // `+` in query strings represents a space (application/x-www-form-urlencoded).
-            result.push(' ');
+            result.push(b' ');
             i += 1;
             continue;
         }
-        result.push(bytes[i] as char);
+        result.push(bytes[i]);
         i += 1;
     }
-    result
+    String::from_utf8_lossy(&result).into_owned()
 }
 
 /// Parses a URL query string into a `serde_json::Value::Object`.
@@ -740,5 +745,26 @@ mod tests {
     fn test_empty_query() {
         let json = parse_query_to_json("");
         assert!(json.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_percent_decode_utf8() {
+        // Multi-byte UTF-8: é = %C3%A9
+        assert_eq!(percent_decode("caf%C3%A9"), "café");
+        // CJK: 中 = %E4%B8%AD
+        assert_eq!(percent_decode("%E4%B8%AD"), "中");
+        // Plus to space
+        assert_eq!(percent_decode("hello+world"), "hello world");
+        // Plain ASCII passthrough
+        assert_eq!(percent_decode("hello"), "hello");
+        // Mixed
+        assert_eq!(percent_decode("name%3D%E5%BC%A0%E4%B8%89"), "name=张三");
+    }
+
+    #[test]
+    fn test_percent_decode_invalid_utf8() {
+        // Invalid UTF-8 sequence → replacement character
+        let result = percent_decode("%FF%FE");
+        assert!(result.contains('\u{FFFD}'));
     }
 }

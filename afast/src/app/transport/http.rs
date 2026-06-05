@@ -87,6 +87,10 @@ pub struct HttpConfig {
     pub max_connections: usize,
     /// HTTP connection timeout in seconds.
     pub request_timeout_secs: u64,
+    /// Whether to sanitize system-level error messages.
+    pub sanitize_errors: bool,
+    /// Security headers added to every HTTP response.
+    pub security_headers: Vec<(&'static str, &'static str)>,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -184,6 +188,8 @@ pub async fn serve(
         #[cfg(feature = "hook")]
         named_hooks: config.named_hooks,
         body_size_limit: config.body_size_limit,
+        sanitize_errors: config.sanitize_errors,
+        security_headers: config.security_headers,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -280,7 +286,20 @@ async fn serve_connection<S>(
     let service = service_fn(move |req| {
         let shared = shared.clone();
         let client_ip = client_ip.clone();
-        async move { handle_request(req, &shared, &client_ip).await }
+        async move {
+            let mut resp = handle_request(req, &shared, &client_ip).await?;
+            // Inject security headers into every response.
+            let headers = resp.headers_mut();
+            for (name, value) in &shared.security_headers {
+                if !headers.contains_key(*name) {
+                    headers.insert(
+                        hyper::header::HeaderName::from_static(name),
+                        hyper::header::HeaderValue::from_static(value),
+                    );
+                }
+            }
+            Ok::<_, hyper::Error>(resp)
+        }
     });
     let timeout_fut = async {
         auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -332,6 +351,10 @@ struct SharedState {
     named_hooks: Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Maximum request/message body size in bytes.
     body_size_limit: usize,
+    /// Whether to sanitize system-level error messages.
+    sanitize_errors: bool,
+    /// Security headers added to every HTTP response.
+    security_headers: Vec<(&'static str, &'static str)>,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -478,7 +501,11 @@ async fn handle_request(
                     Ok(response) => Ok(response.map(|b| b.boxed())),
                     Err(e) => {
                         let code = e.code();
-                        let message = e.message();
+                        let message = if shared.sanitize_errors {
+                            e.sanitized_message()
+                        } else {
+                            e.message()
+                        };
                         // Map user error codes in the 4xx–5xx range to HTTP status
                         // codes so the client receives a semantically correct response.
                         let status = if (400..600).contains(&code) {
@@ -773,7 +800,14 @@ async fn handle_api(
                 .body(Full::new(Bytes::from(resp)).boxed())
                 .expect("valid response builder"))
         }
-        Err(e) => error_response(StatusCode::OK, e.code(), e.message()),
+        Err(e) => {
+            let msg = if shared.sanitize_errors {
+                e.sanitized_message()
+            } else {
+                e.message()
+            };
+            error_response(StatusCode::OK, e.code(), msg)
+        }
     }
 }
 
