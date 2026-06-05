@@ -136,6 +136,173 @@ impl RoutePattern {
     }
 }
 
+// ─── Trie Router ─────────────────────────────────────────────────
+
+/// A trie-based router for O(path_depth) route matching.
+///
+/// Routes are organized into a tree where each node corresponds to a
+/// path segment. Static segments branch via a `HashMap`, while
+/// parameter segments (`:id`) use a single wildcard child.
+///
+/// This replaces the previous O(n) linear scan over all routes.
+#[cfg(feature = "ordinary-http")]
+pub(crate) struct TrieRouter {
+    /// Per-method trie roots: `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`.
+    roots: std::collections::HashMap<&'static str, TrieNode>,
+}
+
+#[cfg(feature = "ordinary-http")]
+struct TrieNode {
+    /// Static segment children: `"users"` → child node.
+    static_children: std::collections::HashMap<String, TrieNode>,
+    /// Parameter segment child (`:id`, `:name`, etc.).
+    /// Only one param child is allowed per node.
+    param_child: Option<Box<ParamChild>>,
+    /// The route stored at this node (if it's a leaf).
+    route: Option<usize>,
+}
+
+#[cfg(feature = "ordinary-http")]
+impl TrieNode {
+    fn new() -> Self {
+        Self {
+            static_children: std::collections::HashMap::new(),
+            param_child: None,
+            route: None,
+        }
+    }
+}
+
+#[cfg(feature = "ordinary-http")]
+struct ParamChild {
+    /// The parameter name (e.g. `"id"`).
+    name: &'static str,
+    /// The child node for the segment after the parameter.
+    node: TrieNode,
+}
+
+#[cfg(feature = "ordinary-http")]
+impl TrieRouter {
+    /// Creates an empty trie router.
+    pub fn new() -> Self {
+        Self {
+            roots: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Inserts a route into the trie.
+    ///
+    /// `method` — HTTP method (e.g. `"GET"`).
+    /// `pattern` — the compiled route pattern.
+    /// `index` — index into the external route storage (e.g. `Vec<CompiledOrdinaryRoute>`).
+    pub fn insert(&mut self, method: &'static str, pattern: &RoutePattern, index: usize) {
+        let root = self.roots.entry(method).or_insert_with(TrieNode::new);
+        match pattern {
+            RoutePattern::Exact(path) => {
+                // Insert exact path as a chain of static segment nodes.
+                let segments: Vec<&str> = if path.is_empty() {
+                    vec![""]
+                } else {
+                    path.split('/').collect()
+                };
+                let mut node = root;
+                for seg in segments {
+                    node = node
+                        .static_children
+                        .entry(seg.to_string())
+                        .or_insert_with(TrieNode::new);
+                }
+                node.route = Some(index);
+            }
+            RoutePattern::Parametric { segments } => {
+                let mut node = root;
+                for seg in segments {
+                    match seg {
+                        RouteSegment::Static(s) => {
+                            node = node
+                                .static_children
+                                .entry(s.clone())
+                                .or_insert_with(TrieNode::new);
+                        }
+                        RouteSegment::Param(name) => {
+                            let param = node.param_child.get_or_insert_with(|| {
+                                Box::new(ParamChild {
+                                    name,
+                                    node: TrieNode::new(),
+                                })
+                            });
+                            // If param name differs, update it (last write wins).
+                            param.name = name;
+                            node = &mut param.node;
+                        }
+                    }
+                }
+                node.route = Some(index);
+            }
+        }
+    }
+
+    /// Matches a request path against the trie for the given method.
+    ///
+    /// Returns `(route_index, path_params)` on match, or `None`.
+    pub fn match_path(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Option<(usize, std::collections::HashMap<String, String>)> {
+        let root = self.roots.get(method)?;
+        let path = path.trim_start_matches('/').trim_end_matches('/');
+
+        // Special case: root path "/" or empty
+        if path.is_empty() {
+            // Check for empty-string static child (root route)
+            if let Some(child) = root.static_children.get("")
+                && let Some(idx) = child.route
+            {
+                return Some((idx, std::collections::HashMap::new()));
+            }
+            // Also check for param child at root
+            // (Root path has no segment for a param — skip)
+            return None;
+        }
+
+        let segments: Vec<&str> = path.split('/').collect();
+        Self::match_segments(root, &segments, 0, &mut std::collections::HashMap::new())
+    }
+
+    fn match_segments(
+        node: &TrieNode,
+        segments: &[&str],
+        idx: usize,
+        params: &mut std::collections::HashMap<String, String>,
+    ) -> Option<(usize, std::collections::HashMap<String, String>)> {
+        if idx >= segments.len() {
+            // All segments consumed — check if this node has a route.
+            return node.route.map(|r| (r, params.clone()));
+        }
+
+        let seg = segments[idx];
+
+        // Try static child first (more specific).
+        if let Some(child) = node.static_children.get(seg)
+            && let Some(result) = Self::match_segments(child, segments, idx + 1, params)
+        {
+            return Some(result);
+        }
+
+        // Try param child (wildcard).
+        if let Some(ref param) = node.param_child {
+            params.insert(param.name.to_string(), seg.to_string());
+            if let Some(result) = Self::match_segments(&param.node, segments, idx + 1, params) {
+                return Some(result);
+            }
+            params.remove(param.name);
+        }
+
+        None
+    }
+}
+
 // ─── Header Helpers (ordinary-http only) ─────────────────────────
 
 /// Converts an HTTP header name to a `snake_case` field name.
