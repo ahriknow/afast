@@ -16,6 +16,7 @@
 - **WebSocket & SSE** — `#[ws]` 和 `#[sse]` 路由宏
 - **长连接** — 通过 `Receiver`/`Sender` 双向流式通信
 - **生命周期钩子** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
+- **请求上下文** — `Ctx<T>` 请求级上下文，hook 写入，handler 读取
 - **请求限流** — 命名策略 + 可插拔存储后端
 - **客户端缓存** — `cache(seconds)` 属性
 
@@ -23,16 +24,19 @@
 
 ```toml
 [dependencies]
-afast = { version = "0.1.12", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.13", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust
-use afast::{AFast, handler, service, State, Data, Result};
+use afast::{AFast, Ctx, handler, service, State, Data, Result};
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
 #[derive(Clone)]
 struct AppState { greeting: String }
+
+#[derive(Clone)]
+struct RequestId(pub String);
 
 #[derive(AFastDeserialize, Tag)]
 #[tag("Hello request")]
@@ -43,7 +47,12 @@ struct HelloReq { name: String }
 struct HelloResp { message: String }
 
 #[handler(desc("Say hello"))]
-async fn hello(state: State<AppState>, req: Data<HelloReq>) -> Result<HelloResp> {
+async fn hello(
+    ctx: Ctx<RequestId>,
+    state: State<AppState>,
+    req: Data<HelloReq>,
+) -> Result<HelloResp> {
+    println!("request_id={}", ctx.0 .0);
     Ok(HelloResp { message: format!("{}, {}!", state.greeting, req.name) })
 }
 
@@ -60,7 +69,7 @@ async fn main() {
 
 ## 文档
 
-📖 **[afast.ahriknow.help](https://afast.ahriknow.help)** — 快速开始、核心概念、特性详解、钩子、限流、代码生成、二进制协议等。
+📖 **[afast.ahriknow.help](https://afast.ahriknow.help)** — 快速开始、核心概念、特性详解、钩子、请求上下文、限流、代码生成、二进制协议等。
 
 ## 项目结构
 

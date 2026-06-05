@@ -87,6 +87,7 @@ async searchUsers(page: PageRequest, filter: FilterRequest): Promise<PageRespons
 | Extractor | Description | Protocols |
 |-----------|-------------|-----------|
 | `State<T>` | Injects shared state by type from StateMap (T: Clone) | All |
+| `Ctx<T>` | Injects per-request context data set by hooks (T: Clone) | All |
 | `Data<T>` | Deserializes request body from binary payload | HTTP/WS/TCP |
 | `Custom<T>` | Deserializes client-side custom context (e.g., auth token) | HTTP/WS/TCP |
 | `Receiver` | Receives binary messages from the client (long connection) | WS/TCP |

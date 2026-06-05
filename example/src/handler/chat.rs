@@ -31,19 +31,28 @@ pub struct ChatJoin {
 
 #[handler(desc("Chat echo — returns a Socket for bidirectional streaming"))]
 pub async fn chat_echo(
+    ctx: afast::Ctx<crate::RequestInfo>,
     afast::State(_state): afast::State<AppState>,
     afast::Data(join): afast::Data<ChatJoin>,
     mut receiver: afast::Receiver,
     sender: afast::Sender,
 ) {
-    println!("afast: chat_echo connection opened for '{}'", join.name);
+    eprintln!(
+        "[chat_echo] '{}' joined (request_id={})",
+        join.name, ctx.0.request_id,
+    );
 
     while let Some(data) = receiver.recv().await {
         if sender.send(data).await.is_err() {
-            println!("afast: chat_echo send error for '{}', closing", join.name);
+            eprintln!("afast: chat_echo send error for '{}', closing", join.name);
             break;
         }
     }
 
-    println!("afast: chat_echo connection closed for '{}'", join.name);
+    eprintln!(
+        "[chat_echo] '{}' left after {:?} (request_id={})",
+        join.name,
+        ctx.0.started_at.elapsed(),
+        ctx.0.request_id,
+    );
 }

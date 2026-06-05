@@ -538,11 +538,14 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_ordinary && is_ws_param_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("WsParam".to_string(), extract_ident_name(&inner), inner)
+                } else if is_ctx_type(&pat_type.ty) {
+                    let inner = extract_generic_inner(&pat_type.ty)?;
+                    ("Ctx".to_string(), extract_ident_name(&inner), inner)
                 } else {
                     return Err(syn::Error::new(
                         pat_type.ty.span(),
                         format!(
-                            "unsupported parameter type: expected State<T>, Custom<T>, Data<T>, Receiver, Sender{} got: {}",
+                            "unsupported parameter type: expected State<T>, Ctx<T>, Custom<T>, Data<T>, Receiver, Sender{} got: {}",
                             if is_ordinary {
                                 ", Query<T>, Param<T>, Body<T>, Header<T>"
                             } else {
@@ -643,6 +646,11 @@ fn is_ws_receiver_type(ty: &Type) -> bool {
 /// Returns true when the outermost identifier of the type is `SseSender`.
 fn is_sse_sender_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "SseSender")
+}
+
+/// Returns true when the outermost identifier of the type is `Ctx`.
+fn is_ctx_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "Ctx")
 }
 
 /// Extracts the last path segment identifier from a `Type::Path`, if any.
@@ -906,6 +914,19 @@ fn build_call_invoker_impl(
                     };
                 });
             }
+            "Ctx" => {
+                sync_extractions.push(quote! {
+                    let #var_name: #full_type = match ctx.get::<#inner>() {
+                        Some(v) => afast::Ctx(v),
+                        None => {
+                            let #err_var = afast::Error::StateNotFound {
+                                message: format!("Ctx<{}> not found in request context", stringify!(#inner))
+                            };
+                            return Box::pin(async move { Err(#err_var) });
+                        }
+                    };
+                });
+            }
             _ => {}
         }
     }
@@ -933,6 +954,7 @@ fn build_call_invoker_impl(
             fn call(
                 &self,
                 state: &afast::StateMap,
+                ctx: &afast::RequestCtx,
                 payload: &[u8],
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, afast::Error>> + Send + '_>
@@ -1029,6 +1051,19 @@ fn build_stream_invoker_impl(
             "Sender" => {
                 send_var = Some(var_name);
             }
+            "Ctx" => {
+                sync_extractions.push(quote! {
+                    let #var_name: #full_type = match ctx.get::<#inner>() {
+                        Some(v) => afast::Ctx(v),
+                        None => {
+                            let #err_var = afast::Error::StateNotFound {
+                                message: format!("Ctx<{}> not found in request context", stringify!(#inner))
+                            };
+                            return Box::pin(async move { Err(#err_var) });
+                        }
+                    };
+                });
+            }
             _ => {}
         }
     }
@@ -1071,6 +1106,7 @@ fn build_stream_invoker_impl(
             fn call(
                 &self,
                 _state: &afast::StateMap,
+                _ctx: &afast::RequestCtx,
                 _payload: &[u8],
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, afast::Error>> + Send + '_>
@@ -1089,6 +1125,7 @@ fn build_stream_invoker_impl(
             fn call_stream<'a>(
                 &'a self,
                 state: &'a afast::StateMap,
+                ctx: &'a afast::RequestCtx,
                 payload: &'a [u8],
                 server_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
                 server_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
@@ -1131,6 +1168,7 @@ fn build_dummy_invoker_impl(invoker_ident: &syn::Ident) -> TokenStream {
             fn call(
                 &self,
                 _state: &afast::StateMap,
+                _ctx: &afast::RequestCtx,
                 _payload: &[u8],
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, afast::Error>> + Send + '_>
@@ -1173,6 +1211,7 @@ fn build_ordinary_invoker_impl(
     let mut header_inner: Option<Type> = None;
 
     let mut async_extractions: Vec<TokenStream> = Vec::new();
+    let mut ctx_extractions: Vec<TokenStream> = Vec::new();
 
     for p in params {
         let var_name = syn::Ident::new(&p.name, Span::call_site());
@@ -1187,6 +1226,19 @@ fn build_ordinary_invoker_impl(
                         Some(v) => afast::State(v.clone()),
                         None => {
                             let #err_var = afast::Error::StateNotFound { message: stringify!(#inner).to_string() };
+                            return Box::pin(async move { Err(#err_var) });
+                        }
+                    };
+                });
+            }
+            "Ctx" => {
+                ctx_extractions.push(quote! {
+                    let #var_name: #full_type = match ctx.get::<#inner>() {
+                        Some(v) => afast::Ctx(v),
+                        None => {
+                            let #err_var = afast::Error::StateNotFound {
+                                message: format!("Ctx<{}> not found in request context", stringify!(#inner))
+                            };
                             return Box::pin(async move { Err(#err_var) });
                         }
                     };
@@ -1305,6 +1357,7 @@ fn build_ordinary_invoker_impl(
                 path_params: &std::collections::HashMap<String, String>,
                 query_string: &str,
                 state: &afast::StateMap,
+                ctx: &afast::RequestCtx,
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
@@ -1316,6 +1369,7 @@ fn build_ordinary_invoker_impl(
                 >,
             > {
                 #( #state_extractions )*
+                #( #ctx_extractions )*
                 #( #owned_query )*
                 Box::pin(async move {
                     use afast::IntoResponse;
@@ -1359,14 +1413,14 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
     // Validate: ws handlers cannot use Body/Custom/Data/Receiver/Sender
     for p in &params {
         match p.extractor.as_str() {
-            "State" | "WsQuery" | "WsParam" | "Query" | "Param" | "Header" | "WsSender"
+            "State" | "Ctx" | "WsQuery" | "WsParam" | "Query" | "Param" | "Header" | "WsSender"
             | "WsReceiver" => {}
             other => {
                 return Err(syn::Error::new(
                     Span::call_site(),
                     format!(
                         "extractor '{}' is not supported in #[ws] handlers. \
-                         Allowed: State, Query, Param, Header, WsSender, WsReceiver",
+                         Allowed: State, Ctx<T>, Query, Param, Header, WsSender, WsReceiver",
                         other
                     ),
                 ));
@@ -1495,6 +1549,26 @@ fn build_ws_invoker_impl(
         }
     }
 
+    // Collect Ctx extractions separately (they need the ctx parameter).
+    let mut ctx_extractions: Vec<TokenStream> = Vec::new();
+    for p in params {
+        let var_name = syn::Ident::new(&p.name, Span::call_site());
+        let full_type = &p.full_type;
+        let inner = &p.inner_type;
+        if p.extractor == "Ctx" {
+            ctx_extractions.push(quote! {
+                let #var_name: #full_type = match ctx.get::<#inner>() {
+                    Some(v) => afast::Ctx(v),
+                    None => {
+                        return Err(afast::Error::StateNotFound {
+                            message: format!("Ctx<{}> not found in request context", stringify!(#inner))
+                        });
+                    }
+                };
+            });
+        }
+    }
+
     let mut extractions: Vec<TokenStream> = Vec::new();
 
     if has_query {
@@ -1565,6 +1639,7 @@ fn build_ws_invoker_impl(
                 sender: afast::WsSender,
                 receiver: afast::WsReceiver,
                 state: std::sync::Arc<afast::StateMap>,
+                ctx: afast::RequestCtx,
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
@@ -1578,6 +1653,7 @@ fn build_ws_invoker_impl(
 
                 Box::pin(async move {
                     #( #state_extractions )*
+                    #( #ctx_extractions )*
                     #( #extractions )*
                     #fn_name( #( #all_call_args ),* ).await
                 })
@@ -1603,13 +1679,14 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     // Validate: sse handlers support State, SseSender, Query, Param, WsQuery, WsParam
     for p in &params {
         match p.extractor.as_str() {
-            "State" | "SseSender" | "WsQuery" | "WsParam" | "Query" | "Param" | "Header" => {}
+            "State" | "Ctx" | "SseSender" | "WsQuery" | "WsParam" | "Query" | "Param"
+            | "Header" => {}
             other => {
                 return Err(syn::Error::new(
                     Span::call_site(),
                     format!(
                         "extractor '{}' is not supported in #[sse] handlers. \
-                         Allowed: State, SseSender, Query, Param, Header, WsQuery, WsParam",
+                         Allowed: State, Ctx<T>, SseSender, Query, Param, Header, WsQuery, WsParam",
                         other
                     ),
                 ));
@@ -1735,6 +1812,26 @@ fn build_sse_invoker_impl(
         }
     }
 
+    // Collect Ctx extractions.
+    let mut ctx_extractions: Vec<TokenStream> = Vec::new();
+    for p in params {
+        let var_name = syn::Ident::new(&p.name, Span::call_site());
+        let full_type = &p.full_type;
+        let inner = &p.inner_type;
+        if p.extractor == "Ctx" {
+            ctx_extractions.push(quote! {
+                let #var_name: #full_type = match ctx.get::<#inner>() {
+                    Some(v) => afast::Ctx(v),
+                    None => {
+                        return Err(afast::Error::StateNotFound {
+                            message: format!("Ctx<{}> not found in request context", stringify!(#inner))
+                        });
+                    }
+                };
+            });
+        }
+    }
+
     let mut extractions: Vec<TokenStream> = Vec::new();
 
     if has_query {
@@ -1790,6 +1887,7 @@ fn build_sse_invoker_impl(
                 headers: serde_json::Value,
                 sender: afast::SseSender,
                 state: std::sync::Arc<afast::StateMap>,
+                ctx: afast::RequestCtx,
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
@@ -1803,6 +1901,7 @@ fn build_sse_invoker_impl(
 
                 Box::pin(async move {
                     #( #state_extractions )*
+                    #( #ctx_extractions )*
                     #( #extractions )*
                     #fn_name( #( #all_call_args ),* ).await
                 })

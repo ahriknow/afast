@@ -131,6 +131,41 @@ before_request → handler (spawned) → on_response
 - `on_response`: fires immediately after spawning the handler (the HTTP 200 response is being sent).
 - `on_error` / `on_disconnect` are **not** called (the handler runs in a spawned task; errors are logged to stderr).
 
+## Request Context Integration
+
+Hooks can read and write per-request data via the `ctx` field on `RequestContext`. This data is then available to handlers via the `Ctx<T>` extractor.
+
+```rust
+use afast::hook::{Hook, RequestContext};
+
+#[derive(Clone)]
+struct RequestId(pub String);
+
+struct CtxHook;
+
+impl Hook for CtxHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // Write into the per-request context
+        ctx.ctx.insert(RequestId(format!("req-{:08x}", /* ... */)));
+        None
+    }
+}
+```
+
+The handler retrieves it automatically:
+
+```rust
+#[handler(desc("..."))]
+async fn my_handler(ctx: afast::Ctx<RequestId>) -> afast::Result<()> {
+    println!("request_id = {}", ctx.0 .0);
+    Ok(())
+}
+```
+
+The same context is shared across all hooks and the handler for a single request. For long-connection handlers (WS/TCP), the context lives for the entire connection duration.
+
+See [Request Context (`Ctx`)](./context.md) for full documentation.
+
 ## Hook Key — Route Matching
 
 Hooks are matched by **`"service_name:route_path"`**, not by handler function name. This avoids conflicts when the same function name appears in different groups within the same service:

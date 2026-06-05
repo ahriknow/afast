@@ -51,6 +51,74 @@ use afast::hook::{ConnectionGuard, Hook, RequestContext, RequestGuard};
 mod handler;
 mod state;
 
+// ─── Request Context Example ─────────────────────────────────────
+//
+// `Ctx<T>` is a per-request context extractor. A hook inserts values
+// into the context, and handlers retrieve them automatically.
+// Unlike `State<T>` (app-global), `Ctx<T>` is scoped to a single
+// request (HTTP) or connection (WS/TCP/SSE).
+
+/// Per-request metadata — inserted by CtxHook, read by handlers.
+#[derive(Clone, Debug)]
+pub struct RequestInfo {
+    pub request_id: String,
+    pub started_at: std::time::Instant,
+}
+
+/// Hook that injects `RequestInfo` into every request's context.
+///
+/// Handlers can retrieve it via `Ctx<RequestInfo>` without any
+/// manual wiring — the framework extracts it automatically.
+#[cfg(feature = "hook")]
+struct CtxHook;
+
+#[cfg(feature = "hook")]
+impl Hook for CtxHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // Insert per-request data into the context.
+        // The RwLock is uncontended here (sequential write then read).
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        ctx.ctx.insert(RequestInfo {
+            request_id: format!("req-{:08x}", nanos),
+            started_at: std::time::Instant::now(),
+        });
+        None
+    }
+
+    fn on_connect(&self, ctx: &RequestContext) -> Option<Box<dyn ConnectionGuard>> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        ctx.ctx.insert(RequestInfo {
+            request_id: format!("conn-{:08x}", nanos),
+            started_at: std::time::Instant::now(),
+        });
+        Some(Box::new(CtxConnGuard))
+    }
+}
+
+#[cfg(feature = "hook")]
+struct CtxConnGuard;
+
+#[cfg(feature = "hook")]
+impl ConnectionGuard for CtxConnGuard {
+    fn on_disconnect(&mut self, ctx: &RequestContext) {
+        // Read the context value that was set in on_connect.
+        if let Some(info) = ctx.ctx.get::<RequestInfo>() {
+            eprintln!(
+                "[ctx-hook] ✕ {} disconnected after {:?} (id: {})",
+                ctx.handler_name,
+                info.started_at.elapsed(),
+                info.request_id,
+            );
+        }
+    }
+}
+
 use handler::admin::{
     delete_user, delete_user_http, get_user_http, list_users, list_users_http, update_user,
     update_user_http,
@@ -287,6 +355,7 @@ async fn main() {
     #[cfg(feature = "hook")]
     {
         app = app.hook(LoggingHook);
+        app = app.hook(CtxHook);
     }
 
     let app = app

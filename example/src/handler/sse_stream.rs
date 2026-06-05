@@ -23,7 +23,7 @@
 //!
 //! ```
 
-use afast::{Query, SseSender};
+use afast::{Ctx, Query, SseSender};
 use serde::Deserialize;
 
 /// Query parameters for the SSE endpoint.
@@ -37,8 +37,17 @@ pub struct SseQuery {
 /// Connect: `GET /sse?room=general`
 /// Sends a "connected" event, then periodic "tick" events.
 #[afast::sse(desc("Server-Sent Events stream"))]
-pub async fn sse_stream(query: Query<SseQuery>, sender: SseSender) -> afast::Result<()> {
+pub async fn sse_stream(
+    ctx: Ctx<crate::RequestInfo>,
+    query: Query<SseQuery>,
+    sender: SseSender,
+) -> afast::Result<()> {
     let room = query.0.room.unwrap_or_else(|| "default".to_string());
+
+    eprintln!(
+        "[sse] client connected to room: {}, request_id: {}",
+        room, ctx.0.request_id,
+    );
 
     // Send initial connected event
     sender
@@ -58,6 +67,13 @@ pub async fn sse_stream(query: Query<SseQuery>, sender: SseSender) -> afast::Res
             break;
         }
     }
+
+    eprintln!(
+        "[sse] client disconnected from room: {} after {:?} (request_id: {})",
+        room,
+        ctx.0.started_at.elapsed(),
+        ctx.0.request_id,
+    );
 
     Ok(())
 }

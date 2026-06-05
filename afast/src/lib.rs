@@ -164,6 +164,7 @@
 //! | [`rate_limit`] | Rate limiting with named policies (feature `rate-limit`) |
 //! | [`marker`] | Conditional serialization with markers (feature `marker`) |
 
+pub mod ctx;
 pub mod error;
 pub mod handler;
 #[cfg(feature = "hook")]
@@ -174,6 +175,7 @@ pub mod rate_limit;
 pub mod service;
 pub mod state;
 
+pub use ctx::RequestCtx;
 pub use error::AFastError;
 pub use error::Error;
 #[cfg(feature = "ordinary-http")]
@@ -212,6 +214,28 @@ pub use afastdata::{AFastDeserialize, AFastSerialize};
 /// }
 /// ```
 pub struct State<T>(pub T);
+
+/// Injects per-request context data into a handler.
+///
+/// The value is retrieved from the request-scoped [`RequestCtx`] type-map
+/// by type.  Unlike [`State<T>`] which is application-global, `Ctx<T>` is
+/// per-request (HTTP) or per-connection (WS/TCP/SSE).
+///
+/// A hook (e.g. `before_request`) can insert values into the context,
+/// and the handler retrieves them via this extractor.
+///
+/// # Examples
+///
+/// ```ignore
+/// #[handler(desc("Handler with request context"))]
+/// async fn my_handler(
+///     ctx: afast::Ctx<RequestId>,
+/// ) -> afast::Result<()> {
+///     let id = ctx.0 .0;
+///     // ...
+/// }
+/// ```
+pub struct Ctx<T>(pub T);
 
 /// Deserializes the binary request payload into `T`.
 ///

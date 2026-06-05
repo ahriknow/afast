@@ -483,6 +483,7 @@ async fn handle_request(
             let query_string = uri.query().unwrap_or("");
             let state = shared.state.clone();
             let invoker = compiled.invoker;
+            let req_ctx = crate::ctx::RequestCtx::new();
 
             // Hook: before_request
             #[cfg(feature = "hook")]
@@ -492,6 +493,7 @@ async fn handle_request(
                 transport: "http",
                 handler_id: 0,
                 state: state.clone(),
+                ctx: req_ctx.clone(),
             };
             #[cfg(feature = "hook")]
             let hook_key = format!("{}:{}", compiled.service_name, compiled.path);
@@ -510,7 +512,7 @@ async fn handle_request(
             };
 
             let result = invoker
-                .call_ordinary(req, &path_params, query_string, &state)
+                .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
                 .await;
 
             // Hook: on_response / on_error
@@ -812,6 +814,7 @@ async fn handle_api(
     }
 
     let payload = &body[4..];
+    let req_ctx = crate::ctx::RequestCtx::new();
 
     // Hook: before_request
     #[cfg(feature = "hook")]
@@ -822,6 +825,7 @@ async fn handle_api(
             transport: "http",
             handler_id,
             state: shared.state.clone(),
+            ctx: req_ctx.clone(),
         };
         shared
             .hooks
@@ -833,7 +837,7 @@ async fn handle_api(
             .collect()
     };
 
-    let result = invoker.call(&shared.state, payload).await;
+    let result = invoker.call(&shared.state, &req_ctx, payload).await;
 
     // Hook: on_response / on_error
     #[cfg(feature = "hook")]
@@ -844,6 +848,7 @@ async fn handle_api(
             transport: "http",
             handler_id,
             state: shared.state.clone(),
+            ctx: req_ctx.clone(),
         };
         match &result {
             Ok(bytes) => {
@@ -1288,6 +1293,7 @@ async fn handle_ordinary_ws_upgrade(
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let query_owned = query_string.to_string();
+    let req_ctx = crate::ctx::RequestCtx::new();
 
     // Hook: before_request
     #[cfg(feature = "hook")]
@@ -1297,6 +1303,7 @@ async fn handle_ordinary_ws_upgrade(
         transport: "ws",
         handler_id: 0,
         state: state.clone(),
+        ctx: req_ctx.clone(),
     };
     #[cfg(feature = "hook")]
     let hook_key = format!("{}:{}", service_name, route_path);
@@ -1358,6 +1365,7 @@ async fn handle_ordinary_ws_upgrade(
                         transport: "ws",
                         handler_id: 0,
                         state: state.clone(),
+                        ctx: req_ctx.clone(),
                     };
                     _hooks_for_spawn
                         .iter()
@@ -1439,6 +1447,7 @@ async fn handle_ordinary_ws_upgrade(
                         ws_sender,
                         ws_receiver,
                         state_for_handler,
+                        req_ctx.clone(),
                     )
                     .await;
 
@@ -1451,6 +1460,7 @@ async fn handle_ordinary_ws_upgrade(
                         transport: "ws",
                         handler_id: 0,
                         state: state.clone(),
+                        ctx: req_ctx.clone(),
                     };
                     match &handler_result {
                         Ok(_) => {
@@ -1483,6 +1493,7 @@ async fn handle_ordinary_ws_upgrade(
                         transport: "ws",
                         handler_id: 0,
                         state: state.clone(),
+                        ctx: req_ctx.clone(),
                     };
                     for g in &mut _conn_guards {
                         g.on_disconnect(&ctx);
@@ -1524,6 +1535,7 @@ async fn handle_sse(
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);
     let sender = crate::app::ordinary_sse::SseSender::new(tx);
     let state = shared.state.clone();
+    let req_ctx = crate::ctx::RequestCtx::new();
 
     // Hook: on_connect (SSE is a long-lived connection)
     #[cfg(feature = "hook")]
@@ -1533,6 +1545,7 @@ async fn handle_sse(
         transport: "sse",
         handler_id: 0,
         state: state.clone(),
+        ctx: req_ctx.clone(),
     };
     #[cfg(feature = "hook")]
     let named_hooks_for_sse = shared.named_hooks.clone();
@@ -1562,6 +1575,7 @@ async fn handle_sse(
                 headers_json,
                 sender,
                 state_for_spawn,
+                req_ctx.clone(),
             )
             .await;
 
@@ -1578,6 +1592,7 @@ async fn handle_sse(
                 transport: "sse",
                 handler_id: 0,
                 state,
+                ctx: req_ctx.clone(),
             };
             for g in &mut _conn_guards {
                 g.on_disconnect(&ctx);

@@ -173,6 +173,7 @@ pub trait SseHandlerInvoker: Send + Sync {
         headers: serde_json::Value,
         sender: SseSender,
         state: std::sync::Arc<crate::state::StateMap>,
+        ctx: crate::ctx::RequestCtx,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
 }
 

@@ -17,6 +17,7 @@ JavaScript, Kotlin, and Rust client code, with built-in interactive API document
 - **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
 - **TLS / HTTPS** — Based on rustls with ALPN for HTTP/2 negotiation
 - **Lifecycle Hooks** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
+- **Request Context** — `Ctx<T>` per-request context, hooks write, handlers read, all transports
 - **Rate Limiting** — Named-policy rate limiting with pluggable storage backend
 
 ## Quick Example

@@ -27,12 +27,15 @@
 use std::sync::Arc;
 
 use crate::StateMap;
+use crate::ctx::RequestCtx;
 
 /// A request-scoped context passed to hooks and guards.
 ///
 /// Contains static metadata about the handler being invoked and the
 /// transport it arrived on.  The `state` field gives access to shared
 /// application state (useful for extracting tracing contexts, etc.).
+/// The `ctx` field is a per-request type-map that hooks can write to
+/// and handlers can read from via the `Ctx<T>` extractor.
 pub struct RequestContext {
     /// Handler name (the Rust function name).
     pub handler_name: &'static str,
@@ -44,6 +47,9 @@ pub struct RequestContext {
     pub handler_id: u32,
     /// Shared application state.
     pub state: Arc<StateMap>,
+    /// Per-request context.  Hooks can insert values here; handlers
+    /// retrieve them via the `Ctx<T>` extractor.
+    pub ctx: RequestCtx,
 }
 
 /// Extension point for request lifecycle events.

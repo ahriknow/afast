@@ -293,6 +293,7 @@ pub async fn handle_websocket<S>(
                                 let connections = connections.clone();
                                 #[cfg(feature = "hook")]
                                 let hooks = hooks.clone();
+                                let req_ctx = crate::ctx::RequestCtx::new();
 
                                 // Hook: on_connect
                                 #[cfg(feature = "hook")]
@@ -303,6 +304,7 @@ pub async fn handle_websocket<S>(
                                         transport: "ws",
                                         handler_id,
                                         state: state.clone(),
+                                        ctx: req_ctx.clone(),
                                     };
                                     hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.on_connect(&ctx)).collect()
                                 };
@@ -317,11 +319,12 @@ pub async fn handle_websocket<S>(
                                             transport: "ws",
                                             handler_id,
                                             state: state.clone(),
+                                            ctx: req_ctx.clone(),
                                         };
                                         hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                                     };
 
-                                    let result = invoker.call_stream(&state, &payload, from_handler_tx, to_handler_rx).await;
+                                    let result = invoker.call_stream(&state, &req_ctx, &payload, from_handler_tx, to_handler_rx).await;
 
                                     // Hook: on_response / on_error for call_stream
                                     #[cfg(feature = "hook")]
@@ -332,6 +335,7 @@ pub async fn handle_websocket<S>(
                                             transport: "ws",
                                             handler_id,
                                             state: state.clone(),
+                                            ctx: req_ctx.clone(),
                                         };
                                         match &result {
                                             Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },
@@ -360,6 +364,7 @@ pub async fn handle_websocket<S>(
                                             transport: "ws",
                                             handler_id,
                                             state: state.clone(),
+                                            ctx: req_ctx.clone(),
                                         };
                                         for g in &mut _conn_guards { g.on_disconnect(&ctx); }
                                     }
@@ -374,6 +379,7 @@ pub async fn handle_websocket<S>(
                             } else {
                                 // Regular handler: invoke synchronously within the
                                 // connection loop and write the response directly.
+                                let req_ctx = crate::ctx::RequestCtx::new();
 
                                 // Hook: before_request
                                 #[cfg(feature = "hook")]
@@ -384,11 +390,12 @@ pub async fn handle_websocket<S>(
                                         transport: "ws",
                                         handler_id,
                                         state: state.clone(),
+                                        ctx: req_ctx.clone(),
                                     };
                                     hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                                 };
 
-                                let result = invoker.call(&state, payload).await;
+                                let result = invoker.call(&state, &req_ctx, payload).await;
 
                                 // Hook: on_response / on_error
                                 #[cfg(feature = "hook")]
@@ -399,6 +406,7 @@ pub async fn handle_websocket<S>(
                                         transport: "ws",
                                         handler_id,
                                         state: state.clone(),
+                                        ctx: req_ctx.clone(),
                                     };
                                     match &result {
                                         Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },

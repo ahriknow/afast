@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.13]
+
+### Added
+
+- **请求级 `Ctx` 上下文系统**: 新增贯穿整个 handler 生命周期的上下文容器，支持所有传输方式。
+  - `RequestCtx` 容器：基于 `Arc<RwLock<HashMap<TypeId, Box<dyn Any>>>>` 的类型图，廉价 clone（共享 Arc）。
+  - `Ctx<T>` 提取器：handler 参数签名中声明 `ctx: Ctx<MyType>`，宏自动从上下文中提取。与 `State<T>`（应用全局）不同，`Ctx<T>` 是请求/连接级别的。
+  - Hook 集成：`RequestContext` 新增 `ctx` 字段，`before_request` 可写入上下文数据，`on_response`/`on_error`/`on_connect`/`on_disconnect` 可读取。
+  - 全传输支持：HTTP binary、HTTP ordinary、WS binary、WS ordinary、SSE、TCP 均自动创建和传递 `RequestCtx`。
+  - 长连接生命周期：WS/TCP 长连接的 `RequestCtx` 在连接建立时创建，整个连接生命周期共享。
+  - 无侵入性：不使用 `Ctx<T>` 的 handler 不受影响，`Ctx<T>` 不计入 binary/ordinary 互斥检查，可与任何提取器组合。
+- **WebSocket Origin 校验**: 新增 `AFast::ws_origins(vec!["https://example.com"])` 配置项，校验 WebSocket 升级请求的 `Origin` 头，防止 CSWSH 攻击。空列表（默认）表示允许所有来源。
+- **`RateLimitStore::decr` 原子操作**: `RateLimitStore` trait 新增 `decr` 方法，原子递减并返回新值，修复令牌桶算法的竞态条件。`InMemoryStore` 使用写锁内原子递减实现。外部存储后端应覆盖此方法以保证原子性。
+
+### Fixed
+
+- **JSON 注入**: 修复 HTTP 错误响应通过 `format!` 直接拼接 JSON 字符串导致的注入风险，改用 `json_error_body()` 对特殊字符（`"`、`\`、`\n` 等）正确转义。
+- **XSS**: 修复 `/doc` 端点将服务名和描述直接嵌入 HTML 未转义的存储型 XSS 漏洞，新增 `html_escape()` 函数。
+- **TLS 握手超时**: 新增 10 秒超时，防止客户端发起 TCP 连接后不完成 TLS 握手导致的资源耗尽。
+- **令牌桶限流竞态条件**: 将 `get` + `set` 两步操作改为 `decr` 原子操作，防止并发请求同时读取相同 token 数双双放行。
+- **`service!` 宏支持变量服务名**: `register_with_path!` 过程宏现在支持字符串字面量（编译期哈希）和任意表达式（运行时哈希），`Service::new` 改为 `AsRef<str>` 签名。
+- **feature gate 兼容性**: 修复 `util` 模块在 `http` feature 下不可用的问题，扩展 cfg gate 为 `any(feature = "http", ...)`。
+- **TCP 启动重复 clone**: 移除 TCP server spawn 块中 `rl`/`hn` 的重复 clone。
+
 ## [0.1.12]
 
 ### Added

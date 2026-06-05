@@ -16,6 +16,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 - **WebSocket & SSE** — `#[ws]` and `#[sse]` route macros
 - **Long Connections** — bidirectional streaming via `Receiver`/`Sender`
 - **Lifecycle Hooks** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
+- **Request Context** — `Ctx<T>` per-request context, hooks write, handlers read
 - **Rate Limiting** — named policies with pluggable storage backend
 - **Client-Side Caching** — `cache(seconds)` attribute
 
@@ -23,16 +24,19 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 
 ```toml
 [dependencies]
-afast = { version = "0.1.12", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.13", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust
-use afast::{AFast, handler, service, State, Data, Result};
+use afast::{AFast, Ctx, handler, service, State, Data, Result};
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
 #[derive(Clone)]
 struct AppState { greeting: String }
+
+#[derive(Clone)]
+struct RequestId(pub String);
 
 #[derive(AFastDeserialize, Tag)]
 #[tag("Hello request")]
@@ -43,7 +47,12 @@ struct HelloReq { name: String }
 struct HelloResp { message: String }
 
 #[handler(desc("Say hello"))]
-async fn hello(state: State<AppState>, req: Data<HelloReq>) -> Result<HelloResp> {
+async fn hello(
+    ctx: Ctx<RequestId>,
+    state: State<AppState>,
+    req: Data<HelloReq>,
+) -> Result<HelloResp> {
+    println!("request_id={}", ctx.0 .0);
     Ok(HelloResp { message: format!("{}, {}!", state.greeting, req.name) })
 }
 

@@ -72,12 +72,14 @@ pub struct HandlerMeta {
 /// Implemented automatically by the `#[handler]` proc macro. Used internally
 /// by the framework to dispatch binary-protocol requests to handlers.
 pub trait HandlerInvoker: Send + Sync {
-    /// Invoke the handler with the given shared state and binary payload.
+    /// Invoke the handler with the given shared state, request context,
+    /// and binary payload.
     ///
     /// Returns the serialized response bytes on success, or an [`Error`] on failure.
     fn call(
         &self,
         state: &StateMap,
+        ctx: &crate::ctx::RequestCtx,
         payload: &[u8],
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Error>> + Send + '_>>;
 
@@ -102,12 +104,13 @@ pub trait HandlerInvoker: Send + Sync {
     fn call_stream<'a>(
         &'a self,
         state: &'a StateMap,
+        ctx: &'a crate::ctx::RequestCtx,
         payload: &'a [u8],
         server_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
         server_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Error>> + Send + 'a>> {
         let _ = (server_tx, server_rx);
-        Box::pin(async move { self.call(state, payload).await })
+        Box::pin(async move { self.call(state, ctx, payload).await })
     }
 }
 
@@ -118,13 +121,15 @@ pub trait HandlerInvoker: Send + Sync {
 #[cfg(feature = "ordinary-http")]
 pub trait OrdinaryHandlerInvoker: Send + Sync {
     /// Invoke the ordinary handler with the full HTTP request, extracted path
-    /// parameters, the raw query string, and shared application state.
+    /// parameters, the raw query string, shared application state, and
+    /// per-request context.
     fn call_ordinary(
         &self,
         req: hyper::Request<hyper::body::Incoming>,
         path_params: &std::collections::HashMap<String, String>,
         query_string: &str,
         state: &StateMap,
+        ctx: &crate::ctx::RequestCtx,
     ) -> Pin<Box<dyn Future<Output = OrdinaryResponse> + Send + '_>>;
 }
 
@@ -262,6 +267,7 @@ impl HandlerInvoker for DummyInvoker {
     fn call(
         &self,
         _state: &StateMap,
+        _ctx: &crate::ctx::RequestCtx,
         _payload: &[u8],
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Error>> + Send + '_>> {
         Box::pin(async {

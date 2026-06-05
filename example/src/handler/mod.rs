@@ -33,10 +33,16 @@ pub struct TokenResponse {
 
 /// Health check endpoint.
 ///
-/// This handler takes no parameters and returns a simple version string.
+/// This handler demonstrates the `Ctx<T>` extractor for per-request context.
+/// The `RequestInfo` is injected by `CtxHook` before the handler runs.
 /// It's registered in the "check" service.
 #[handler(desc("Health check"))]
-pub async fn health() -> afast::Result<TokenResponse> {
+pub async fn health(ctx: afast::Ctx<crate::RequestInfo>) -> afast::Result<TokenResponse> {
+    eprintln!(
+        "[health] request_id={}, elapsed={:?}",
+        ctx.0.request_id,
+        ctx.0.started_at.elapsed(),
+    );
     Ok(TokenResponse {
         version: "0.0.0".to_string(),
     })
@@ -110,12 +116,19 @@ pub struct PongResponse {
 
 /// Simple ping endpoint (ordinary HTTP GET).
 ///
-/// This handler uses the `#[get]` macro instead of `#[handler]`.
+/// This handler demonstrates `Ctx<T>` with ordinary HTTP routes.
 /// It returns `Json<T>` which serializes to JSON automatically.
 ///
 /// Access via: GET http://localhost:5001/ping
 /// Response: {"pong": true}
 #[get(desc("Simple ping endpoint"))]
-pub async fn ping() -> afast::HttpResult<afast::Json<PongResponse>> {
+pub async fn ping(
+    ctx: afast::Ctx<crate::RequestInfo>,
+) -> afast::HttpResult<afast::Json<PongResponse>> {
+    eprintln!(
+        "[ping] request_id={}, elapsed={:?}",
+        ctx.0.request_id,
+        ctx.0.started_at.elapsed(),
+    );
     Ok(afast::Json(PongResponse { pong: true }))
 }

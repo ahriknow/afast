@@ -5,6 +5,7 @@
 - [Conditional Serialization (Marker)](./marker.md)
 - [Rate Limiting](./rate-limiting.md)
 - [Lifecycle Hooks](./hooks.md)
+- [Request Context (`Ctx`)](./context.md)
 - [Transport Layer](./transports.md)
 - [Code Generation](./code-generation.md)
 - [Binary Protocol](./binary-protocol.md)

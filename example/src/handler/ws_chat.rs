@@ -22,7 +22,7 @@
 //! Ordinary-ws is easier to test with browser DevTools and standard
 //! WebSocket clients.
 
-use afast::{Param, Query, WsReceiver, WsSender};
+use afast::{Ctx, Param, Query, WsReceiver, WsSender};
 use serde::Deserialize;
 
 /// Query parameters from the WebSocket upgrade URL.
@@ -43,6 +43,7 @@ pub struct ChatParam {
 /// Sends back each received message prefixed with the room name.
 #[afast::ws(desc("WebSocket chat echo"))]
 pub async fn chat_ws(
+    ctx: Ctx<crate::RequestInfo>,
     query: Query<ChatQuery>,
     param: Param<ChatParam>,
     sender: WsSender,
@@ -50,7 +51,10 @@ pub async fn chat_ws(
 ) -> afast::Result<()> {
     let room = &param.0.room;
     let token = query.0.token.as_deref().unwrap_or("<none>");
-    println!("[ws-chat] client joined room: {}, token: {}", room, token);
+    eprintln!(
+        "[ws-chat] client joined room: {}, token: {}, request_id: {}",
+        room, token, ctx.0.request_id,
+    );
 
     while let Some(msg) = receiver.recv().await {
         match msg {
@@ -59,12 +63,19 @@ pub async fn chat_ws(
                 sender.send_text(&reply).await?;
             }
             afast::WsMessage::Close(_) => {
-                println!("[ws-chat] client left room: {}", room);
+                eprintln!("[ws-chat] client left room: {}", room);
                 break;
             }
             _ => {}
         }
     }
+
+    eprintln!(
+        "[ws-chat] room '{}' session ended after {:?} (request_id: {})",
+        room,
+        ctx.0.started_at.elapsed(),
+        ctx.0.request_id,
+    );
 
     Ok(())
 }
