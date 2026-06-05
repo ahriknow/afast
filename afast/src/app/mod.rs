@@ -315,6 +315,10 @@ pub struct AFast {
     /// Applies to HTTP binary API, ordinary HTTP body reads,
     /// WebSocket messages, and TCP frames.
     body_size_limit: usize,
+    /// Maximum concurrent connections (default 10 000).
+    /// Applies to HTTP, WebSocket, and TCP servers.
+    /// Excess connections wait on a semaphore until a slot opens.
+    max_connections: usize,
 }
 
 impl AFast {
@@ -353,6 +357,7 @@ impl AFast {
             #[cfg(feature = "hook")]
             hooks: Vec::new(),
             body_size_limit: 10 * 1024 * 1024, // 10 MB
+            max_connections: 10_000,
         }
     }
 
@@ -382,6 +387,19 @@ impl AFast {
     /// allocation.
     pub fn body_size_limit(mut self, limit: usize) -> Self {
         self.body_size_limit = limit;
+        self
+    }
+
+    /// Sets the maximum number of concurrent connections.
+    ///
+    /// When the limit is reached, new connections wait on a semaphore
+    /// until an existing connection closes. This prevents file descriptor
+    /// and memory exhaustion from connection floods.
+    ///
+    /// Applies to HTTP, WebSocket, and TCP servers.
+    /// Defaults to 10 000.
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = max;
         self
     }
 
@@ -860,6 +878,7 @@ impl AFast {
                 let ws_merged = false;
 
                 let body_size_limit = self.body_size_limit;
+                let max_connections = self.max_connections;
 
                 // Start WS server (standalone, only if not merged with HTTP)
                 #[cfg(all(feature = "ws", feature = "binary"))]
@@ -883,6 +902,8 @@ impl AFast {
                         #[cfg(feature = "rate-limit")]
                         let hn_base = rate_handler_names_outer.clone();
                         let mut shutdown_rx = shutdown_tx.subscribe();
+                        let ws_semaphore =
+                            std::sync::Arc::new(tokio::sync::Semaphore::new(max_connections));
 
                         let server = tokio::spawn(async move {
                             loop {
@@ -898,7 +919,10 @@ impl AFast {
                                                 let rl = rl_base.clone();
                                                 #[cfg(feature = "rate-limit")]
                                                 let hn = hn_base.clone();
+                                                let permit = ws_semaphore.clone().acquire_owned().await
+                                                    .expect("semaphore closed");
                                                 tokio::spawn(async move {
+                                                    let _permit = permit;
                                                     crate::app::transport::handle_connection(
                                                         stream,
                                                         state,
@@ -986,6 +1010,7 @@ impl AFast {
                                 #[cfg(feature = "rate-limit")]
                                 handler_names: hn,
                                 body_size_limit: self.body_size_limit,
+                                max_connections: self.max_connections,
                             },
                             shutdown_rx,
                         )
@@ -1055,6 +1080,7 @@ impl AFast {
                                 #[cfg(feature = "rate-limit")]
                                 handler_names: hn,
                                 body_size_limit: self.body_size_limit,
+                                max_connections: self.max_connections,
                             },
                             shutdown_rx,
                         )
@@ -1078,6 +1104,8 @@ impl AFast {
                     #[cfg(feature = "hook")]
                     let hooks_clone = hooks.clone();
                     let mut shutdown_rx = shutdown_tx.subscribe();
+                    let tcp_semaphore =
+                        std::sync::Arc::new(tokio::sync::Semaphore::new(max_connections));
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
@@ -1101,7 +1129,10 @@ impl AFast {
                                             let rl = rl.clone();
                                             #[cfg(feature = "rate-limit")]
                                             let hn = hn.clone();
+                                            let permit = tcp_semaphore.clone().acquire_owned().await
+                                                .expect("semaphore closed");
                                             tokio::spawn(async move {
+                                                let _permit = permit;
                                                 crate::app::transport::handle_tcp_connection(
                                                     stream,
                                                     state,

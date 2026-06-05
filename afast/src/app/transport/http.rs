@@ -83,6 +83,8 @@ pub struct HttpConfig {
         Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Maximum request/message body size in bytes.
     pub body_size_limit: usize,
+    /// Maximum concurrent connections.
+    pub max_connections: usize,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -201,6 +203,9 @@ pub async fn serve(
         None
     };
 
+    // Semaphore to limit concurrent connections.
+    let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_connections));
+
     loop {
         tokio::select! {
             accept = listener.accept() => {
@@ -209,7 +214,10 @@ pub async fn serve(
                         let shared = shared.clone();
                         #[cfg(feature = "tls")]
                         let tls = tls_acceptor.clone();
+                        let permit = conn_semaphore.clone().acquire_owned().await
+                            .expect("semaphore closed");
                         tokio::spawn(async move {
+                            let _permit = permit; // hold until connection ends
                             // Extract client IP from the TCP peer address.
                             let peer_ip = stream.peer_addr()
                                 .map(|a| a.ip().to_string())
