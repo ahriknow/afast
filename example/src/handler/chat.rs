@@ -1,3 +1,19 @@
+//! Chat handler — bidirectional long-connection streaming.
+//!
+//! This module demonstrates:
+//! - Long-connection handlers using `Receiver` and `Sender`
+//! - The handler runs in a loop, reading messages from the client
+//!   and echoing them back
+//! - The connection stays open until the client disconnects
+//! - Works over WebSocket and TCP transports (not HTTP)
+//!
+//! ## How it works
+//!
+//! 1. Client connects and sends `ChatJoin` data (name)
+//! 2. Handler enters a loop reading messages via `receiver.recv()`
+//! 3. Each message is echoed back via `sender.send()`
+//! 4. When the client disconnects, `recv()` returns `None` and the loop ends
+
 use afast::{AFastDeserialize, Tag, handler};
 
 use crate::state::AppState;

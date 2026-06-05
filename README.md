@@ -1,32 +1,29 @@
 # AFast
 
-[简体中文](./README_CN.md) | English | [📖 Full Documentation](https://ahriknow.github.io/afast)
+[简体中文](./README_CN.md) | English | [📖 Documentation](https://afast.ahriknow.help)
 
-AFast is a high-performance Rust web backend framework. It eliminates manual route
-definitions — annotate functions with `#[handler]` and the framework auto-registers
-and dispatches requests. Data transport uses a compact binary protocol that is
-smaller and faster than JSON. It supports one-click generation of TypeScript,
-JavaScript, Kotlin, and Rust client code, with built-in interactive API documentation.
+A high-performance Rust web framework. Annotate functions with `#[handler]` — the framework auto-registers routes, dispatches requests via a compact binary protocol, and generates TypeScript / JavaScript / Kotlin / Rust client code with one click.
 
 ## Features
 
 - **Zero Route Definitions** — `#[handler]` annotation, no manual routing table
-- **Compact Binary Protocol** — Smaller and faster than JSON, designed for internal communication
-- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients with full type definitions
-- **Interactive API Docs** — Built-in Web docs with dark/light theme and online API testing
-- **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, and TCP, mix and match as needed
-- **TLS / HTTPS** — Based on rustls with ALPN for HTTP/2 negotiation
-- **RESTful Endpoints** — Standard HTTP methods with Query/Param/Body/Header extractors
-- **Long Connections** — Bidirectional persistent communication via Receiver/Sender over WS/TCP
-- **Lifecycle Hooks** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`, global and per-service
-- **Rate Limiting** — Named-policy rate limiting with pluggable storage backend
-- **Client-Side Caching** — `cache(seconds)` attribute with class-level static cache
+- **Compact Binary Protocol** — smaller and faster than JSON
+- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients
+- **Interactive API Docs** — built-in Web docs with online testing
+- **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, TCP
+- **TLS / HTTPS** — rustls with ALPN for HTTP/2
+- **RESTful Endpoints** — `#[get]`/`#[post]`/`#[put]`/`#[delete]` with JSON
+- **WebSocket & SSE** — `#[ws]` and `#[sse]` route macros
+- **Long Connections** — bidirectional streaming via `Receiver`/`Sender`
+- **Lifecycle Hooks** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
+- **Rate Limiting** — named policies with pluggable storage backend
+- **Client-Side Caching** — `cache(seconds)` attribute
 
 ## Quick Start
 
 ```toml
 [dependencies]
-afast = { version = "0.1.11", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.12", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -35,56 +32,41 @@ use afast::{AFast, handler, service, State, Data, Result};
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
 #[derive(Clone)]
-struct AppState { db_url: String }
+struct AppState { greeting: String }
 
 #[derive(AFastDeserialize, Tag)]
-#[tag("Request")]
+#[tag("Hello request")]
 struct HelloReq { name: String }
 
 #[derive(AFastSerialize, Tag)]
-#[tag("Response")]
+#[tag("Hello response")]
 struct HelloResp { message: String }
 
 #[handler(desc("Say hello"))]
 async fn hello(state: State<AppState>, req: Data<HelloReq>) -> Result<HelloResp> {
-    Ok(HelloResp { message: format!("Hello, {}!", req.name) })
+    Ok(HelloResp { message: format!("{}, {}!", state.greeting, req.name) })
 }
 
 #[tokio::main]
 async fn main() {
     let svc = service!("api" => { h(hello) });
     AFast::new()
-        .state(AppState { db_url: "localhost".into() })
+        .state(AppState { greeting: "Hello".into() })
         .service(svc)
         .http("0.0.0.0:5000")
         .run().await.unwrap();
 }
 ```
 
-```bash
-cargo run --features "http,ws,ts"
-```
-
 ## Documentation
 
-📖 **[Full Documentation](https://ahriknow.github.io/afast)** — Complete guide with examples
-
-| Topic | Description |
-|-------|-------------|
-| [Quick Start](https://ahriknow.github.io/afast/quick-start.html) | Getting started guide |
-| [Core Concepts](https://ahriknow.github.io/afast/core-concepts.html) | Handlers, Services, Extractors |
-| [Features](https://ahriknow.github.io/afast/features.html) | All available features |
-| [Lifecycle Hooks](https://ahriknow.github.io/afast/hooks.html) | Request/connection hooks |
-| [Rate Limiting](https://ahriknow.github.io/afast/rate-limiting.html) | Rate limit configuration |
-| [Transport Layer](https://ahriknow.github.io/afast/transports.html) | HTTP, WebSocket, TCP |
-| [Code Generation](https://ahriknow.github.io/afast/code-generation.html) | TS/JS/KT/RS clients |
-| [Binary Protocol](https://ahriknow.github.io/afast/binary-protocol.html) | Wire format specification |
+📖 **[afast.ahriknow.help](https://afast.ahriknow.help)** — Quick Start, Core Concepts, Features, Hooks, Rate Limiting, Code Generation, Binary Protocol, and more.
 
 ## Project Structure
 
 ```
 afast/           — Main framework crate
-afast-macros/    — Proc macros (#[handler], register!, #[derive(Tag)])
+afast-macros/    — Proc macros (#[handler], service!, #[derive(Tag)])
 example/         — Example project with full usage
 docs/            — Documentation source (mdbook)
 ```

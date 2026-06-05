@@ -1,3 +1,26 @@
+//! Admin handler — user CRUD with both binary protocol and ordinary HTTP.
+//!
+//! This module demonstrates:
+//! - Binary protocol handlers (`#[handler]`) with `Custom<T>` auth extractor
+//! - Ordinary HTTP handlers (`#[get]`, `#[post]`, etc.) with `Header<T>` auth
+//! - Nested route groups (`group(":user_id" => { ... })`)
+//! - Request/response type definitions with `#[tag]` annotations
+//!
+//! ## Binary Protocol Handlers
+//!
+//! - `create_user` — Create a new user (requires AuthCustom)
+//! - `list_users` — List users with pagination (requires AuthCustom)
+//! - `update_user` — Update an existing user (requires AuthCustom)
+//! - `delete_user` — Delete a user by ID (requires AuthCustom)
+//!
+//! ## Ordinary HTTP Handlers
+//!
+//! - `GET /user` — List users (requires AuthHeader)
+//! - `POST /user` — Create user (requires AuthHeader)
+//! - `GET /user/:user_id` — Get user by ID (requires AuthHeader)
+//! - `PUT /user/:user_id` — Update user (requires AuthHeader)
+//! - `DELETE /user/:user_id` — Delete user (requires AuthHeader)
+
 use afast::{AFastDeserialize, AFastSerialize, Tag, delete, get, handler, post, put};
 
 use crate::handler::auth::AuthCustom;

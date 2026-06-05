@@ -328,7 +328,7 @@ async fn try_acquire(
             // Atomic: incr first, then check. This eliminates the race
             // condition where concurrent requests both read the same count
             // before either increments. The trade-off is that rejected
-            // requests also increment the counter (slightly偏严), which is
+            // requests also increment the counter (slightly strict), which is
             // acceptable for rate limiting.
             let current_count = store.incr(&current_key, window_secs * 2).await;
             let previous_count = store.get(&previous_key).await;
@@ -537,6 +537,53 @@ impl RateLimiter {
 
         // For Connection keys, use the per-connection ID so the store
         // scopes the counter to this connection.
+        let store_key = match conn_id {
+            Some(cid) => cid,
+            None => key,
+        };
+
+        let allowed = try_acquire(
+            self.store.as_ref(),
+            policy_id,
+            &store_key,
+            policy.max_requests,
+            policy.window_secs,
+            &policy.algorithm,
+            is_connection,
+        )
+        .await;
+
+        if !allowed {
+            return Err(Error::RateLimited {
+                message: self.rejected_message.clone(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Checks whether a request is allowed under a specific policy ID.
+    ///
+    /// Unlike [`check`](Self::check), this method takes the policy ID
+    /// directly instead of looking it up by handler name. Used for
+    /// framework-level endpoints like `/code` and `/doc`.
+    #[allow(dead_code)]
+    pub(crate) async fn check_by_policy(
+        &self,
+        policy_id: &str,
+        ctx: &mut ConnectionContext,
+    ) -> Result<(), Error> {
+        let policy = match self.policies.get(policy_id) {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let is_connection = matches!(policy.key, RateLimitKey::Connection);
+        let (key, conn_id) = match ctx.extract_key(&policy.key) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+
         let store_key = match conn_id {
             Some(cid) => cid,
             None => key,

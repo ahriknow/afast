@@ -1,3 +1,10 @@
+//! Article handler — CRUD operations with client-side caching.
+//!
+//! This module demonstrates:
+//! - Full CRUD pattern (Create, Read, Update, Delete)
+//! - `#[handler(cache(60))]` for client-side caching
+//! - Optional auth (some endpoints require auth, others don't)
+
 use afast::{AFastDeserialize, AFastSerialize, Tag, handler};
 
 use crate::handler::auth::AuthCustom;

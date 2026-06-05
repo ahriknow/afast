@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.12]
+
+### Added
+
+- **`AFastError` trait — 自定义错误类型**: 新增 `AFastError` trait，允许用户定义自己的错误类型并直接从 handler 返回。
+  - 实现 `code()` 和 `message()` 方法即可，框架自动调用 `into_error()` 转换为 `Error`。
+  - `Error` 自身也实现了 `AFastError`，向后兼容。
+  - `Result<T>` 文档更新，说明任何实现 `AFastError` 的类型都可作为 handler 返回值。
+- **连接并发限制**: 新增 `AFast::max_connections(n)` 配置项（默认 10,000），通过 Semaphore 限制 HTTP/WS/TCP 并发连接数，防止文件描述符和内存耗尽。
+- **连接超时**: 新增 `AFast::request_timeout(secs)` 配置项（默认 30 秒），超时连接被静默关闭，防止 slowloris 攻击。
+- **请求体大小限制配置**: 新增 `AFast::body_size_limit(bytes)` 配置项（默认 10 MB），在流式读取时强制检查，防止 OOM。
+- **安全响应头**: HTTP 响应自动添加 `x-content-type-options: nosniff`、`x-frame-options: DENY`、`x-xss-protection: 1; mode=block`，可通过 `AFast::security_headers()` 自定义。
+- **错误消息脱敏**: 新增 `Error::sanitized_message()` 方法，系统级错误（Io/Serialize/StateNotFound/Ws/Http/Tcp）返回通用消息，用户自定义错误原样返回。通过 `AFast::sanitize_errors(bool)` 控制（默认开启）。
+
+### Changed
+
+- **路由匹配从 O(n) 线性扫描改为 O(depth) Trie 路由器**: 普通 HTTP 路由匹配从遍历所有路由改为 Trie 树匹配，路径深度决定复杂度，大量路由时性能显著提升。
+- **`Error::custom()` 的 `assert!` 改为 `debug_assert!`**: Release 构建中不再因保留错误码 panic，防止生产环境崩溃。
+- **`SseEvent` 字段类型**: `event` 和 `id` 从 `Option<&'static str>` 改为 `Option<String>`，支持动态构造事件。
+- **`SseEvent::to_wire()` 性能优化**: 使用 `String::with_capacity` 和直接 `push_str` 替代 `format!`，减少内存分配。
+
+### Fixed
+
+- **滑动窗口限流竞态条件**: 修复并发请求同时读取计数器再递增的竞态条件，改为先 `incr` 再检查（原子操作）。
+- **`InMemoryStore` 内存泄漏**: 新增后台清理任务（每 60 秒），自动移除过期条目，防止内存无限增长。
+- **SSE hook 生命周期修复**: 修复 `on_response`/`on_error` guard 被提前 drop 的问题，hook 现在在 handler 返回后正确触发。
+- **动态 `Retry-After` 响应头**: 被限流时返回的 `Retry-After` 头现在根据策略的 `window_secs` 动态计算，而非固定值。
+- **`Box::leak` 内存增长**: 路由模式参数名不再使用 `Box::leak` 泄漏内存，改为 `'static` 字符串引用。
+- **流式读取大小限制**: HTTP body、WebSocket 帧、TCP 帧在流式读取时强制检查大小限制，防止超大 payload 导致 OOM。
+
 ## [0.1.11]
 
 ### Added

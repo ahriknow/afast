@@ -1,3 +1,8 @@
+//! Type-map for storing shared application state.
+//!
+//! The [`StateMap`] stores at most one value per Rust type, keyed by [`TypeId`].
+//! Handlers access state through the [`State<T>`](crate::State) extractor.
+
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 

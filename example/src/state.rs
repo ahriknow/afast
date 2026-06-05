@@ -1,14 +1,48 @@
+//! Application state and data model definitions.
+//!
+//! This module defines:
+//! - **AppState** — shared application state accessible from all handlers via `State<T>`
+//! - **Database** — in-memory database with CRUD operations for users, articles, and tokens
+//! - **Data model types** — User, Article, Role, Status, Profile, Address, etc.
+//!
+//! ## Derive Macros
+//!
+//! Data model types use these derive macros:
+//!
+//! - `AFastDeserialize` — enables deserialization from the afast binary protocol
+//! - `AFastSerialize` — enables serialization to the afast binary protocol
+//! - `Tag` — generates type metadata for code generation (TypeScript, JavaScript, Kotlin, Rust)
+//! - `serde::Serialize` / `serde::Deserialize` — enables JSON serialization for HTTP ordinary routes
+//!
+//! ## Tag Attributes
+//!
+//! - `#[tag("description")]` — on structs/enums: description shown in generated docs and clients
+//! - `#[tag("description")]` — on fields/variants: field-level description
+//!
+//! ## Conditional Serialization
+//!
+//! - `#[afast(skip_with("marker"))]` — field is excluded when the active marker matches
+//!   The marker is set via `AFast::marker("value")` at application startup.
+//!   In this example, `password` and `metadata` are excluded when marker is "afast".
+
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+// ─── Shared Application State ────────────────────────────────────
+
+/// Shared application state, accessible from all handlers via `State<AppState>`.
+///
+/// Uses `Arc<Mutex<Database>>` so the database can be shared safely across
+/// async tasks. Each handler extracts this with `afast::State<AppState>`.
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
 }
 
 impl AppState {
+    /// Creates a new AppState with a seeded database.
     pub fn new() -> Self {
         Self {
             db: Arc::new(Mutex::new(Database::new())),
@@ -16,18 +50,26 @@ impl AppState {
     }
 }
 
+// ─── In-Memory Database ──────────────────────────────────────────
+
+/// Simple in-memory database for demonstration.
+///
+/// In a real application, you would replace this with a connection pool
+/// (e.g., sqlx, diesel, sea-orm) or an external service client.
 pub struct Database {
     users: Vec<User>,
     articles: Vec<Article>,
     tokens: Vec<TokenInfo>,
 }
 
+/// Stores the mapping between auth tokens and user IDs.
 pub struct TokenInfo {
     pub user_id: i64,
     pub token: String,
 }
 
 impl Database {
+    /// Creates a new database with seed data.
     pub fn new() -> Self {
         Self {
             articles: vec![
@@ -55,6 +97,7 @@ impl Database {
                 },
             ],
             tokens: vec![],
+            // Seed user with extensive field coverage to demonstrate all data types
             users: vec![User {
                 id: 1,
                 username: "ahriknow".to_string(),
@@ -106,6 +149,9 @@ impl Database {
         }
     }
 
+    // ─── User CRUD ─────────────────────────────────────────────
+
+    /// Creates a new user and returns their ID.
     pub async fn create_user(&mut self, user: User) -> i64 {
         let max_id = self.users.iter().map(|u| u.id).max().unwrap_or(1);
         let new_id = max_id + 1;
@@ -113,14 +159,17 @@ impl Database {
         new_id
     }
 
+    /// Lists users with pagination (skip + limit).
     pub async fn read(&self, skip: usize, limit: usize) -> Vec<User> {
         self.users.iter().skip(skip).take(limit).cloned().collect()
     }
 
+    /// Gets a user by ID.
     pub async fn get(&self, id: i64) -> Option<User> {
         self.users.iter().find(|u| u.id == id).cloned()
     }
 
+    /// Updates a user's mutable fields. Returns true if found.
     pub async fn update(&mut self, id: i64, user: User) -> bool {
         if let Some(existing) = self.users.iter_mut().find(|u| u.id == id) {
             existing.name = user.name;
@@ -137,6 +186,7 @@ impl Database {
         }
     }
 
+    /// Deletes a user by ID. Returns the deleted user if found.
     pub async fn delete(&mut self, id: i64) -> Option<User> {
         if let Some(pos) = self.users.iter().position(|u| u.id == id) {
             Some(self.users.remove(pos))
@@ -147,6 +197,7 @@ impl Database {
 
     // ─── Auth ────────────────────────────────────────────────
 
+    /// Finds a user by username and password.
     pub async fn find_user_by_credentials(&self, username: &str, password: &str) -> Option<User> {
         self.users
             .iter()
@@ -154,6 +205,7 @@ impl Database {
             .cloned()
     }
 
+    /// Creates a new auth token for a user.
     pub async fn create_token(&mut self, user_id: i64) -> String {
         let token = format!("tok_{}_{}", user_id, rand_id());
         self.tokens.push(TokenInfo {
@@ -163,6 +215,7 @@ impl Database {
         token
     }
 
+    /// Resolves a token to a user ID.
     pub async fn get_user_id_by_token(&self, token: &str) -> Option<i64> {
         self.tokens
             .iter()
@@ -170,8 +223,9 @@ impl Database {
             .map(|t| t.user_id)
     }
 
-    // ─── Articles ────────────────────────────────────────────
+    // ─── Article CRUD ────────────────────────────────────────
 
+    /// Creates a new article and returns its ID.
     pub async fn create_article(&mut self, article: Article) -> i64 {
         let max_id = self.articles.iter().map(|a| a.id).max().unwrap_or(0);
         let new_id = max_id + 1;
@@ -182,6 +236,7 @@ impl Database {
         new_id
     }
 
+    /// Lists articles with optional published-only filter and pagination.
     pub async fn list_articles(
         &self,
         skip: usize,
@@ -197,6 +252,7 @@ impl Database {
             .collect()
     }
 
+    /// Counts articles with optional published-only filter.
     pub async fn count_articles(&self, published_only: bool) -> i64 {
         self.articles
             .iter()
@@ -204,10 +260,12 @@ impl Database {
             .count() as i64
     }
 
+    /// Gets an article by ID.
     pub async fn get_article(&self, id: i64) -> Option<Article> {
         self.articles.iter().find(|a| a.id == id).cloned()
     }
 
+    /// Updates an article's mutable fields. Returns true if found.
     pub async fn update_article(&mut self, id: i64, article: Article) -> bool {
         if let Some(existing) = self.articles.iter_mut().find(|a| a.id == id) {
             existing.title = article.title;
@@ -221,6 +279,7 @@ impl Database {
         }
     }
 
+    /// Deletes an article by ID. Returns the deleted article if found.
     pub async fn delete_article(&mut self, id: i64) -> Option<Article> {
         if let Some(pos) = self.articles.iter().position(|a| a.id == id) {
             Some(self.articles.remove(pos))
@@ -230,6 +289,9 @@ impl Database {
     }
 }
 
+// ─── Helper Functions ────────────────────────────────────────────
+
+/// Returns the current Unix timestamp in seconds.
 fn now_ts() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -237,6 +299,7 @@ fn now_ts() -> i64 {
         .as_secs() as i64
 }
 
+/// Generates a random-looking ID from the current timestamp hash.
 fn rand_id() -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -246,47 +309,91 @@ fn rand_id() -> String {
 }
 
 // ─── User ────────────────────────────────────────────────────────
+//
+// The User struct demonstrates all primitive types, nested types,
+// Option, Vec, and enum variants. The #[afast(skip_with("afast"))]
+// attribute on `password` and `metadata` means these fields are
+// excluded from serialization when the marker is "afast".
 
+/// User account information.
+///
+/// This struct demonstrates all data types supported by afast:
+/// - Primitives: i8, i16, i32, i64, u8, u16, u64, f32, f64, bool, String
+/// - Collections: `Vec<T>`, `Vec<u8>` (bytes)
+/// - Optional: `Option<T>`
+/// - Nested structs: Profile, Address
+/// - Enums: Role, Status, UserEvent
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
 #[tag("User account information")]
 pub struct User {
+    #[tag("User ID")]
     pub id: i64,
+    #[tag("Login username")]
     pub username: String,
+    /// Password is excluded from client code when marker is "afast"
     #[afast(skip_with("afast"))]
     pub password: String,
+    #[tag("Display name")]
     pub name: String,
+    #[tag("Age in years")]
     pub age: i32,
+    #[tag("Score")]
     pub score: f64,
+    #[tag("Account balance")]
     pub balance: f32,
+    #[tag("Whether the account is active")]
     pub active: bool,
+    #[tag("User tags")]
     pub tags: Vec<String>,
+    /// Metadata is excluded from client code when marker is "afast"
     #[afast(skip_with("afast"))]
     pub metadata: Option<String>,
+    #[tag("User role")]
     pub role: Role,
+    #[tag("Account status")]
     pub status: Status,
+    #[tag("User profile")]
     pub profile: Profile,
+    #[tag("User addresses")]
     pub addresses: Vec<Address>,
+    #[tag("Test scores")]
     pub scores: Vec<i32>,
+    #[tag("Feature flags")]
     pub flags: Vec<bool>,
+    #[tag("Raw bytes")]
     pub bytes: Vec<u8>,
+    #[tag("Float ratio")]
     pub ratio: f32,
+    #[tag("Large ID (i64)")]
     pub big_id: i64,
+    #[tag("Small number (i8)")]
     pub small_num: i8,
+    #[tag("Short number (i16)")]
     pub short_num: i16,
+    #[tag("Unsigned byte (u8)")]
     pub unsigned_num: u8,
+    #[tag("Medium unsigned (u16)")]
     pub med_unsigned: u16,
+    #[tag("Large unsigned (u64)")]
     pub large_unsigned: u64,
+    #[tag("Size count (usize)")]
     pub count: usize,
+    #[tag("Temperature in Celsius")]
     pub temperature: f64,
+    #[tag("Optional age")]
     pub optional_age: Option<i32>,
+    #[tag("Optional name")]
     pub optional_name: Option<String>,
+    #[tag("Optional dimensions")]
     pub dimensions: Option<Vec<f64>>,
+    #[tag("Event log")]
     pub event_log: Vec<UserEvent>,
 }
 
 impl User {
+    /// Creates a new user with default values.
     pub fn new(username: String, password: String, name: String) -> Self {
         Self {
             id: 0,
@@ -329,6 +436,12 @@ impl User {
 
 // ─── Nested Types ─────────────────────────────────────────────────
 
+/// User role — demonstrates simple enum variants (unit variants).
+///
+/// In the generated TypeScript client, this becomes:
+/// ```typescript
+/// type Role = { tag: 'Admin', data: null } | { tag: 'User', data: null } | { tag: 'Guest', data: null };
+/// ```
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -342,6 +455,7 @@ pub enum Role {
     Guest,
 }
 
+/// Account status — another simple enum.
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -352,27 +466,37 @@ pub enum Status {
     Banned,
 }
 
+/// User profile — demonstrates nested struct.
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
 #[tag("User profile")]
 pub struct Profile {
+    #[tag("Avatar URL")]
     pub avatar: String,
+    #[tag("Short biography")]
     pub bio: Option<String>,
+    #[tag("Experience level")]
     pub level: u32,
 }
 
+/// User address — demonstrates nested struct with enum field.
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
 #[tag("User address")]
 pub struct Address {
+    #[tag("Address category")]
     pub kind: AddressKind,
+    #[tag("Street address")]
     pub street: String,
+    #[tag("City")]
     pub city: String,
+    #[tag("ZIP/postal code")]
     pub zip: Option<String>,
 }
 
+/// Address category — demonstrates enum inside a struct.
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -386,6 +510,16 @@ pub enum AddressKind {
     Other,
 }
 
+/// User event log entry — demonstrates enum with data-carrying variants.
+///
+/// In the generated TypeScript client, this becomes:
+/// ```typescript
+/// type UserEvent =
+///     { tag: 'LoggedIn', data: null } |
+///     { tag: 'LoggedOut', data: null } |
+///     { tag: 'Error', data: string } |
+///     { tag: 'PasswordChanged', data: { old_hash: string, new_hash: string } };
+/// ```
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -395,8 +529,10 @@ pub enum UserEvent {
     LoggedIn,
     #[tag("User logged out")]
     LoggedOut,
+    /// Tuple variant — carries a String
     #[tag("Error occurred")]
     Error(String),
+    /// Struct variant — carries named fields
     #[tag("Password was changed")]
     PasswordChanged {
         #[tag("Previous password hash")]
@@ -408,6 +544,7 @@ pub enum UserEvent {
 
 // ─── Article ──────────────────────────────────────────────────────
 
+/// Blog article — demonstrates a simpler data model with tagged fields.
 #[derive(
     Debug, AFastDeserialize, AFastSerialize, Tag, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -432,6 +569,7 @@ pub struct Article {
 }
 
 impl Article {
+    /// Creates a new article with default timestamps.
     pub fn new(title: String, content: String, author_id: i64) -> Self {
         let now = now_ts();
         Self {

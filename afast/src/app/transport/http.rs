@@ -91,6 +91,9 @@ pub struct HttpConfig {
     pub sanitize_errors: bool,
     /// Security headers added to every HTTP response.
     pub security_headers: Vec<(&'static str, &'static str)>,
+    /// Rate-limit policy name for /code and /doc endpoints.
+    #[cfg(feature = "rate-limit")]
+    pub doc_code_rate_limit_policy: Option<String>,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -202,6 +205,8 @@ pub async fn serve(
         body_size_limit: config.body_size_limit,
         sanitize_errors: config.sanitize_errors,
         security_headers: config.security_headers,
+        #[cfg(feature = "rate-limit")]
+        doc_code_rate_limit_policy: config.doc_code_rate_limit_policy,
     });
 
     // Set up TLS acceptor if TLS config is provided.
@@ -370,6 +375,9 @@ struct SharedState {
     sanitize_errors: bool,
     /// Security headers added to every HTTP response.
     security_headers: Vec<(&'static str, &'static str)>,
+    /// Rate-limit policy name for /code and /doc endpoints.
+    #[cfg(feature = "rate-limit")]
+    doc_code_rate_limit_policy: Option<String>,
 }
 
 /// A pre-compiled ordinary HTTP route ready for request matching.
@@ -410,11 +418,13 @@ struct CompiledSseRoute {
 ///
 /// Resolution order:
 /// 1. Ordinary HTTP routes (compiled patterns, first match wins).
-/// 2. `POST /_api` for binary handler dispatch.
-/// 3. `GET /code/{service}/{lang}` for client code generation.
-/// 4. `GET /doc[/{service}]` for interactive documentation.
-/// 5. `GET /_ws` for WebSocket upgrade (merged mode only).
-/// 6. 404 for unmatched paths.
+/// 2. Ordinary SSE routes (`GET` with path matching).
+/// 3. Ordinary WS routes (`GET` WebSocket upgrade with path matching).
+/// 4. `POST /_api` for binary handler dispatch.
+/// 5. `GET /code/{service}/{lang}` for client code generation.
+/// 6. `GET /doc[/{service}]` for interactive documentation.
+/// 7. `GET /_ws` for WebSocket upgrade (merged mode only).
+/// 8. 404 for unmatched paths.
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
@@ -629,12 +639,58 @@ async fn handle_request(
             if method != hyper::Method::GET {
                 return method_not_allowed();
             }
+            // Rate-limit check for /code endpoint.
+            #[cfg(feature = "rate-limit")]
+            if let (Some(limiter), Some(policy)) =
+                (&shared.rate_limiter, &shared.doc_code_rate_limit_policy)
+            {
+                let mut ctx = ConnectionContext::new(client_ip.to_string());
+                for (name, value) in req.headers().iter() {
+                    if let Ok(v) = value.to_str() {
+                        ctx.header_cache
+                            .insert(name.as_str().to_lowercase(), v.to_string());
+                    }
+                }
+                if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
+                    let retry = limiter.retry_after_secs(policy);
+                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                    return Ok(Response::builder()
+                        .status(StatusCode::TOO_MANY_REQUESTS)
+                        .header("content-type", "application/json; charset=utf-8")
+                        .header("retry-after", retry.to_string())
+                        .body(Full::new(Bytes::from(body)).boxed())
+                        .expect("valid response builder"));
+                }
+            }
             handle_code(&segments, uri.query(), shared)
         }
         #[cfg(feature = "doc")]
         Some("doc") => {
             if method != hyper::Method::GET {
                 return method_not_allowed();
+            }
+            // Rate-limit check for /doc endpoint.
+            #[cfg(feature = "rate-limit")]
+            if let (Some(limiter), Some(policy)) =
+                (&shared.rate_limiter, &shared.doc_code_rate_limit_policy)
+            {
+                let mut ctx = ConnectionContext::new(client_ip.to_string());
+                for (name, value) in req.headers().iter() {
+                    if let Ok(v) = value.to_str() {
+                        ctx.header_cache
+                            .insert(name.as_str().to_lowercase(), v.to_string());
+                    }
+                }
+                if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
+                    let retry = limiter.retry_after_secs(policy);
+                    let body = format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
+                    return Ok(Response::builder()
+                        .status(StatusCode::TOO_MANY_REQUESTS)
+                        .header("content-type", "application/json; charset=utf-8")
+                        .header("retry-after", retry.to_string())
+                        .body(Full::new(Bytes::from(body)).boxed())
+                        .expect("valid response builder"));
+                }
             }
             handle_doc(&segments, shared)
         }
@@ -1527,8 +1583,8 @@ fn not_found() -> Result<Response<BoxBody>, hyper::Error> {
 /// Builds a binary-format error response.
 ///
 /// The body uses the same `[1u8][code i64][message bytes]` format as
-/// WebSocket error frames, providing a consistent error representation
-/// across both transports.
+/// the binary protocol error frames, providing a consistent error
+/// representation across HTTP, WebSocket, and TCP transports.
 fn error_response(
     status: StatusCode,
     code: i64,

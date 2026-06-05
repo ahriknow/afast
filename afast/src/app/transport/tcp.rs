@@ -57,87 +57,31 @@ use crate::handler::HandlerInvoker;
 use crate::rate_limit::{ConnectionContext, RateLimiter};
 use crate::state::StateMap;
 
-/// Safely reads N bytes from `data` at `offset` and converts to `[u8; N]`.
-/// Returns `None` if the slice is too short.
-#[inline]
-fn read_array<const N: usize>(data: &[u8], offset: usize) -> Option<[u8; N]> {
-    data.get(offset..offset + N)?.try_into().ok()
-}
-
-#[cfg(feature = "seq64")]
-type SeqId = i64;
-#[cfg(not(feature = "seq64"))]
-type SeqId = i32;
-
-#[cfg(feature = "len64")]
-type Len = u64;
-#[cfg(not(feature = "len64"))]
-type Len = u32;
-
-/// Byte size of the sequence-id field in wire frames.
-const SEQ_BYTES: usize = std::mem::size_of::<SeqId>();
-/// Byte size of the length field in wire frames.
-const LEN_BYTES: usize = std::mem::size_of::<Len>();
-/// Reserved sequence ID that identifies heartbeat frames.
-const HEARTBEAT_ID: SeqId = -1;
+use super::util::*;
 
 /// Tracks a single long-connection handler's inbound communication channel.
 struct ConnectionState {
     to_handler: mpsc::Sender<Vec<u8>>,
 }
 
-/// Builds a success response for a regular (non-long-connection) handler.
+/// Builds a success response for a regular handler.
 fn make_success(req_id: SeqId, data: &[u8]) -> Vec<u8> {
-    let len: Len = (1 + 8 + data.len()) as Len;
-    let mut buf = Vec::with_capacity(SEQ_BYTES + LEN_BYTES + 1 + 8 + data.len());
-    buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.push(0);
-    buf.extend_from_slice(&0i64.to_le_bytes());
-    buf.extend_from_slice(data);
-    buf
+    make_success_raw(req_id, data)
 }
 
-/// Builds a success response that includes a connection ID, used during
-/// long-connection initialization so the client can address subsequent
-/// push messages.
+/// Builds a success response with conn_id for long-connection init.
 fn make_success_with_conn(req_id: SeqId, conn_id: u32, data: &[u8]) -> Vec<u8> {
-    let payload_len = 4 + data.len();
-    let len: Len = (1 + 8 + payload_len) as Len;
-    let mut buf = Vec::with_capacity(SEQ_BYTES + LEN_BYTES + 1 + 8 + payload_len);
-    buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.push(0);
-    buf.extend_from_slice(&0i64.to_le_bytes());
-    buf.extend_from_slice(&conn_id.to_le_bytes());
-    buf.extend_from_slice(data);
-    buf
+    make_success_with_conn_raw(req_id, conn_id, data)
 }
 
 /// Builds an error response frame.
 fn make_error(req_id: SeqId, code: i64, message: &str) -> Vec<u8> {
-    let msg_bytes = message.as_bytes();
-    let len: Len = (1 + 8 + msg_bytes.len()) as Len;
-    let mut buf = Vec::with_capacity(SEQ_BYTES + LEN_BYTES + 1 + 8 + msg_bytes.len());
-    buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.push(1);
-    buf.extend_from_slice(&code.to_le_bytes());
-    buf.extend_from_slice(msg_bytes);
-    buf
+    make_error_raw(req_id, code, message)
 }
 
-/// Builds a push frame for forwarding long-connection handler output to
-/// the client.
+/// Builds a push frame for forwarding handler output to the client.
 fn make_push(conn_id: u32, data: &[u8]) -> Vec<u8> {
-    let zero: SeqId = 0;
-    let len: Len = data.len() as Len;
-    let mut buf = Vec::with_capacity(SEQ_BYTES + 4 + LEN_BYTES + data.len());
-    buf.extend_from_slice(&zero.to_le_bytes());
-    buf.extend_from_slice(&conn_id.to_le_bytes());
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(data);
-    buf
+    make_push_raw(conn_id, data)
 }
 
 /// Reads a length-prefixed frame from the TCP stream.

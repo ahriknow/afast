@@ -1,3 +1,14 @@
+//! Error types and error codes for the afast framework.
+//!
+//! All handler return types use [`Result<T>`](crate::Result), which is an alias
+//! for `Result<T, Error>`. The [`Error`] enum carries a numeric code and a
+//! human-readable message. System-level error codes (`-90012` to `-90000`) are
+//! reserved; user-defined errors must use codes outside this range via
+//! [`Error::custom`].
+//!
+//! Custom error types can implement the [`AFastError`] trait to be returned
+//! directly from handler functions.
+
 use std::fmt;
 
 // ─── Reserved system error codes (users must not use) ──────────
@@ -43,7 +54,7 @@ fn is_reserved_code(code: i64) -> bool {
 /// All handler return types use `afast::Result<T>`, which is an alias for
 /// `Result<T, Error>`. Each variant carries a numeric code and a
 /// human-readable message. User-defined errors must use [`Error::custom`]
-/// with codes outside the reserved range (`-90011` to `-90000`).
+/// with codes outside the reserved range (`-90012` to `-90000`).
 #[derive(Debug)]
 pub enum Error {
     /// Serialization or deserialization failure.

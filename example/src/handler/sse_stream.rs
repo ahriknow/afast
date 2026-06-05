@@ -1,6 +1,32 @@
+//! SSE (Server-Sent Events) handler — pushes periodic events to the client.
+//!
+//! This module demonstrates:
+//! - `#[afast::sse]` macro for SSE endpoints
+//! - `SseSender` for pushing events to the client
+//! - `SseEvent` for constructing events with custom types
+//! - `Query<T>` extractor for URL query parameters
+//!
+//! ## How to connect
+//!
+//! ```javascript
+//! const es = new EventSource('http://localhost:5001/sse?room=lobby');
+//! es.addEventListener('connected', (e) => console.log('Connected:', e.data));
+//! es.addEventListener('tick', (e) => console.log('Tick:', e.data));
+//! ```
+//!
+//! ## SSE wire format
+//!
+//! Each event is sent as:
+//! ```text
+//! event: tick
+//! data: {"count":1,"room":"lobby"}
+//!
+//! ```
+
 use afast::{Query, SseSender};
 use serde::Deserialize;
 
+/// Query parameters for the SSE endpoint.
 #[derive(Deserialize)]
 pub struct SseQuery {
     pub room: Option<String>,

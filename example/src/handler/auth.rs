@@ -1,3 +1,11 @@
+//! Auth handler — registration, login, and token management.
+//!
+//! This module demonstrates:
+//! - `Custom<T>` extractor for binary protocol authentication
+//! - `Header<T>` extractor for HTTP authentication
+//! - `#[handler(name("signup"))]` to override the client-side method name
+//! - `#[handler(rate_limit("login"))]` to apply rate limiting
+
 use afast::{AFastDeserialize, AFastSerialize, Tag, handler};
 
 use crate::state::{AppState, User};

@@ -2,8 +2,8 @@
 //! (the `ordinary-ws` feature).
 //!
 //! This module provides:
-//! - `WsStream` — a high-level wrapper for sending/receiving text and JSON
-//!   messages over a WebSocket connection.
+//! - `WsSender` / `WsReceiver` — high-level wrappers for sending and
+//!   receiving text, JSON, and binary messages over a WebSocket connection.
 //! - `WsQuery<T>` — query parameter extractor from the upgrade request.
 //! - `WsParam<T>` — path parameter extractor from the upgrade request.
 //!

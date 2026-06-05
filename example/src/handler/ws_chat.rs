@@ -1,11 +1,37 @@
+//! WebSocket chat handler — path-based WebSocket with text/JSON frames.
+//!
+//! This module demonstrates:
+//! - `#[afast::ws]` macro for WebSocket endpoints
+//! - `WsSender` / `WsReceiver` for sending/receiving messages
+//! - `WsMessage` enum for handling different frame types (Text, Binary, Close, etc.)
+//! - `Query<T>` extractor for URL query parameters from the upgrade request
+//! - `Param<T>` extractor for path parameters (`:room`)
+//!
+//! ## How to connect
+//!
+//! ```javascript
+//! const ws = new WebSocket('ws://localhost:5001/chat/lobby?token=abc');
+//! ws.onopen = () => ws.send('Hello!');
+//! ws.onmessage = (e) => console.log(e.data); // "[lobby] Hello!"
+//! ```
+//!
+//! ## Difference from binary chat
+//!
+//! This handler uses standard WebSocket text/JSON frames (ordinary-ws),
+//! while `chat_echo` in `chat.rs` uses the afast binary protocol.
+//! Ordinary-ws is easier to test with browser DevTools and standard
+//! WebSocket clients.
+
 use afast::{Param, Query, WsReceiver, WsSender};
 use serde::Deserialize;
 
+/// Query parameters from the WebSocket upgrade URL.
 #[derive(Deserialize)]
 pub struct ChatQuery {
     pub token: Option<String>,
 }
 
+/// Path parameters from the route pattern `/chat/:room`.
 #[derive(Deserialize)]
 pub struct ChatParam {
     pub room: String,

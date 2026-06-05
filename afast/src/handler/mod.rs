@@ -1,3 +1,14 @@
+//! Handler abstractions and metadata for the afast framework.
+//!
+//! This module defines the core types that describe handler functions:
+//! - [`Handler`] — a node in the handler tree (leaf or group).
+//! - [`HandlerEntry`] — a compiled handler reference produced by `register!`.
+//! - [`HandlerInvoker`] — trait for type-erased handler dispatch.
+//! - [`HandlerMeta`], [`ParamMeta`] — static metadata for code generation.
+//! - [`TagMeta`], [`FieldMeta`], [`Structure`] — type metadata for TypeScript
+//!   and JavaScript code generators.
+//! - [`Receiver`], [`Sender`] — channels for long-connection (WebSocket/TCP) handlers.
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -44,7 +55,7 @@ pub struct HandlerMeta {
     pub return_structure: Option<fn() -> &'static TagMeta>,
     /// Whether this handler uses [`Receiver`]/[`Sender`] for persistent connections.
     pub long_connection: bool,
-    /// Whether this is an ordinary HTTP handler (uses Query/Param/Body/Header extractors).
+    /// Whether this is an ordinary route handler (uses Query/Param/Body/Header extractors).
     pub is_ordinary: bool,
     /// HTTP method for ordinary handlers (`"GET"`, `"POST"`, etc.). Empty for binary handlers.
     pub method: &'static str,

@@ -94,6 +94,7 @@ pub struct SseSender {
 
 impl SseSender {
     /// Creates a new `SseSender` wrapping the given channel.
+    #[cfg(all(feature = "http", feature = "binary"))]
     pub(crate) fn new(tx: tokio::sync::mpsc::Sender<String>) -> Self {
         Self { tx }
     }

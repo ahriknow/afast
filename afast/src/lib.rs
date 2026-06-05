@@ -44,6 +44,91 @@
 //! }
 //! ```
 //!
+//! ## Core Concepts
+//!
+//! ### Handlers
+//!
+//! A **handler** is an async function annotated with `#[handler(desc("..."))]`.
+//! The framework registers it automatically and dispatches binary protocol
+//! requests to it. Handlers can extract shared state via [`State<T>`],
+//! request data via [`Data<T>`], and auth context via [`Custom<T>`].
+//!
+//! ```no_run
+//! use afast::{handler, Data, State, Result};
+//! use afast::{AFastDeserialize, AFastSerialize, Tag};
+//!
+//! # #[derive(Clone)] struct AppState;
+//! #[derive(AFastDeserialize, Tag)]
+//! #[tag("Login request")]
+//! struct LoginReq { username: String, password: String }
+//!
+//! #[derive(AFastSerialize, Tag)]
+//! #[tag("Login response")]
+//! struct LoginResp { token: String }
+//!
+//! #[handler(desc("Login with username and password"))]
+//! async fn login(
+//!     state: State<AppState>,
+//!     req: Data<LoginReq>,
+//! ) -> Result<LoginResp> {
+//!     // Validate credentials, generate token, etc.
+//!     Ok(LoginResp { token: "abc123".into() })
+//! }
+//! ```
+//!
+//! **Handler attributes:**
+//! - `desc("...")` — Human-readable description (required)
+//! - `name("...")` — Client-side method name override
+//! - `cache(seconds)` — Client-side cache duration
+//! - `rate_limit("id")` — Rate-limit policy ID
+//!
+//! ### Services
+//!
+//! A **service** groups handlers into a namespace. Each service generates a
+//! separate client code file. Use the [`service!`] macro:
+//!
+//! ```ignore
+//! let svc = service!("api", "My API" => {
+//!     h(health),
+//!     group("user" => {
+//!         h(create_user),
+//!         h(list_users),
+//!     }),
+//! });
+//! ```
+//!
+//! ### Ordinary HTTP Routes
+//!
+//! With the `ordinary-http` feature, you can define REST-style endpoints
+//! using `#[get]`, `#[post]`, `#[put]`, `#[delete]`, `#[patch]` macros.
+//! These use JSON request/response bodies instead of the binary protocol.
+//!
+//! ```ignore
+//! use afast::{get, post, Query, Param, Body, Json, HttpResult};
+//!
+//! #[get(desc("List users"))]
+//! async fn list_users(query: Query<ListQuery>) -> HttpResult<Json<UserList>> {
+//!     Ok(Json(UserList { total: 0, items: vec![] }))
+//! }
+//!
+//! #[post(desc("Create user"))]
+//! async fn create_user(body: Body<CreateBody>) -> HttpResult<Json<User>> {
+//!     Ok(Json(User { id: 1, username: body.0.username }))
+//! }
+//! ```
+//!
+//! ### Error Handling
+//!
+//! All handlers return [`Result<T>`], which is `Result<T, Error>`.
+//! Use [`Error::custom`] to create user-defined errors:
+//!
+//! ```ignore
+//! return Err(Error::custom(404, "user not found"));
+//! ```
+//!
+//! Custom error types can implement [`AFastError`] to be returned directly
+//! from handlers.
+//!
 //! ## Features
 //!
 //! | Feature | Description |
@@ -54,13 +139,30 @@
 //! | `ts` | TypeScript client code generation |
 //! | `js` | JavaScript client code generation |
 //! | `kt` | Kotlin client code generation |
+//! | `rs` | Rust client code generation |
 //! | `code` | HTTP endpoint for on-demand client code generation |
 //! | `doc` | Interactive API documentation page |
-//! | `ordinary-http` | REST-style endpoints with JSON request/response bodies |
+//! | `ordinary-http` | REST-style HTTP endpoints with JSON request/response bodies |
+//! | `ordinary-ws` | Path-based WebSocket endpoints with text/JSON frames |
+//! | `ordinary-sse` | Server-Sent Events endpoints |
 //! | `tls` | HTTPS support via rustls with ALPN for HTTP/2 |
 //! | `seq64` | Use `i64` for WebSocket request IDs (default `i32`) |
 //! | `len64` | Use `u64` for WebSocket payload lengths (default `u32`) |
 //! | `rate-limit` | Request rate limiting with named policies and pluggable store |
+//! | `hook` | Request and connection lifecycle hooks |
+//! | `marker` | Conditional serialization with marker-based field skipping |
+//!
+//! ## Module Guide
+//!
+//! | Module | Description |
+//! |--------|-------------|
+//! | [`error`] | Error types and error codes |
+//! | [`mod@handler`] | Handler abstractions, metadata, and type tags |
+//! | [`mod@service`] | Service container for grouping handlers |
+//! | [`state`] | Type-map for shared application state |
+//! | [`hook`] | Request/connection lifecycle hooks (feature `hook`) |
+//! | [`rate_limit`] | Rate limiting with named policies (feature `rate-limit`) |
+//! | [`marker`] | Conditional serialization with markers (feature `marker`) |
 
 pub mod error;
 pub mod handler;
@@ -175,7 +277,7 @@ impl<T: Structure> Data<T> {
     }
 }
 
-// ─── Ordinary HTTP extractors ─────────────────────────────────────
+// ─── Ordinary route extractors (HTTP / WS / SSE) ─────────────────
 
 #[cfg(feature = "ordinary-http")]
 pub use serde;

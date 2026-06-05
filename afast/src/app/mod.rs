@@ -1,3 +1,15 @@
+//! Application builder, transport servers, and code generation.
+//!
+//! This module contains:
+//! - [`AFast`] — the top-level application builder and runtime.
+//! - Transport implementations (HTTP, WebSocket, TCP) in the private `transport`
+//!   submodule.
+//! - Client code generators (TypeScript, JavaScript, Kotlin, Rust) in `codegen`.
+//! - Ordinary route support (REST HTTP, WebSocket, SSE) in [`ordinary`],
+//!   [`ordinary_ws`], and [`ordinary_sse`].
+//! - Shared extractors ([`Query`](extractors::Query), [`Param`](extractors::Param))
+//!   in [`extractors`].
+
 use crate::handler::Handler;
 #[cfg(feature = "binary")]
 use crate::handler::HandlerInvoker;
@@ -331,6 +343,11 @@ pub struct AFast {
     /// Defaults to `[("x-content-type-options", "nosniff"), ("x-frame-options", "DENY"),
     /// ("x-xss-protection", "1; mode=block")]`.
     security_headers: Vec<(&'static str, &'static str)>,
+    /// Rate-limit policy name applied to `/code` and `/doc` endpoints.
+    /// Only effective when the `rate-limit` feature is enabled and a
+    /// policy with this name exists in the [`RateLimitConfig`].
+    /// Defaults to `None` (no rate limiting on code/doc).
+    doc_code_rate_limit_policy: Option<String>,
 }
 
 impl AFast {
@@ -377,13 +394,14 @@ impl AFast {
                 ("x-frame-options", "DENY"),
                 ("x-xss-protection", "1; mode=block"),
             ],
+            doc_code_rate_limit_policy: None,
         }
     }
 
     /// Sets the marker string used for conditional serialization.
     ///
     /// The marker is stored in the application and passed to handlers via
-    /// `Arc<String>` in the [`StateMap`](crate::StateMap). It controls which
+    /// `Arc<String>` in the [`StateMap`]. It controls which
     /// `#[afast(skip_with("marker"))]` fields are skipped during
     /// serialization/deserialization.
     ///
@@ -464,6 +482,19 @@ impl AFast {
     /// ```
     pub fn security_headers(mut self, headers: Vec<(&'static str, &'static str)>) -> Self {
         self.security_headers = headers;
+        self
+    }
+
+    /// Sets the rate-limit policy for `/code` and `/doc` endpoints.
+    ///
+    /// The policy name must match an existing policy in the
+    /// [`RateLimitConfig`](crate::rate_limit::RateLimitConfig) registered via
+    /// [`rate_limit`](Self::rate_limit). Only effective when the `rate-limit`
+    /// feature is enabled.
+    ///
+    /// Defaults to `None` (no rate limiting on code/doc).
+    pub fn doc_code_rate_limit_policy(mut self, policy: impl Into<String>) -> Self {
+        self.doc_code_rate_limit_policy = Some(policy.into());
         self
     }
 
@@ -815,6 +846,7 @@ impl AFast {
                 // Key: "service_name:handler_name", Value: merged hooks (global + service).
                 #[cfg(feature = "hook")]
                 let named_hooks = {
+                    #[cfg(feature = "ordinary-http")]
                     use std::collections::HashSet;
                     let mut map: std::collections::HashMap<
                         String,
@@ -944,6 +976,8 @@ impl AFast {
                 let body_size_limit = self.body_size_limit;
                 let max_connections = self.max_connections;
                 let security_headers = self.security_headers;
+                #[cfg(feature = "rate-limit")]
+                let doc_code_rate_limit_policy = self.doc_code_rate_limit_policy.clone();
 
                 // Start WS server (standalone, only if not merged with HTTP)
                 #[cfg(all(feature = "ws", feature = "binary"))]
@@ -1044,6 +1078,8 @@ impl AFast {
                     #[cfg(feature = "rate-limit")]
                     let hn = rate_handler_names_outer.clone();
                     let security_headers_http = security_headers.clone();
+                    #[cfg(feature = "rate-limit")]
+                    let doc_code_rate_limit_policy_http = doc_code_rate_limit_policy.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1080,6 +1116,8 @@ impl AFast {
                                 request_timeout_secs: self.request_timeout_secs,
                                 sanitize_errors: self.sanitize_errors,
                                 security_headers: security_headers_http,
+                                #[cfg(feature = "rate-limit")]
+                                doc_code_rate_limit_policy: doc_code_rate_limit_policy_http,
                             },
                             shutdown_rx,
                         )
@@ -1153,6 +1191,8 @@ impl AFast {
                                 request_timeout_secs: self.request_timeout_secs,
                                 sanitize_errors: self.sanitize_errors,
                                 security_headers: security_headers.clone(),
+                                #[cfg(feature = "rate-limit")]
+                                doc_code_rate_limit_policy: doc_code_rate_limit_policy.clone(),
                             },
                             shutdown_rx,
                         )

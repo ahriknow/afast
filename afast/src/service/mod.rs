@@ -1,3 +1,9 @@
+//! Service container for grouping handlers into API namespaces.
+//!
+//! A [`Service`] has a name, description, and a tree of [`Handler`] nodes.
+//! Multiple services can be registered on an [`AFast`](crate::AFast) application,
+//! and each service generates a separate client code file.
+
 use crate::handler::Handler;
 #[cfg(feature = "ordinary-http")]
 use crate::handler::HandlerEntry;

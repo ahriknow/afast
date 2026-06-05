@@ -1,5 +1,5 @@
 //! Route pattern matching, query/path parsing and lenient deserialization
-//! shared by `ordinary-http` and `ordinary-ws` features.
+//! shared by `ordinary-http`, `ordinary-ws`, and `ordinary-sse` features.
 //!
 //! This module provides:
 //! - Path pattern compilation and matching (exact and parameterized).
@@ -145,13 +145,13 @@ impl RoutePattern {
 /// parameter segments (`:id`) use a single wildcard child.
 ///
 /// This replaces the previous O(n) linear scan over all routes.
-#[cfg(feature = "ordinary-http")]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 pub(crate) struct TrieRouter {
     /// Per-method trie roots: `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`.
     roots: std::collections::HashMap<&'static str, TrieNode>,
 }
 
-#[cfg(feature = "ordinary-http")]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 struct TrieNode {
     /// Static segment children: `"users"` → child node.
     static_children: std::collections::HashMap<String, TrieNode>,
@@ -162,7 +162,7 @@ struct TrieNode {
     route: Option<usize>,
 }
 
-#[cfg(feature = "ordinary-http")]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 impl TrieNode {
     fn new() -> Self {
         Self {
@@ -173,7 +173,7 @@ impl TrieNode {
     }
 }
 
-#[cfg(feature = "ordinary-http")]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 struct ParamChild {
     /// The parameter name (e.g. `"id"`).
     name: &'static str,
@@ -181,7 +181,7 @@ struct ParamChild {
     node: TrieNode,
 }
 
-#[cfg(feature = "ordinary-http")]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 impl TrieRouter {
     /// Creates an empty trie router.
     pub fn new() -> Self {
@@ -331,7 +331,7 @@ pub fn header_name_to_field(header_name: &str) -> String {
 /// be converted to UTF-8 are silently omitted.
 #[cfg(feature = "ordinary-http")]
 pub fn req_headers_to_json(headers: &hyper::HeaderMap) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
+    let mut map = serde_json::Map::with_capacity(headers.len());
     for (name, value) in headers.iter() {
         let field_name = header_name_to_field(name.as_str());
         if let Ok(s) = value.to_str() {
@@ -378,6 +378,10 @@ pub fn fill_standard_header_defaults(
 /// handled correctly. Invalid UTF-8 bytes are replaced with the
 /// Unicode replacement character (U+FFFD).
 fn percent_decode(s: &str) -> String {
+    // Fast path: if no special characters, return the original string.
+    if !s.as_bytes().iter().any(|&b| b == b'%' || b == b'+') {
+        return s.to_string();
+    }
     let mut result = Vec::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -392,7 +396,6 @@ fn percent_decode(s: &str) -> String {
                 continue;
             }
         } else if bytes[i] == b'+' {
-            // `+` in query strings represents a space (application/x-www-form-urlencoded).
             result.push(b' ');
             i += 1;
             continue;

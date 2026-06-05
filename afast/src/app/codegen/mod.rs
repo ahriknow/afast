@@ -1,6 +1,14 @@
-// Client code generation for TypeScript, JavaScript, Kotlin, Rust, API docs, and the
-// on-demand /code endpoint. Each module is gated by a Cargo feature so unused
-// generators are not compiled.
+//! Client code generation for TypeScript, JavaScript, Kotlin, Rust, API docs,
+//! and the on-demand `/code` endpoint.
+//!
+//! Each submodule is gated by a Cargo feature so unused generators are not
+//! compiled:
+//! - `ts` → [`ts`] — TypeScript
+//! - `js` → [`js`] — JavaScript
+//! - `kt` → [`kt`] — Kotlin
+//! - `rs` → [`rs`] — Rust
+//! - `doc` → [`doc`] — Interactive API documentation HTML
+//! - `code` → [`code`] — On-demand `/code/{service}/{lang}` HTTP endpoint
 
 pub(crate) mod buf;
 #[cfg(feature = "code")]
