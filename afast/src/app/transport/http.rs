@@ -1043,7 +1043,7 @@ async fn handle_ordinary_ws_upgrade(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
-    handler_name: &str,
+    handler_name: &'static str,
     service_name: &str,
     route_path: &str,
     query_string: &str,
@@ -1082,15 +1082,11 @@ async fn handle_ordinary_ws_upgrade(
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let query_owned = query_string.to_string();
-    // Leak to get &'static str for RequestContext (handler names are compile-time constants).
-    #[cfg(feature = "hook")]
-    let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
-    let handler_name_owned = handler_name.to_string();
 
     // Hook: before_request
     #[cfg(feature = "hook")]
     let hook_ctx = crate::hook::RequestContext {
-        handler_name: handler_name_static,
+        handler_name,
         handler_desc: "",
         transport: "ws",
         handler_id: 0,
@@ -1146,7 +1142,7 @@ async fn handle_ordinary_ws_upgrade(
                 #[cfg(feature = "hook")]
                 let mut _conn_guards: Vec<Box<dyn crate::hook::ConnectionGuard>> = {
                     let ctx = crate::hook::RequestContext {
-                        handler_name: handler_name_static,
+                        handler_name,
                         handler_desc: "",
                         transport: "ws",
                         handler_id: 0,
@@ -1239,7 +1235,7 @@ async fn handle_ordinary_ws_upgrade(
                 #[cfg(feature = "hook")]
                 {
                     let ctx = crate::hook::RequestContext {
-                        handler_name: handler_name_static,
+                        handler_name,
                         handler_desc: "",
                         transport: "ws",
                         handler_id: 0,
@@ -1260,7 +1256,7 @@ async fn handle_ordinary_ws_upgrade(
                 }
 
                 if let Err(e) = handler_result {
-                    eprintln!("afast: ws handler '{}' error: {}", handler_name_owned, e);
+                    eprintln!("afast: ws handler '{}' error: {}", handler_name, e);
                 }
 
                 // Clean up forwarding tasks.
@@ -1271,7 +1267,7 @@ async fn handle_ordinary_ws_upgrade(
                 #[cfg(feature = "hook")]
                 {
                     let ctx = crate::hook::RequestContext {
-                        handler_name: handler_name_static,
+                        handler_name,
                         handler_desc: "",
                         transport: "ws",
                         handler_id: 0,
@@ -1283,10 +1279,7 @@ async fn handle_ordinary_ws_upgrade(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "afast: ws upgrade error for '{}': {}",
-                    handler_name_owned, e
-                );
+                eprintln!("afast: ws upgrade error for '{}': {}", handler_name, e);
             }
         }
     });
@@ -1308,7 +1301,7 @@ async fn handle_ordinary_ws_upgrade(
 async fn handle_sse(
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
-    handler_name: &str,
+    handler_name: &'static str,
     service_name: &str,
     route_path: &str,
     query_string: String,
@@ -1320,15 +1313,11 @@ async fn handle_sse(
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);
     let sender = crate::app::ordinary_sse::SseSender::new(tx);
     let state = shared.state.clone();
-    // Leak to get &'static str for RequestContext (handler names are compile-time constants).
-    #[cfg(feature = "hook")]
-    let handler_name_static: &'static str = Box::leak(handler_name.to_string().into_boxed_str());
-    let handler_name_owned = handler_name.to_string();
 
     // Hook: before_request
     #[cfg(feature = "hook")]
     let hook_ctx = crate::hook::RequestContext {
-        handler_name: handler_name_static,
+        handler_name,
         handler_desc: "",
         transport: "sse",
         handler_id: 0,
@@ -1358,7 +1347,7 @@ async fn handle_sse(
             .await;
 
         if let Err(e) = handler_result {
-            eprintln!("afast: sse handler '{}' error: {}", handler_name_owned, e);
+            eprintln!("afast: sse handler '{}' error: {}", handler_name, e);
         }
         // sender (tx) is dropped here → rx stream will end
     });

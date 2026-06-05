@@ -21,6 +21,7 @@
 //! ```
 
 use crate::error::Error;
+use std::fmt::Write;
 
 // ─── SseEvent ─────────────────────────────────────────────────────
 
@@ -33,11 +34,11 @@ use crate::error::Error;
 /// - `retry:` — reconnection time in ms (optional)
 pub struct SseEvent {
     /// The event type name (maps to `event:` field).
-    pub event: Option<&'static str>,
+    pub event: Option<String>,
     /// The event payload (maps to `data:` field).
     pub data: String,
     /// The event ID (maps to `id:` field).
-    pub id: Option<&'static str>,
+    pub id: Option<String>,
     /// Reconnection time in milliseconds (maps to `retry:` field).
     pub retry: Option<u64>,
 }
@@ -53,19 +54,27 @@ impl SseEvent {
     /// \n
     /// ```
     pub fn to_wire(&self) -> String {
-        let mut out = String::new();
-        if let Some(event) = self.event {
-            out.push_str(&format!("event: {}\n", event));
+        let mut out = String::with_capacity(128);
+        if let Some(ref event) = self.event {
+            out.push_str("event: ");
+            out.push_str(event);
+            out.push('\n');
         }
-        if let Some(id) = self.id {
-            out.push_str(&format!("id: {}\n", id));
+        if let Some(ref id) = self.id {
+            out.push_str("id: ");
+            out.push_str(id);
+            out.push('\n');
         }
         if let Some(retry) = self.retry {
-            out.push_str(&format!("retry: {}\n", retry));
+            out.push_str("retry: ");
+            write!(out, "{}", retry).unwrap();
+            out.push('\n');
         }
         // Multi-line data: split by newlines, each line gets a `data:` prefix.
         for line in self.data.split('\n') {
-            out.push_str(&format!("data: {}\n", line));
+            out.push_str("data: ");
+            out.push_str(line);
+            out.push('\n');
         }
         out.push('\n');
         out
@@ -78,6 +87,7 @@ impl SseEvent {
 ///
 /// Obtained as a handler parameter in `#[sse]` handlers. The sender
 /// writes formatted SSE text frames into the HTTP response body stream.
+#[derive(Clone)]
 pub struct SseSender {
     tx: tokio::sync::mpsc::Sender<String>,
 }
@@ -115,7 +125,7 @@ impl SseSender {
         let payload =
             serde_json::to_string(data).unwrap_or_else(|_| "<unserializable>".to_string());
         let wire = SseEvent {
-            event: Some(leak_str(event)),
+            event: Some(event.to_string()),
             data: payload,
             id: None,
             retry: None,
@@ -138,11 +148,6 @@ impl SseSender {
     pub async fn close(&self) {
         let _ = self.tx.send(String::new()).await;
     }
-}
-
-/// Leaks a string into `'static` lifetime for use in `SseEvent` fields.
-fn leak_str(s: &str) -> &'static str {
-    Box::leak(s.to_string().into_boxed_str())
 }
 
 // ─── SseHandlerInvoker trait ─────────────────────────────────────
