@@ -319,6 +319,9 @@ pub struct AFast {
     /// Applies to HTTP, WebSocket, and TCP servers.
     /// Excess connections wait on a semaphore until a slot opens.
     max_connections: usize,
+    /// HTTP connection timeout in seconds (default 30).
+    /// Connections that exceed this duration are silently closed.
+    request_timeout_secs: u64,
 }
 
 impl AFast {
@@ -358,6 +361,7 @@ impl AFast {
             hooks: Vec::new(),
             body_size_limit: 10 * 1024 * 1024, // 10 MB
             max_connections: 10_000,
+            request_timeout_secs: 30,
         }
     }
 
@@ -400,6 +404,18 @@ impl AFast {
     /// Defaults to 10 000.
     pub fn max_connections(mut self, max: usize) -> Self {
         self.max_connections = max;
+        self
+    }
+
+    /// Sets the HTTP connection timeout in seconds.
+    ///
+    /// Connections that exceed this duration are silently closed by the
+    /// server. This prevents slowloris-style attacks and frees resources
+    /// held by idle connections.
+    ///
+    /// Defaults to 30 seconds. Set to `0` to disable the timeout.
+    pub fn request_timeout(mut self, secs: u64) -> Self {
+        self.request_timeout_secs = secs;
         self
     }
 
@@ -1011,6 +1027,7 @@ impl AFast {
                                 handler_names: hn,
                                 body_size_limit: self.body_size_limit,
                                 max_connections: self.max_connections,
+                                request_timeout_secs: self.request_timeout_secs,
                             },
                             shutdown_rx,
                         )
@@ -1081,6 +1098,7 @@ impl AFast {
                                 handler_names: hn,
                                 body_size_limit: self.body_size_limit,
                                 max_connections: self.max_connections,
+                                request_timeout_secs: self.request_timeout_secs,
                             },
                             shutdown_rx,
                         )

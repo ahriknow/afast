@@ -85,6 +85,8 @@ pub struct HttpConfig {
     pub body_size_limit: usize,
     /// Maximum concurrent connections.
     pub max_connections: usize,
+    /// HTTP connection timeout in seconds.
+    pub request_timeout_secs: u64,
 }
 
 /// Starts the HTTP server and blocks until a shutdown signal is received.
@@ -205,6 +207,7 @@ pub async fn serve(
 
     // Semaphore to limit concurrent connections.
     let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_connections));
+    let request_timeout = config.request_timeout_secs;
 
     loop {
         tokio::select! {
@@ -216,6 +219,7 @@ pub async fn serve(
                         let tls = tls_acceptor.clone();
                         let permit = conn_semaphore.clone().acquire_owned().await
                             .expect("semaphore closed");
+                        let timeout = request_timeout;
                         tokio::spawn(async move {
                             let _permit = permit; // hold until connection ends
                             // Extract client IP from the TCP peer address.
@@ -233,7 +237,7 @@ pub async fn serve(
                                                 .map(|a| a.ip().to_string())
                                                 .unwrap_or(peer_ip);
                                             let io = hyper_util::rt::TokioIo::new(tls_stream);
-                                            serve_connection(io, shared, client_ip).await;
+                                            serve_connection(io, shared, client_ip, timeout).await;
                                         }
                                         Err(e) => {
                                             eprintln!("afast: tls handshake error: {}", e);
@@ -242,13 +246,13 @@ pub async fn serve(
                                 }
                                 None => {
                                     let io = hyper_util::rt::TokioIo::new(stream);
-                                    serve_connection(io, shared, peer_ip).await;
+                                    serve_connection(io, shared, peer_ip, timeout).await;
                                 }
                             };
                             #[cfg(not(feature = "tls"))]
                             {
                                 let io = hyper_util::rt::TokioIo::new(stream);
-                                serve_connection(io, shared, peer_ip).await;
+                                serve_connection(io, shared, peer_ip, timeout).await;
                             }
                         });
                     }
@@ -269,6 +273,7 @@ async fn serve_connection<S>(
     io: hyper_util::rt::TokioIo<S>,
     shared: Arc<SharedState>,
     client_ip: String,
+    request_timeout_secs: u64,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -277,14 +282,22 @@ async fn serve_connection<S>(
         let client_ip = client_ip.clone();
         async move { handle_request(req, &shared, &client_ip).await }
     });
-    if let Err(e) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-        .serve_connection_with_upgrades(io, service)
+    let timeout_fut = async {
+        auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(io, service)
+            .await
+    };
+    if request_timeout_secs > 0 {
+        if let Err(_elapsed) = tokio::time::timeout(
+            std::time::Duration::from_secs(request_timeout_secs),
+            timeout_fut,
+        )
         .await
-    {
-        let msg = e.to_string();
-        if !msg.contains("incomplete message") {
-            eprintln!("afast: http connection error: {}", e);
+        {
+            // Connection timed out — silently drop it.
         }
+    } else {
+        let _ = timeout_fut.await;
     }
 }
 
@@ -400,13 +413,14 @@ async fn handle_request(
                         }
                     }
                     if let Err(e) = limiter.check(handler_name, &mut ctx).await {
+                        let retry = limiter.retry_after_secs(handler_name);
                         let status = StatusCode::TOO_MANY_REQUESTS;
                         let body =
                             format!("{{\"code\":{},\"message\":\"{}\"}}", e.code(), e.message());
                         return Ok(Response::builder()
                             .status(status)
                             .header("content-type", "application/json; charset=utf-8")
-                            .header("retry-after", "60")
+                            .header("retry-after", retry.to_string())
                             .body(Full::new(Bytes::from(body)).boxed())
                             .expect("valid response builder"));
                     }
@@ -533,6 +547,7 @@ async fn handle_request(
                             }
                         }
                         if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
+                            let retry = limiter.retry_after_secs(compiled.handler_name);
                             let status = StatusCode::TOO_MANY_REQUESTS;
                             let body = format!(
                                 "{{\"code\":{},\"message\":\"{}\"}}",
@@ -542,7 +557,7 @@ async fn handle_request(
                             return Ok(Response::builder()
                                 .status(status)
                                 .header("content-type", "application/json; charset=utf-8")
-                                .header("retry-after", "60")
+                                .header("retry-after", retry.to_string())
                                 .body(Full::new(Bytes::from(body)).boxed())
                                 .expect("valid response builder"));
                         }
@@ -1363,7 +1378,7 @@ async fn handle_sse(
     let sender = crate::app::ordinary_sse::SseSender::new(tx);
     let state = shared.state.clone();
 
-    // Hook: before_request
+    // Hook: on_connect (SSE is a long-lived connection)
     #[cfg(feature = "hook")]
     let hook_ctx = crate::hook::RequestContext {
         handler_name,
@@ -1373,16 +1388,17 @@ async fn handle_sse(
         state: state.clone(),
     };
     #[cfg(feature = "hook")]
+    let named_hooks_for_sse = shared.named_hooks.clone();
+    #[cfg(feature = "hook")]
     let hook_key = format!("{}:{}", service_name, route_path);
     #[cfg(feature = "hook")]
-    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
-        shared
-            .named_hooks
+    let mut _conn_guards: Vec<Box<dyn crate::hook::ConnectionGuard>> = {
+        named_hooks_for_sse
             .get(&hook_key)
             .map(|hooks| {
                 hooks
                     .iter()
-                    .filter_map(|h| h.before_request(&hook_ctx))
+                    .filter_map(|h| h.on_connect(&hook_ctx))
                     .collect()
             })
             .unwrap_or_default()
@@ -1390,22 +1406,38 @@ async fn handle_sse(
 
     // Spawn the handler — it pushes events into `tx` via the SseSender.
     // When `tx` is dropped (handler returns), the `rx` stream ends.
+    let state_for_spawn = state.clone();
     tokio::spawn(async move {
         let handler_result = invoker
-            .call_sse(&query_string, &path_params, headers_json, sender, state)
+            .call_sse(
+                &query_string,
+                &path_params,
+                headers_json,
+                sender,
+                state_for_spawn,
+            )
             .await;
 
         if let Err(e) = handler_result {
             eprintln!("afast: sse handler '{}' error: {}", handler_name, e);
         }
+
+        // Hook: on_disconnect (SSE is a long-lived connection)
+        #[cfg(feature = "hook")]
+        {
+            let ctx = crate::hook::RequestContext {
+                handler_name,
+                handler_desc: "",
+                transport: "sse",
+                handler_id: 0,
+                state,
+            };
+            for g in &mut _conn_guards {
+                g.on_disconnect(&ctx);
+            }
+        }
         // sender (tx) is dropped here → rx stream will end
     });
-
-    // Hook: on_response (HTTP 200 is being sent with streaming body)
-    #[cfg(feature = "hook")]
-    for g in &mut _guards {
-        g.on_response(&hook_ctx, &[]);
-    }
 
     // Build a streaming body from the receiver channel
     let stream = futures_util::stream::unfold(rx, |mut rx| async {

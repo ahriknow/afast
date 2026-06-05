@@ -486,6 +486,24 @@ impl RateLimiter {
         self.name_to_policy.get(handler_name).map(|s| s.as_str())
     }
 
+    /// Returns the `window_secs` for the policy that applies to
+    /// `handler_name`, used to compute the `Retry-After` header.
+    /// Returns `60` as a safe default when no policy is found.
+    #[allow(dead_code)]
+    pub(crate) fn retry_after_secs(&self, handler_name: &str) -> u64 {
+        let policy_id = match self.name_to_policy.get(handler_name) {
+            Some(id) => id.as_str(),
+            None => match self.default_policy.as_deref() {
+                Some(dp) => dp,
+                None => return 60,
+            },
+        };
+        self.policies
+            .get(policy_id)
+            .map(|p| p.window_secs)
+            .unwrap_or(60)
+    }
+
     /// Checks whether a request is allowed under the rate-limit policy
     /// associated with the given handler name.
     ///
