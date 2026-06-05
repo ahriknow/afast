@@ -942,7 +942,10 @@ fn build_call_invoker_impl(
                 #offset_init
                 #( #sync_extractions )*
                 Box::pin(async move {
-                    let result = #fn_name( #( #call_args ),* ).await?;
+                    let result = match #fn_name( #( #call_args ),* ).await {
+                        Ok(v) => v,
+                        Err(e) => return Err(afast::AFastError::into_error(e)),
+                    };
                     Ok(afast::marker::serialize(&result, &__marker))
                 })
             }

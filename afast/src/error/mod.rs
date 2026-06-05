@@ -167,6 +167,83 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+// ─── AFastError trait ──────────────────────────────────────────
+
+/// Trait for types that can be returned as handler errors.
+///
+/// Implement this trait on your custom error types to return them
+/// directly from handler functions. The framework will call `code()`
+/// and `message()` to serialize the error for the client.
+///
+/// [`Error`] implements this trait, so it continues to work as before.
+///
+/// # Example
+///
+/// ```ignore
+/// use afast::AFastError;
+///
+/// enum MyError {
+///     NotFound(String),
+///     Forbidden,
+/// }
+///
+/// impl AFastError for MyError {
+///     fn code(&self) -> i64 {
+///         match self {
+///             MyError::NotFound(_) => 404,
+///             MyError::Forbidden => 403,
+///         }
+///     }
+///     fn message(&self) -> &str {
+///         match self {
+///             MyError::NotFound(name) => name,  // requires lifetime workaround
+///             MyError::Forbidden => "forbidden",
+///         }
+///     }
+/// }
+///
+/// #[handler(desc("get user"))]
+/// async fn get_user(id: Data<Id>) -> afast::Result<User> {
+///     find_user(id).ok_or(MyError::NotFound("user".into()))
+/// }
+/// ```
+pub trait AFastError: Send + Sync + 'static {
+    /// Returns the numeric error code sent to the client.
+    fn code(&self) -> i64;
+
+    /// Returns the human-readable error message sent to the client.
+    fn message(&self) -> String;
+
+    /// Converts this error into an [`Error`].
+    ///
+    /// The default implementation creates an `Error::Custom` with the
+    /// trait's `code()` and `message()`. Override for more specific
+    /// error variants.
+    fn into_error(self) -> Error
+    where
+        Self: Sized,
+    {
+        Error::Custom {
+            code: self.code(),
+            message: self.message(),
+        }
+    }
+}
+
+impl AFastError for Error {
+    fn code(&self) -> i64 {
+        Error::code(self)
+    }
+
+    fn message(&self) -> String {
+        Error::message(self).to_string()
+    }
+
+    fn into_error(self) -> Error {
+        self
+    }
+}
+
 impl From<afastdata::Error> for Error {
     fn from(e: afastdata::Error) -> Self {
         match e.kind() {

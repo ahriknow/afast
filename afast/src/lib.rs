@@ -72,6 +72,7 @@ pub mod rate_limit;
 pub mod service;
 pub mod state;
 
+pub use error::AFastError;
 pub use error::Error;
 #[cfg(feature = "ordinary-http")]
 pub use handler::OrdinaryHandlerInvoker;
@@ -619,6 +620,11 @@ macro_rules! service {
 }
 
 /// A `Result` type alias using [`Error`] as the error type.
+///
+/// Handler functions should return `afast::Result<T>`. Any type that
+/// implements [`AFastError`] can be returned — the framework will
+/// convert it to [`Error`] automatically via
+/// [`AFastError::into_error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub mod app;
