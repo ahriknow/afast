@@ -3,7 +3,7 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 use syn::{Expr, ExprLit};
-use syn::{FnArg, ItemFn, Lit, LitInt, LitStr, Meta, Pat, Type};
+use syn::{FnArg, ItemFn, Lit, LitBool, LitInt, LitStr, Meta, Pat, Type};
 
 /// Describes a single handler parameter discovered during signature analysis.
 struct ParamInfo {
@@ -43,7 +43,7 @@ pub fn expand(
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, cache_seconds, rate_limit_policy) =
+    let (desc, api_name, cache_seconds, rate_limit_policy, extra_attrs) =
         parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, method)?;
 
@@ -270,6 +270,7 @@ pub fn expand(
         param_meta_entries: &param_meta_entries,
         cache_seconds,
         rate_limit_policy: &rate_limit_policy,
+        extra_attrs: &extra_attrs,
     });
 
     let invoker_ident = syn::Ident::new(&format!("__Invoker_{}", fn_name_str), Span::call_site());
@@ -376,16 +377,32 @@ pub fn expand(
 ///
 /// Returns `(description, api_name, cache_seconds)`. `cache_seconds` defaults
 /// to 0 (no caching) when the attribute is not provided.
+/// Value of a custom attribute collected from handler macros.
+#[derive(Clone)]
+enum MacroAttrValue {
+    Str(String),
+    Int(i64),
+    Bool(bool),
+}
+
+/// A custom attribute collected from handler macros.
+#[derive(Clone)]
+struct MacroAttr {
+    key: String,
+    value: MacroAttrValue,
+}
+
 fn parse_handler_attrs_from_tokens(
     attr_tokens: &TokenStream,
-) -> syn::Result<(String, String, u64, String)> {
+) -> syn::Result<(String, String, u64, String, Vec<MacroAttr>)> {
     let mut desc = String::new();
     let mut api_name = String::new();
     let mut cache_seconds: u64 = 0;
     let mut rate_limit_policy = String::new();
+    let mut extras: Vec<MacroAttr> = Vec::new();
 
     if attr_tokens.is_empty() {
-        return Ok((desc, api_name, cache_seconds, rate_limit_policy));
+        return Ok((desc, api_name, cache_seconds, rate_limit_policy, extras));
     }
 
     let parser = |input: syn::parse::ParseStream| -> syn::Result<Vec<Meta>> {
@@ -429,6 +446,11 @@ fn parse_handler_attrs_from_tokens(
                     }) = nv.value
                 {
                     rate_limit_policy = s.value();
+                } else {
+                    // Collect extra attribute
+                    let key = nv.path.segments.last().unwrap().ident.to_string();
+                    let value = expr_to_attr_value(&nv.value);
+                    extras.push(MacroAttr { key, value });
                 }
             }
             Meta::List(list) => {
@@ -444,13 +466,47 @@ fn parse_handler_attrs_from_tokens(
                 } else if list.path.is_ident("rate_limit") {
                     let lit: LitStr = list.parse_args()?;
                     rate_limit_policy = lit.value();
+                } else {
+                    // Collect extra attribute with value
+                    let key = list.path.segments.last().unwrap().ident.to_string();
+                    let value = if let Ok(lit) = list.parse_args::<LitStr>() {
+                        MacroAttrValue::Str(lit.value())
+                    } else if let Ok(lit) = list.parse_args::<LitInt>() {
+                        MacroAttrValue::Int(lit.base10_parse()?)
+                    } else if let Ok(lit) = list.parse_args::<LitBool>() {
+                        MacroAttrValue::Bool(lit.value)
+                    } else {
+                        MacroAttrValue::Bool(true)
+                    };
+                    extras.push(MacroAttr { key, value });
                 }
             }
-            _ => {}
+            Meta::Path(path) => {
+                // Bare identifier → Bool(true)
+                let key = path.segments.last().unwrap().ident.to_string();
+                extras.push(MacroAttr {
+                    key,
+                    value: MacroAttrValue::Bool(true),
+                });
+            }
         }
     }
 
-    Ok((desc, api_name, cache_seconds, rate_limit_policy))
+    Ok((desc, api_name, cache_seconds, rate_limit_policy, extras))
+}
+
+/// Converts an expression from a NameValue attribute to a MacroAttrValue.
+fn expr_to_attr_value(expr: &Expr) -> MacroAttrValue {
+    if let Expr::Lit(ExprLit { lit, .. }) = expr {
+        match lit {
+            Lit::Str(s) => MacroAttrValue::Str(s.value()),
+            Lit::Int(n) => MacroAttrValue::Int(n.base10_parse().unwrap_or(0)),
+            Lit::Bool(b) => MacroAttrValue::Bool(b.value),
+            _ => MacroAttrValue::Str(quote!(#lit).to_string()),
+        }
+    } else {
+        MacroAttrValue::Str(quote!(#expr).to_string())
+    }
 }
 
 /// Analyzes each parameter in the handler's function signature and classifies
@@ -790,6 +846,7 @@ struct HandlerMetaParams<'a> {
     param_meta_entries: &'a [TokenStream],
     cache_seconds: u64,
     rate_limit_policy: &'a str,
+    extra_attrs: &'a [MacroAttr],
 }
 
 fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
@@ -808,6 +865,22 @@ fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
     let param_meta_entries = p.param_meta_entries;
     let cache_seconds = p.cache_seconds;
     let rate_limit_policy = p.rate_limit_policy;
+
+    // Generate attrs field entries for meta-attrs feature
+    let attrs_entries: Vec<TokenStream> = p
+        .extra_attrs
+        .iter()
+        .map(|a| {
+            let key = &a.key;
+            let value = match &a.value {
+                MacroAttrValue::Str(s) => quote! { afast::handler::AttrValue::Str(#s) },
+                MacroAttrValue::Int(n) => quote! { afast::handler::AttrValue::Int(#n) },
+                MacroAttrValue::Bool(b) => quote! { afast::handler::AttrValue::Bool(#b) },
+            };
+            quote! { afast::handler::Attr { key: #key, value: #value } }
+        })
+        .collect();
+
     quote! {
         pub const #meta_ident: afast::HandlerMeta = afast::HandlerMeta {
             name: #fn_name_str,
@@ -822,6 +895,7 @@ fn build_handler_meta(p: &HandlerMetaParams<'_>) -> TokenStream {
             path: "",
             cache_seconds: #cache_seconds,
             rate_limit_policy: #rate_limit_policy,
+            attrs: &[#( #attrs_entries ),*],
         };
     }
 }
@@ -1406,7 +1480,7 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, _cache_seconds, _rate_limit_policy) =
+    let (desc, api_name, _cache_seconds, _rate_limit_policy, _extra_attrs) =
         parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, Some("WS"))?;
 
@@ -1475,6 +1549,7 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
             path: "",
             cache_seconds: 0,
             rate_limit_policy: "",
+            attrs: &[],
         };
 
         #ws_invoker_impl
@@ -1672,7 +1747,7 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, _cache_seconds, _rate_limit_policy) =
+    let (desc, api_name, _cache_seconds, _rate_limit_policy, _extra_attrs) =
         parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, Some("SSE"))?;
 
@@ -1742,6 +1817,7 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
             path: "",
             cache_seconds: 0,
             rate_limit_policy: "",
+            attrs: &[],
         };
 
         #sse_invoker_impl

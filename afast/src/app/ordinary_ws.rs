@@ -197,4 +197,6 @@ pub struct WsRouteInfo {
     pub invoker: &'static dyn WsHandlerInvoker,
     /// The service this route belongs to.
     pub service_name: String,
+    /// Custom attributes from handler macros.
+    pub attrs: &'static [crate::handler::Attr],
 }

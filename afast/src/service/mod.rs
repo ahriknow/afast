@@ -135,6 +135,7 @@ impl Service {
             pattern: crate::app::ordinary::RoutePattern::parse(path),
             invoker,
             service_name: self.name.clone(),
+            attrs: &[],
         });
         self
     }
@@ -155,6 +156,7 @@ impl Service {
                 pattern: crate::app::ordinary::RoutePattern::parse(path),
                 invoker,
                 service_name: self.name.clone(),
+                attrs: &[],
             });
         self
     }

@@ -180,6 +180,8 @@ pub use error::AFastError;
 pub use error::Error;
 #[cfg(feature = "ordinary-http")]
 pub use handler::OrdinaryHandlerInvoker;
+#[cfg(feature = "meta-attrs")]
+pub use handler::{Attr, AttrValue};
 pub use handler::{DummyInvoker, Handler};
 pub use handler::{
     EnumVariantMeta, FieldMeta, Structure, TagKind, TagMeta, ValidateRule, no_structure,

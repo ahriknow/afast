@@ -135,6 +135,7 @@ pub async fn serve(
             handler_name: r.handler_entry.name,
             path: Box::leak(r.path.clone().into_boxed_str()),
             service_name: r.service_name.clone(),
+            attrs: r.handler_entry.meta.attrs,
         })
         .collect();
 
@@ -149,6 +150,7 @@ pub async fn serve(
             handler_name: r.handler_name,
             path: r.path,
             service_name: r.service_name.clone(),
+            attrs: r.attrs,
         })
         .collect();
 
@@ -163,6 +165,7 @@ pub async fn serve(
             handler_name: r.handler_name,
             path: r.path,
             service_name: r.service_name.clone(),
+            attrs: r.attrs,
         })
         .collect();
 
@@ -379,6 +382,14 @@ struct SharedState {
     hooks: Arc<std::collections::HashMap<u32, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Name-based hook lookup for ordinary routes.
     #[cfg(feature = "hook")]
+    #[cfg_attr(
+        not(any(
+            feature = "ordinary-http",
+            feature = "ordinary-ws",
+            feature = "ordinary-sse"
+        )),
+        allow(dead_code)
+    )]
     named_hooks: Arc<std::collections::HashMap<String, Vec<std::sync::Arc<dyn crate::hook::Hook>>>>,
     /// Maximum request/message body size in bytes.
     body_size_limit: usize,
@@ -388,6 +399,7 @@ struct SharedState {
     security_headers: Vec<(&'static str, &'static str)>,
     /// Rate-limit policy name for /code and /doc endpoints.
     #[cfg(feature = "rate-limit")]
+    #[allow(dead_code)]
     doc_code_rate_limit_policy: Option<String>,
 }
 
@@ -403,6 +415,8 @@ struct CompiledOrdinaryRoute {
     path: &'static str,
     #[cfg_attr(not(feature = "hook"), allow(dead_code))]
     service_name: String,
+    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
+    attrs: &'static [crate::handler::Attr],
 }
 
 /// A pre-compiled ordinary-ws route ready for WebSocket upgrade matching.
@@ -413,6 +427,7 @@ struct CompiledWsRoute {
     handler_name: &'static str,
     path: &'static str,
     service_name: String,
+    attrs: &'static [crate::handler::Attr],
 }
 
 /// A pre-compiled ordinary-sse route ready for SSE stream matching.
@@ -423,6 +438,7 @@ struct CompiledSseRoute {
     handler_name: &'static str,
     path: &'static str,
     service_name: String,
+    attrs: &'static [crate::handler::Attr],
 }
 
 /// Dispatches an incoming HTTP request to the correct handler.
@@ -494,6 +510,7 @@ async fn handle_request(
                 handler_id: 0,
                 state: state.clone(),
                 ctx: req_ctx.clone(),
+                attrs: compiled.attrs,
             };
             #[cfg(feature = "hook")]
             let hook_key = format!("{}:{}", compiled.service_name, compiled.path);
@@ -573,6 +590,7 @@ async fn handle_request(
                     query_string.to_string(),
                     path_params,
                     headers_json,
+                    compiled.attrs,
                     client_ip,
                 )
                 .await;
@@ -627,6 +645,7 @@ async fn handle_request(
                         compiled.path,
                         query_string,
                         path_params,
+                        compiled.attrs,
                         client_ip,
                     )
                     .await;
@@ -826,6 +845,7 @@ async fn handle_api(
             handler_id,
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
+            attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
         };
         shared
             .hooks
@@ -849,6 +869,7 @@ async fn handle_api(
             handler_id,
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
+            attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
         };
         match &result {
             Ok(bytes) => {
@@ -1238,6 +1259,7 @@ async fn handle_ordinary_ws_upgrade(
     route_path: &str,
     query_string: &str,
     path_params: std::collections::HashMap<String, String>,
+    attrs: &'static [crate::handler::Attr],
     _client_ip: &str,
 ) -> Result<Response<BoxBody>, hyper::Error> {
     use tokio_tungstenite::WebSocketStream;
@@ -1304,6 +1326,7 @@ async fn handle_ordinary_ws_upgrade(
         handler_id: 0,
         state: state.clone(),
         ctx: req_ctx.clone(),
+        attrs,
     };
     #[cfg(feature = "hook")]
     let hook_key = format!("{}:{}", service_name, route_path);
@@ -1366,6 +1389,7 @@ async fn handle_ordinary_ws_upgrade(
                         handler_id: 0,
                         state: state.clone(),
                         ctx: req_ctx.clone(),
+                        attrs,
                     };
                     _hooks_for_spawn
                         .iter()
@@ -1461,6 +1485,7 @@ async fn handle_ordinary_ws_upgrade(
                         handler_id: 0,
                         state: state.clone(),
                         ctx: req_ctx.clone(),
+                        attrs,
                     };
                     match &handler_result {
                         Ok(_) => {
@@ -1494,6 +1519,7 @@ async fn handle_ordinary_ws_upgrade(
                         handler_id: 0,
                         state: state.clone(),
                         ctx: req_ctx.clone(),
+                        attrs,
                     };
                     for g in &mut _conn_guards {
                         g.on_disconnect(&ctx);
@@ -1529,6 +1555,7 @@ async fn handle_sse(
     query_string: String,
     path_params: std::collections::HashMap<String, String>,
     headers_json: serde_json::Value,
+    attrs: &'static [crate::handler::Attr],
     _client_ip: &str,
 ) -> Result<Response<BoxBody>, hyper::Error> {
     // Create channel for SSE events
@@ -1546,6 +1573,7 @@ async fn handle_sse(
         handler_id: 0,
         state: state.clone(),
         ctx: req_ctx.clone(),
+        attrs,
     };
     #[cfg(feature = "hook")]
     let named_hooks_for_sse = shared.named_hooks.clone();
@@ -1593,6 +1621,7 @@ async fn handle_sse(
                 handler_id: 0,
                 state,
                 ctx: req_ctx.clone(),
+                attrs,
             };
             for g in &mut _conn_guards {
                 g.on_disconnect(&ctx);

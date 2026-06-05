@@ -353,6 +353,7 @@ pub async fn handle_connection(
                                 handler_id,
                                 state: state.clone(),
                                 ctx: req_ctx.clone(),
+                                attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                             };
                             hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.on_connect(&ctx)).collect()
                         };
@@ -368,6 +369,7 @@ pub async fn handle_connection(
                                     handler_id,
                                     state: state.clone(),
                                     ctx: req_ctx.clone(),
+                                    attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                                 };
                                 hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                             };
@@ -384,6 +386,7 @@ pub async fn handle_connection(
                                     handler_id,
                                     state: state.clone(),
                                     ctx: req_ctx.clone(),
+                                    attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                                 };
                                 match &result {
                                     Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },
@@ -413,6 +416,7 @@ pub async fn handle_connection(
                                     handler_id,
                                     state: state.clone(),
                                     ctx: req_ctx.clone(),
+                                    attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                                 };
                                 for g in &mut _conn_guards { g.on_disconnect(&ctx); }
                             }
@@ -438,6 +442,7 @@ pub async fn handle_connection(
                                 handler_id,
                                 state: state.clone(),
                                 ctx: req_ctx.clone(),
+                                attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                             };
                             hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
                         };
@@ -454,6 +459,7 @@ pub async fn handle_connection(
                                 handler_id,
                                 state: state.clone(),
                                 ctx: req_ctx.clone(),
+                                attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
                             };
                             match &result {
                                 Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },

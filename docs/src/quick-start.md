@@ -4,7 +4,7 @@
 
 ```toml
 [dependencies]
-afast = { version = "0.1.12", features = ["http", "ws", "ts"] }
+afast = { version = "0.1.13", features = ["http", "ws", "ts"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

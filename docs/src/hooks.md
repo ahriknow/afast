@@ -166,6 +166,29 @@ The same context is shared across all hooks and the handler for a single request
 
 See [Request Context (`Ctx`)](./context.md) for full documentation.
 
+## Accessing Custom Attributes
+
+`RequestContext` exposes the handler's custom attributes via `ctx.attrs`:
+
+```rust
+impl Hook for DeprecationHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        for attr in ctx.attrs {
+            match attr.key {
+                "deprecated" => eprintln!("WARNING: {} is deprecated", ctx.handler_name),
+                "tag" => {
+                    if let AttrValue::Str(v) = attr.value {
+                        eprintln!("tag: {}", v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+```
+
 ## Hook Key — Route Matching
 
 Hooks are matched by **`"service_name:route_path"`**, not by handler function name. This avoids conflicts when the same function name appears in different groups within the same service:

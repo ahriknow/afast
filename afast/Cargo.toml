@@ -34,6 +34,7 @@ tag-u32 = ["afastdata/tag-u32"]
 marker = []
 hook = []
 rate-limit = []
+meta-attrs = []
 
 [dependencies]
 afast-macros.workspace = true

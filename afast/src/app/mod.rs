@@ -656,6 +656,7 @@ impl AFast {
                         pattern: route.pattern.clone(),
                         invoker: route.invoker,
                         service_name: route.service_name.clone(),
+                        attrs: route.attrs,
                     });
                 }
                 existing.ws_routes.append(&mut service.ws_routes);
@@ -671,6 +672,7 @@ impl AFast {
                             pattern: route.pattern.clone(),
                             invoker: route.invoker,
                             service_name: route.service_name.clone(),
+                            attrs: route.attrs,
                         });
                 }
                 existing.sse_routes.append(&mut service.sse_routes);
@@ -713,6 +715,7 @@ impl AFast {
                     pattern: route.pattern.clone(),
                     invoker: route.invoker,
                     service_name: route.service_name.clone(),
+                    attrs: route.attrs,
                 });
             }
         }
@@ -727,6 +730,7 @@ impl AFast {
                         pattern: route.pattern.clone(),
                         invoker: route.invoker,
                         service_name: route.service_name.clone(),
+                        attrs: route.attrs,
                     });
             }
         }

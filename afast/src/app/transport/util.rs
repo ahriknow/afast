@@ -91,7 +91,7 @@ pub(crate) fn make_error_raw(req_id: SeqId, code: i64, message: &str) -> Vec<u8>
 ///
 /// Handles `"`, `\`, and control characters (`\n`, `\r`, `\t`) that would
 /// otherwise produce invalid JSON when interpolated via `format!`.
-#[cfg(feature = "http")]
+#[cfg(any(feature = "ordinary-http", feature = "rate-limit"))]
 pub(crate) fn json_error_body(code: i64, message: &str) -> String {
     let mut escaped = String::with_capacity(message.len());
     for c in message.chars() {

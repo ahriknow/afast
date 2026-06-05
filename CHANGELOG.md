@@ -13,6 +13,15 @@
   - 无侵入性：不使用 `Ctx<T>` 的 handler 不受影响，`Ctx<T>` 不计入 binary/ordinary 互斥检查，可与任何提取器组合。
 - **WebSocket Origin 校验**: 新增 `AFast::ws_origins(vec!["https://example.com"])` 配置项，校验 WebSocket 升级请求的 `Origin` 头，防止 CSWSH 攻击。空列表（默认）表示允许所有来源。
 - **`RateLimitStore::decr` 原子操作**: `RateLimitStore` trait 新增 `decr` 方法，原子递减并返回新值，修复令牌桶算法的竞态条件。`InMemoryStore` 使用写锁内原子递减实现。外部存储后端应覆盖此方法以保证原子性。
+- **`HandlerMeta` 自定义属性**（`meta-attrs` feature）: `HandlerMeta` 新增 `attrs: &'static [Attr]` 字段，收集 handler 宏中除内置参数（`desc`/`name`/`cache`/`rate_limit`）以外的所有自定义属性。
+  - `Attr` 结构体：`key: &'static str` + `value: AttrValue`。
+  - `AttrValue` 枚举：`Str(&'static str)` / `Int(i64)` / `Bool(bool)`，自动推断值类型。
+  - 使用方式：`#[handler(desc("..."), tag("admin"), timeout(30), deprecated)]`，`tag`/`timeout`/`deprecated` 被收集到 `attrs`。
+  - 启用 `meta-attrs` feature 后可通过 `use afast::{Attr, AttrValue}` 导入类型。
+  - 运行时可通过 `invoker.meta().unwrap().attrs` 读取。
+  - `RequestContext` 新增 `attrs` 字段，hook 生命周期中可通过 `ctx.attrs` 访问自定义属性。
+  - 所有传输方式（HTTP/WS/TCP binary、HTTP/WS/SSE ordinary）均自动传递 attrs。
+  - 无自定义属性时为空 `&[]`，零开销。
 
 ### Fixed
 

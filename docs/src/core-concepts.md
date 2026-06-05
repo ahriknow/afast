@@ -23,6 +23,53 @@ async fn get_user_handler(
 - `desc("...")` — Sets description used in docs and JSDoc comments
 - `name("...")` — Overrides the client-side method name (defaults to the Rust function name)
 - `cache(seconds)` — Enables client-side caching
+- `rate_limit("policy")` — Binds the handler to a named rate-limit policy
+- Any other attribute — Collected as custom attributes in `HandlerMeta::attrs`
+
+### Custom Attributes
+
+You can add arbitrary attributes to handler macros. They are collected into `HandlerMeta::attrs` as `Attr` key-value pairs:
+
+```rust
+#[handler(desc("Create user"), tag("admin"), timeout(30), deprecated)]
+async fn create_user(...) -> ... { ... }
+```
+
+At runtime, read them via `invoker.meta().unwrap().attrs`:
+
+```rust
+if let Some(meta) = invoker.meta() {
+    for attr in meta.attrs {
+        match attr.value {
+            AttrValue::Str(v) => println!("{} = {}", attr.key, v),
+            AttrValue::Int(v) => println!("{} = {}", attr.key, v),
+            AttrValue::Bool(v) => println!("{} = {}", attr.key, v),
+        }
+    }
+}
+```
+
+Value type is inferred automatically:
+- String: `tag("admin")` → `AttrValue::Str("admin")`
+- Integer: `timeout(30)` → `AttrValue::Int(30)`
+- Boolean: `deprecated` → `AttrValue::Bool(true)`
+
+Both syntaxes are supported: `tag("admin")` and `tag = "admin"`.
+
+Custom attributes are also available in hooks via `RequestContext::attrs`:
+
+```rust
+impl Hook for MyHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        for attr in ctx.attrs {
+            if attr.key == "deprecated" {
+                eprintln!("WARNING: {} is deprecated", ctx.handler_name);
+            }
+        }
+        None
+    }
+}
+```
 
 ## Multiple States
 

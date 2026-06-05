@@ -194,4 +194,6 @@ pub struct SseRouteInfo {
     pub invoker: &'static dyn SseHandlerInvoker,
     /// The service this route belongs to.
     pub service_name: String,
+    /// Custom attributes from handler macros.
+    pub attrs: &'static [crate::handler::Attr],
 }

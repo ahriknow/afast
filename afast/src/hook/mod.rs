@@ -36,6 +36,7 @@ use crate::ctx::RequestCtx;
 /// application state (useful for extracting tracing contexts, etc.).
 /// The `ctx` field is a per-request type-map that hooks can write to
 /// and handlers can read from via the `Ctx<T>` extractor.
+/// The `attrs` field exposes custom attributes from handler macros.
 pub struct RequestContext {
     /// Handler name (the Rust function name).
     pub handler_name: &'static str,
@@ -50,6 +51,8 @@ pub struct RequestContext {
     /// Per-request context.  Hooks can insert values here; handlers
     /// retrieve them via the `Ctx<T>` extractor.
     pub ctx: RequestCtx,
+    /// Custom attributes from handler macros (e.g. `tag("admin")`, `deprecated`).
+    pub attrs: &'static [crate::handler::Attr],
 }
 
 /// Extension point for request lifecycle events.
