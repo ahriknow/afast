@@ -128,6 +128,7 @@ impl Service {
         path: &'static str,
         invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
         handler_name: &'static str,
+        attrs: &'static [crate::handler::Attr],
     ) -> Self {
         self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
             path,
@@ -135,7 +136,7 @@ impl Service {
             pattern: crate::app::ordinary::RoutePattern::parse(path),
             invoker,
             service_name: self.name.clone(),
-            attrs: &[],
+            attrs,
         });
         self
     }
@@ -148,6 +149,7 @@ impl Service {
         path: &'static str,
         invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
         handler_name: &'static str,
+        attrs: &'static [crate::handler::Attr],
     ) -> Self {
         self.sse_routes
             .push(crate::app::ordinary_sse::SseRouteInfo {
@@ -156,7 +158,7 @@ impl Service {
                 pattern: crate::app::ordinary::RoutePattern::parse(path),
                 invoker,
                 service_name: self.name.clone(),
-                attrs: &[],
+                attrs,
             });
         self
     }

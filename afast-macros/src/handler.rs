@@ -1480,7 +1480,7 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, _cache_seconds, _rate_limit_policy, _extra_attrs) =
+    let (desc, api_name, _cache_seconds, _rate_limit_policy, extra_attrs) =
         parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, Some("WS"))?;
 
@@ -1533,6 +1533,20 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
 
     let ws_invoker_impl = build_ws_invoker_impl(&invoker_ident, &impl_fn_name, &params);
 
+    // Generate attrs entries from extra_attrs
+    let ws_attrs_entries: Vec<TokenStream> = extra_attrs
+        .iter()
+        .map(|a| {
+            let key = &a.key;
+            let value = match &a.value {
+                MacroAttrValue::Str(s) => quote! { afast::handler::AttrValue::Str(#s) },
+                MacroAttrValue::Int(n) => quote! { afast::handler::AttrValue::Int(#n) },
+                MacroAttrValue::Bool(b) => quote! { afast::handler::AttrValue::Bool(#b) },
+            };
+            quote! { afast::handler::Attr { key: #key, value: #value } }
+        })
+        .collect();
+
     Ok(quote! {
         #impl_fn
 
@@ -1549,15 +1563,15 @@ pub fn expand_ws(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
             path: "",
             cache_seconds: 0,
             rate_limit_policy: "",
-            attrs: &[],
+            attrs: &[#( #ws_attrs_entries ),*],
         };
 
         #ws_invoker_impl
 
         const #invoker_const: #invoker_ident = #invoker_ident;
 
-        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_ws::WsHandlerInvoker, &'static str) {
-            (&#invoker_const, #name_str)
+        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_ws::WsHandlerInvoker, &'static str, &'static [afast::handler::Attr]) {
+            (&#invoker_const, #name_str, #meta_ident.attrs)
         }
     })
 }
@@ -1747,7 +1761,7 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
 
-    let (desc, api_name, _cache_seconds, _rate_limit_policy, _extra_attrs) =
+    let (desc, api_name, _cache_seconds, _rate_limit_policy, extra_attrs) =
         parse_handler_attrs_from_tokens(&attr)?;
     let params = parse_handler_params(&input_fn, Some("SSE"))?;
 
@@ -1801,6 +1815,20 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
 
     let sse_invoker_impl = build_sse_invoker_impl(&invoker_ident, &impl_fn_name, &params);
 
+    // Generate attrs entries from extra_attrs
+    let sse_attrs_entries: Vec<TokenStream> = extra_attrs
+        .iter()
+        .map(|a| {
+            let key = &a.key;
+            let value = match &a.value {
+                MacroAttrValue::Str(s) => quote! { afast::handler::AttrValue::Str(#s) },
+                MacroAttrValue::Int(n) => quote! { afast::handler::AttrValue::Int(#n) },
+                MacroAttrValue::Bool(b) => quote! { afast::handler::AttrValue::Bool(#b) },
+            };
+            quote! { afast::handler::Attr { key: #key, value: #value } }
+        })
+        .collect();
+
     Ok(quote! {
         #impl_fn
 
@@ -1817,15 +1845,15 @@ pub fn expand_sse(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
             path: "",
             cache_seconds: 0,
             rate_limit_policy: "",
-            attrs: &[],
+            attrs: &[#( #sse_attrs_entries ),*],
         };
 
         #sse_invoker_impl
 
         const #invoker_const: #invoker_ident = #invoker_ident;
 
-        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_sse::SseHandlerInvoker, &'static str) {
-            (&#invoker_const, #name_str)
+        pub fn #fn_name() -> (&'static dyn afast::app::ordinary_sse::SseHandlerInvoker, &'static str, &'static [afast::handler::Attr]) {
+            (&#invoker_const, #name_str, #meta_ident.attrs)
         }
     })
 }

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.14]
+
+### Added
+
+- **`RequestContext` 传输协议信息**: `RequestContext` 新增 `is_binary`、`method`、`long_connection` 字段，hook 可精确判断请求类型。
+  - `transport` 字段细化为：`"http-binary"` / `"http"` / `"ws-binary"` / `"ws"` / `"tcp"` / `"sse"`。
+  - `is_binary: bool` — 是否为 binary 协议接口。
+  - `method: &str` — 普通 HTTP 的方法名（`"GET"`/`"POST"`/`"PUT"`/`"DELETE"`/`"PATCH"`），其他情况为空。
+  - `long_connection: bool` — 是否为长连接 handler（`Receiver`/`Sender`）。
+
+### Changed
+
+- **Hook 生命周期职责分离**: 按接口类型明确划分 `before_request` 和 `on_connect` 的职责，不再混用。
+  - **`before_request`**（请求-响应模式）：HTTP binary、WS binary、TCP binary、ordinary HTTP。
+  - **`on_connect`**（连接模式）：WS long、TCP long、ordinary WS、SSE。
+  - 长连接 handler（WS/TCP binary `call_stream`）移除了多余的 `before_request` / `on_response` / `on_error` 调用，只保留 `on_connect` + `on_disconnect`。
+  - 普通 WS handler 移除了 `before_request` / `on_response` / `on_error` 调用，只保留 `on_connect` + `on_disconnect`。
+
 ## [0.1.13]
 
 ### Added

@@ -507,6 +507,9 @@ async fn handle_request(
                 handler_name: compiled.handler_name,
                 handler_desc: "",
                 transport: "http",
+                is_binary: false,
+                method: compiled.method,
+                long_connection: false,
                 handler_id: 0,
                 state: state.clone(),
                 ctx: req_ctx.clone(),
@@ -841,7 +844,10 @@ async fn handle_api(
         let ctx = crate::hook::RequestContext {
             handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
             handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-            transport: "http",
+            transport: "http-binary",
+            is_binary: true,
+            method: "",
+            long_connection: invoker.is_long_connection(),
             handler_id,
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
@@ -865,7 +871,10 @@ async fn handle_api(
         let ctx = crate::hook::RequestContext {
             handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
             handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-            transport: "http",
+            transport: "http-binary",
+            is_binary: true,
+            method: "",
+            long_connection: invoker.is_long_connection(),
             handler_id,
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
@@ -1317,36 +1326,9 @@ async fn handle_ordinary_ws_upgrade(
     let query_owned = query_string.to_string();
     let req_ctx = crate::ctx::RequestCtx::new();
 
-    // Hook: before_request
-    #[cfg(feature = "hook")]
-    let hook_ctx = crate::hook::RequestContext {
-        handler_name,
-        handler_desc: "",
-        transport: "ws",
-        handler_id: 0,
-        state: state.clone(),
-        ctx: req_ctx.clone(),
-        attrs,
-    };
-    #[cfg(feature = "hook")]
-    let hook_key = format!("{}:{}", service_name, route_path);
-    #[cfg(feature = "hook")]
-    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
-        shared
-            .named_hooks
-            .get(&hook_key)
-            .map(|hooks| {
-                hooks
-                    .iter()
-                    .filter_map(|h| h.before_request(&hook_ctx))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-
     // Clone hook data for use inside the spawned task.
     #[cfg(feature = "hook")]
-    let hook_key = hook_key.clone();
+    let hook_key = format!("{}:{}", service_name, route_path);
     #[cfg(feature = "hook")]
     let named_hooks_for_spawn = shared.named_hooks.clone();
     let body_size_limit = shared.body_size_limit;
@@ -1386,6 +1368,9 @@ async fn handle_ordinary_ws_upgrade(
                         handler_name,
                         handler_desc: "",
                         transport: "ws",
+                        is_binary: false,
+                        method: "",
+                        long_connection: false,
                         handler_id: 0,
                         state: state.clone(),
                         ctx: req_ctx.clone(),
@@ -1475,32 +1460,6 @@ async fn handle_ordinary_ws_upgrade(
                     )
                     .await;
 
-                // Hook: on_response / on_error for before_request guards
-                #[cfg(feature = "hook")]
-                {
-                    let ctx = crate::hook::RequestContext {
-                        handler_name,
-                        handler_desc: "",
-                        transport: "ws",
-                        handler_id: 0,
-                        state: state.clone(),
-                        ctx: req_ctx.clone(),
-                        attrs,
-                    };
-                    match &handler_result {
-                        Ok(_) => {
-                            for g in &mut _guards {
-                                g.on_response(&ctx, &[]);
-                            }
-                        }
-                        Err(e) => {
-                            for g in &mut _guards {
-                                g.on_error(&ctx, e);
-                            }
-                        }
-                    }
-                }
-
                 if let Err(e) = handler_result {
                     eprintln!("afast: ws handler '{}' error: {}", handler_name, e);
                 }
@@ -1516,6 +1475,9 @@ async fn handle_ordinary_ws_upgrade(
                         handler_name,
                         handler_desc: "",
                         transport: "ws",
+                        is_binary: false,
+                        method: "",
+                        long_connection: false,
                         handler_id: 0,
                         state: state.clone(),
                         ctx: req_ctx.clone(),
@@ -1570,6 +1532,9 @@ async fn handle_sse(
         handler_name,
         handler_desc: "",
         transport: "sse",
+        is_binary: false,
+        method: "",
+        long_connection: false,
         handler_id: 0,
         state: state.clone(),
         ctx: req_ctx.clone(),
@@ -1618,6 +1583,9 @@ async fn handle_sse(
                 handler_name,
                 handler_desc: "",
                 transport: "sse",
+                is_binary: false,
+                method: "",
+                long_connection: false,
                 handler_id: 0,
                 state,
                 ctx: req_ctx.clone(),

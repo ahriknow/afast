@@ -675,8 +675,8 @@ macro_rules! service {
     (@svc $sname:expr, $svc:expr, ws($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc $sname,
             {
-                let (__ws_invoker, __ws_name) = $crate::register_ws!($($fn)+);
-                $svc.ws_route($path, __ws_invoker, __ws_name)
+                let (__ws_invoker, __ws_name, __ws_attrs) = $crate::register_ws!($($fn)+);
+                $svc.ws_route($path, __ws_invoker, __ws_name, __ws_attrs)
             }
             $($rest)*
         )
@@ -684,8 +684,8 @@ macro_rules! service {
     (@svc $sname:expr, $svc:expr, sse($path:expr, $($fn:tt)+) $($rest:tt)*) => {
         $crate::service!(@svc $sname,
             {
-                let (__sse_invoker, __sse_name) = $crate::register_sse!($($fn)+);
-                $svc.sse_route($path, __sse_invoker, __sse_name)
+                let (__sse_invoker, __sse_name, __sse_attrs) = $crate::register_sse!($($fn)+);
+                $svc.sse_route($path, __sse_invoker, __sse_name, __sse_attrs)
             }
             $($rest)*
         )

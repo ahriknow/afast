@@ -301,7 +301,10 @@ pub async fn handle_websocket<S>(
                                     let ctx = crate::hook::RequestContext {
                                         handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
                                         handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                        transport: "ws",
+                                        transport: "ws-binary",
+                                        is_binary: true,
+                                        method: "",
+                                        long_connection: invoker.is_long_connection(),
                                         handler_id,
                                         state: state.clone(),
                                         ctx: req_ctx.clone(),
@@ -311,40 +314,7 @@ pub async fn handle_websocket<S>(
                                 };
 
                                 tokio::spawn(async move {
-                                    // Hook: before_request for call_stream
-                                    #[cfg(feature = "hook")]
-                                    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
-                                        let ctx = crate::hook::RequestContext {
-                                            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
-                                            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                            transport: "ws",
-                                            handler_id,
-                                            state: state.clone(),
-                                            ctx: req_ctx.clone(),
-                                            attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
-                                        };
-                                        hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.before_request(&ctx)).collect()
-                                    };
-
                                     let result = invoker.call_stream(&state, &req_ctx, &payload, from_handler_tx, to_handler_rx).await;
-
-                                    // Hook: on_response / on_error for call_stream
-                                    #[cfg(feature = "hook")]
-                                    {
-                                        let ctx = crate::hook::RequestContext {
-                                            handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
-                                            handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                            transport: "ws",
-                                            handler_id,
-                                            state: state.clone(),
-                                            ctx: req_ctx.clone(),
-                                            attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
-                                        };
-                                        match &result {
-                                            Ok(bytes) => for g in _guards.iter_mut().rev() { g.on_response(&ctx, bytes); },
-                                            Err(e) => for g in _guards.iter_mut().rev() { g.on_error(&ctx, e); },
-                                        }
-                                    }
 
                                     if let Err(ref e) = result {
                                         eprintln!("afast: stream handler error: {}", e);
@@ -364,7 +334,10 @@ pub async fn handle_websocket<S>(
                                         let ctx = crate::hook::RequestContext {
                                             handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
                                             handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                            transport: "ws",
+                                            transport: "ws-binary",
+                                            is_binary: true,
+                                            method: "",
+                                            long_connection: invoker.is_long_connection(),
                                             handler_id,
                                             state: state.clone(),
                                             ctx: req_ctx.clone(),
@@ -391,7 +364,10 @@ pub async fn handle_websocket<S>(
                                     let ctx = crate::hook::RequestContext {
                                         handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
                                         handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                        transport: "ws",
+                                        transport: "ws-binary",
+                                        is_binary: true,
+                                        method: "",
+                                        long_connection: invoker.is_long_connection(),
                                         handler_id,
                                         state: state.clone(),
                                         ctx: req_ctx.clone(),
@@ -408,7 +384,10 @@ pub async fn handle_websocket<S>(
                                     let ctx = crate::hook::RequestContext {
                                         handler_name: invoker.meta().map(|m| m.name).unwrap_or("unknown"),
                                         handler_desc: invoker.meta().map(|m| m.desc).unwrap_or(""),
-                                        transport: "ws",
+                                        transport: "ws-binary",
+                                        is_binary: true,
+                                        method: "",
+                                        long_connection: invoker.is_long_connection(),
                                         handler_id,
                                         state: state.clone(),
                                         ctx: req_ctx.clone(),

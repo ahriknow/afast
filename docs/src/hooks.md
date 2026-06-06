@@ -43,10 +43,14 @@ impl ConnectionGuard for () {
 
 ```rust
 pub trait Hook: Send + Sync + 'static {
-    /// Called before each request. Return a `RequestGuard` to observe the response.
+    /// Called before each request for request-response interfaces
+    /// (HTTP binary, WS binary, TCP binary, ordinary HTTP).
+    /// Return a `RequestGuard` to observe the response.
     fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> { None }
 
-    /// Called when a long connection (WS/TCP) is established.
+    /// Called when a connection is established for connection-oriented interfaces
+    /// (WS long, TCP long, ordinary WS, SSE).
+    /// Return a `ConnectionGuard` to observe disconnection.
     fn on_connect(&self, ctx: &RequestContext) -> Option<Box<dyn ConnectionGuard>> { None }
 }
 ```
@@ -90,16 +94,23 @@ let app = AFast::new()
 
 ## Hook Lifecycle by Transport
 
+Hooks are divided into two categories by interface type:
+
+- **`before_request`** (request-response): HTTP binary, WS binary, TCP binary, ordinary HTTP.
+- **`on_connect`** (connection-oriented): WS long, TCP long, ordinary WS, SSE.
+
 ### Binary Protocol (HTTP `POST /_api`, WS `/_ws`, TCP)
+
+Regular handlers (request-response):
 
 ```
 before_request → handler → on_response / on_error
 ```
 
-For long-connection binary handlers (`call_stream`):
+Long-connection handlers (`call_stream`):
 
 ```
-on_connect → before_request → handler → on_response / on_error → on_disconnect
+on_connect → handler → on_disconnect
 ```
 
 ### Ordinary HTTP (`ordinary-http`)
@@ -113,23 +124,20 @@ before_request → handler → on_response / on_error
 ### Ordinary WebSocket (`ordinary-ws`)
 
 ```
-before_request → on_connect → handler → on_response / on_error → on_disconnect
+on_connect → handler → on_disconnect
 ```
 
-- `before_request`: fires when the HTTP upgrade request arrives.
 - `on_connect`: fires after the WebSocket handshake completes.
-- `on_response` / `on_error`: fires after the handler function returns.
 - `on_disconnect`: fires after the handler returns and forwarding tasks are cleaned up.
 
 ### Ordinary SSE (`ordinary-sse`)
 
 ```
-before_request → handler (spawned) → on_response
+on_connect → handler (spawned) → on_disconnect
 ```
 
-- `before_request`: fires before the SSE response is sent.
-- `on_response`: fires immediately after spawning the handler (the HTTP 200 response is being sent).
-- `on_error` / `on_disconnect` are **not** called (the handler runs in a spawned task; errors are logged to stderr).
+- `on_connect`: fires before the SSE response is sent and the handler is spawned.
+- `on_disconnect`: fires after the handler task completes.
 
 ## Request Context Integration
 
@@ -212,7 +220,7 @@ For merged services (same service name registered multiple times), hook entries 
 |-------|------|-------------|
 | `handler_name` | `&'static str` | Handler function name |
 | `handler_desc` | `&'static str` | Description from `#[handler(desc(...))]` |
-| `transport` | `&'static str` | `"tcp"`, `"ws"`, `"http"`, or `"sse"` |
+| `transport` | `&'static str` | `"http-binary"`, `"http"`, `"ws-binary"`, `"ws"`, `"tcp"`, or `"sse"` |
 | `handler_id` | `usize` | Handler offset in binary dispatch table (0 for ordinary routes) |
 | `state` | `Arc<StateMap>` | Shared application state |
 
@@ -238,12 +246,10 @@ All extractors work across all transports:
 ## Server Example Output
 
 ```
-[hook] → chat_ws (ws)                ← before_request
-[check-svc] ▶ chat_ws                ← service hook
 [hook] ↕ connect: chat_ws (ws)       ← on_connect
+[check-svc] ▶ chat_ws                ← service hook
 [ws-chat] client joined room: test   ← handler runs
 [ws-chat] client left room: test     ← handler returns
-[hook] ← chat_ws OK (1.28ms)         ← on_response
-[check-svc] ◀ chat_ws done           ← service hook done
 [hook] ✕ disconnect: chat_ws (ws)    ← on_disconnect
+[check-svc] ◀ chat_ws done           ← service hook done
 ```

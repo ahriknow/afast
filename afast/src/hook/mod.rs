@@ -42,8 +42,23 @@ pub struct RequestContext {
     pub handler_name: &'static str,
     /// Human-readable description from `#[handler(desc(...))]`.
     pub handler_desc: &'static str,
-    /// Transport that delivered this request: `"tcp"`, `"ws"`, or `"http"`.
+    /// Transport that delivered this request.
+    ///
+    /// - `"http-binary"` — binary protocol over HTTP (`POST /_api`)
+    /// - `"http"` — ordinary HTTP REST (`#[get]`/`#[post]`/etc.)
+    /// - `"ws-binary"` — binary protocol over WebSocket (`/_ws`)
+    /// - `"ws"` — ordinary WebSocket (`#[ws]` route)
+    /// - `"tcp"` — binary protocol over TCP
+    /// - `"sse"` — Server-Sent Events (`#[sse]` route)
     pub transport: &'static str,
+    /// Whether this handler uses the binary protocol (`true`) or
+    /// ordinary HTTP/WS/SSE (`false`).
+    pub is_binary: bool,
+    /// HTTP method for ordinary HTTP handlers (`"GET"`, `"POST"`, `"PUT"`,
+    /// `"DELETE"`, `"PATCH"`). Empty for binary, WS, TCP, and SSE handlers.
+    pub method: &'static str,
+    /// Whether this handler uses persistent connections (Receiver/Sender).
+    pub long_connection: bool,
     /// Hash-based stable handler ID in the binary dispatch table.
     pub handler_id: u32,
     /// Shared application state.
