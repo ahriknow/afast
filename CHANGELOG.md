@@ -18,6 +18,16 @@
   - 长连接 handler（WS/TCP binary `call_stream`）移除了多余的 `before_request` / `on_response` / `on_error` 调用，只保留 `on_connect` + `on_disconnect`。
   - 普通 WS handler 移除了 `before_request` / `on_response` / `on_error` 调用，只保留 `on_connect` + `on_disconnect`。
 
+### Optimized
+
+- **减少 HTTP 热路径堆分配（6 项）**:
+  - `TrieRouter::match_segments` 返回 `Option<usize>`，params 就地填充，消除 `params.clone()`。精确路由返回空 HashMap（Rust HashMap 不预分配堆内存）。
+  - Hook key（`"service_name:path"`）在路由编译阶段预计算存入 `Compiled*Route`，运行时直接引用，消除每次请求的 `format!` 分配。
+  - SSE/WS 路由从 O(n) 线性扫描改为 `TrieRouter` O(depth) 匹配，复用现有 trie 基础设施（cfg gate 扩展为 `ordinary-http | ordinary-ws | ordinary-sse`）。
+  - `handle_request` 中 `uri.path()` 直接借用 `&str`，消除 `.to_string()` 分配。
+  - `path.split('/').collect::<Vec>()` 延迟到 fallback 分支（`/_api`、`/code`、`/doc`、`/_ws`），普通路由命中 trie 后跳过此分配。
+  - `read_body_bytes` 从 `Content-Length` 头预分配 `Vec::with_capacity`，避免大 body 多次 realloc。
+
 ## [0.1.13]
 
 ### Added

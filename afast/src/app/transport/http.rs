@@ -125,17 +125,22 @@ pub async fn serve(
     let compiled_routes: Vec<CompiledOrdinaryRoute> = config
         .ordinary_routes
         .iter()
-        .map(|r| CompiledOrdinaryRoute {
-            method: r.method,
-            pattern: RoutePattern::parse(&r.path),
-            invoker: r
-                .handler_entry
-                .ordinary_invoker
-                .expect("ordinary_invoker must be set for ordinary routes"),
-            handler_name: r.handler_entry.name,
-            path: Box::leak(r.path.clone().into_boxed_str()),
-            service_name: r.service_name.clone(),
-            attrs: r.handler_entry.meta.attrs,
+        .map(|r| {
+            let path: &'static str = Box::leak(r.path.clone().into_boxed_str());
+            let service_name = r.service_name.clone();
+            CompiledOrdinaryRoute {
+                method: r.method,
+                pattern: RoutePattern::parse(&r.path),
+                invoker: r
+                    .handler_entry
+                    .ordinary_invoker
+                    .expect("ordinary_invoker must be set for ordinary routes"),
+                handler_name: r.handler_entry.name,
+                path,
+                hook_key: format!("{}:{}", service_name, path),
+                service_name,
+                attrs: r.handler_entry.meta.attrs,
+            }
         })
         .collect();
 
@@ -149,6 +154,7 @@ pub async fn serve(
             invoker: r.invoker,
             handler_name: r.handler_name,
             path: r.path,
+            hook_key: format!("{}:{}", r.service_name, r.path),
             service_name: r.service_name.clone(),
             attrs: r.attrs,
         })
@@ -164,6 +170,7 @@ pub async fn serve(
             invoker: r.invoker,
             handler_name: r.handler_name,
             path: r.path,
+            hook_key: format!("{}:{}", r.service_name, r.path),
             service_name: r.service_name.clone(),
             attrs: r.attrs,
         })
@@ -175,6 +182,24 @@ pub async fn serve(
         let mut trie = crate::app::ordinary::TrieRouter::new();
         for (i, r) in compiled_routes.iter().enumerate() {
             trie.insert(r.method, &r.pattern, i);
+        }
+        trie
+    };
+
+    // Build trie routers for WS and SSE routes.
+    #[cfg(feature = "ordinary-ws")]
+    let ws_trie_router = {
+        let mut trie = crate::app::ordinary::TrieRouter::new();
+        for (i, r) in compiled_ws_routes.iter().enumerate() {
+            trie.insert("GET", &r.pattern, i);
+        }
+        trie
+    };
+    #[cfg(feature = "ordinary-sse")]
+    let sse_trie_router = {
+        let mut trie = crate::app::ordinary::TrieRouter::new();
+        for (i, r) in compiled_sse_routes.iter().enumerate() {
+            trie.insert("GET", &r.pattern, i);
         }
         trie
     };
@@ -196,8 +221,12 @@ pub async fn serve(
         trie_router,
         #[cfg(feature = "ordinary-ws")]
         ws_routes: compiled_ws_routes,
+        #[cfg(feature = "ordinary-ws")]
+        ws_trie_router,
         #[cfg(feature = "ordinary-sse")]
         sse_routes: compiled_sse_routes,
+        #[cfg(feature = "ordinary-sse")]
+        sse_trie_router,
         #[cfg(all(feature = "ws", feature = "binary"))]
         enable_ws_upgrade: config.enable_ws_upgrade,
         #[cfg(feature = "ws")]
@@ -368,8 +397,14 @@ struct SharedState {
     trie_router: crate::app::ordinary::TrieRouter,
     #[cfg(feature = "ordinary-ws")]
     ws_routes: Vec<CompiledWsRoute>,
+    /// Trie-based router for O(path_depth) WS route matching.
+    #[cfg(feature = "ordinary-ws")]
+    ws_trie_router: crate::app::ordinary::TrieRouter,
     #[cfg(feature = "ordinary-sse")]
     sse_routes: Vec<CompiledSseRoute>,
+    /// Trie-based router for O(path_depth) SSE route matching.
+    #[cfg(feature = "ordinary-sse")]
+    sse_trie_router: crate::app::ordinary::TrieRouter,
     #[cfg(all(feature = "ws", feature = "binary"))]
     enable_ws_upgrade: bool,
     #[cfg(feature = "ws")]
@@ -411,12 +446,15 @@ struct CompiledOrdinaryRoute {
     invoker: &'static dyn crate::handler::OrdinaryHandlerInvoker,
     #[cfg_attr(not(feature = "rate-limit"), allow(dead_code))]
     handler_name: &'static str,
-    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
+    #[allow(dead_code)]
     path: &'static str,
-    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
+    #[allow(dead_code)]
     service_name: String,
     #[cfg_attr(not(feature = "hook"), allow(dead_code))]
     attrs: &'static [crate::handler::Attr],
+    /// Pre-computed hook key `"service_name:path"` — avoids per-request allocation.
+    #[cfg_attr(not(feature = "hook"), allow(dead_code))]
+    hook_key: String,
 }
 
 /// A pre-compiled ordinary-ws route ready for WebSocket upgrade matching.
@@ -425,9 +463,13 @@ struct CompiledWsRoute {
     pattern: RoutePattern,
     invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
     handler_name: &'static str,
+    #[allow(dead_code)]
     path: &'static str,
+    #[allow(dead_code)]
     service_name: String,
     attrs: &'static [crate::handler::Attr],
+    /// Pre-computed hook key `"service_name:path"` — avoids per-request allocation.
+    hook_key: String,
 }
 
 /// A pre-compiled ordinary-sse route ready for SSE stream matching.
@@ -436,9 +478,13 @@ struct CompiledSseRoute {
     pattern: RoutePattern,
     invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
     handler_name: &'static str,
+    #[allow(dead_code)]
     path: &'static str,
+    #[allow(dead_code)]
     service_name: String,
     attrs: &'static [crate::handler::Attr],
+    /// Pre-computed hook key `"service_name:path"` — avoids per-request allocation.
+    hook_key: String,
 }
 
 /// Dispatches an incoming HTTP request to the correct handler.
@@ -459,18 +505,13 @@ async fn handle_request(
 ) -> Result<Response<BoxBody>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let path = uri.path().to_string();
-    let segments: Vec<&str> = path
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .split('/')
-        .collect();
+    let path = uri.path();
 
     // Try ordinary HTTP routes via trie router (O(path_depth))
     #[cfg(feature = "ordinary-http")]
     {
         let method_str = method.as_str();
-        if let Some((route_idx, path_params)) = shared.trie_router.match_path(method_str, &path) {
+        if let Some((route_idx, path_params)) = shared.trie_router.match_path(method_str, path) {
             let compiled = &shared.ordinary_routes[route_idx];
             // Rate-limit check for ordinary routes.
             #[cfg(feature = "rate-limit")]
@@ -516,12 +557,12 @@ async fn handle_request(
                 attrs: compiled.attrs,
             };
             #[cfg(feature = "hook")]
-            let hook_key = format!("{}:{}", compiled.service_name, compiled.path);
+            let hook_key = &compiled.hook_key;
             #[cfg(feature = "hook")]
             let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
                 shared
                     .named_hooks
-                    .get(&hook_key)
+                    .get(hook_key)
                     .map(|hooks| {
                         hooks
                             .iter()
@@ -577,34 +618,31 @@ async fn handle_request(
     }
     // Note: unmatched ordinary routes fall through to SSE/WS/binary/doc handlers below.
 
-    // Try ordinary-sse routes (SSE stream with path matching)
+    // Try ordinary-sse routes via trie router (O(path_depth))
     #[cfg(feature = "ordinary-sse")]
-    if method == hyper::Method::GET {
-        for compiled in &shared.sse_routes {
-            if let Some(path_params) = compiled.pattern.matches(&path) {
-                let query_string = uri.query().unwrap_or("");
-                let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
-                return handle_sse(
-                    shared,
-                    compiled.invoker,
-                    compiled.handler_name,
-                    &compiled.service_name,
-                    compiled.path,
-                    query_string.to_string(),
-                    path_params,
-                    headers_json,
-                    compiled.attrs,
-                    client_ip,
-                )
-                .await;
-            }
-        }
+    if method == hyper::Method::GET
+        && let Some((route_idx, path_params)) = shared.sse_trie_router.match_path("GET", path)
+    {
+        let compiled = &shared.sse_routes[route_idx];
+        let query_string = uri.query().unwrap_or("");
+        let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
+        return handle_sse(
+            shared,
+            compiled.invoker,
+            compiled.handler_name,
+            &compiled.hook_key,
+            query_string.to_string(),
+            path_params,
+            headers_json,
+            compiled.attrs,
+            client_ip,
+        )
+        .await;
     }
 
-    // Try ordinary-ws routes (WebSocket upgrade with path matching)
+    // Try ordinary-ws routes via trie router (O(path_depth))
     #[cfg(feature = "ordinary-ws")]
     if method == hyper::Method::GET {
-        // Check if this is a WebSocket upgrade request.
         let is_ws_upgrade = req
             .headers()
             .get(hyper::header::UPGRADE)
@@ -612,51 +650,57 @@ async fn handle_request(
             .map(|v| v.to_lowercase().contains("websocket"))
             .unwrap_or(false);
 
-        if is_ws_upgrade {
-            for compiled in &shared.ws_routes {
-                if let Some(path_params) = compiled.pattern.matches(&path) {
-                    // Rate-limit check for ordinary-ws routes.
-                    #[cfg(feature = "rate-limit")]
-                    if let Some(ref limiter) = shared.rate_limiter {
-                        let mut ctx = ConnectionContext::new(client_ip.to_string());
-                        for (name, value) in req.headers().iter() {
-                            if let Ok(v) = value.to_str() {
-                                ctx.header_cache
-                                    .insert(name.as_str().to_lowercase(), v.to_string());
-                            }
-                        }
-                        if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
-                            let retry = limiter.retry_after_secs(compiled.handler_name);
-                            let status = StatusCode::TOO_MANY_REQUESTS;
-                            let body = super::util::json_error_body(e.code(), e.message());
-                            return Ok(Response::builder()
-                                .status(status)
-                                .header("content-type", "application/json; charset=utf-8")
-                                .header("retry-after", retry.to_string())
-                                .body(Full::new(Bytes::from(body)).boxed())
-                                .expect("valid response builder"));
-                        }
+        if is_ws_upgrade
+            && let Some((route_idx, path_params)) = shared.ws_trie_router.match_path("GET", path)
+        {
+            let compiled = &shared.ws_routes[route_idx];
+            // Rate-limit check for ordinary-ws routes.
+            #[cfg(feature = "rate-limit")]
+            if let Some(ref limiter) = shared.rate_limiter {
+                let mut ctx = ConnectionContext::new(client_ip.to_string());
+                for (name, value) in req.headers().iter() {
+                    if let Ok(v) = value.to_str() {
+                        ctx.header_cache
+                            .insert(name.as_str().to_lowercase(), v.to_string());
                     }
-
-                    let query_string = uri.query().unwrap_or("");
-                    return handle_ordinary_ws_upgrade(
-                        req,
-                        shared,
-                        compiled.invoker,
-                        compiled.handler_name,
-                        &compiled.service_name,
-                        compiled.path,
-                        query_string,
-                        path_params,
-                        compiled.attrs,
-                        client_ip,
-                    )
-                    .await;
+                }
+                if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
+                    let retry = limiter.retry_after_secs(compiled.handler_name);
+                    let status = StatusCode::TOO_MANY_REQUESTS;
+                    let body = super::util::json_error_body(e.code(), e.message());
+                    return Ok(Response::builder()
+                        .status(status)
+                        .header("content-type", "application/json; charset=utf-8")
+                        .header("retry-after", retry.to_string())
+                        .body(Full::new(Bytes::from(body)).boxed())
+                        .expect("valid response builder"));
                 }
             }
+
+            let query_string = uri.query().unwrap_or("");
+            return handle_ordinary_ws_upgrade(
+                req,
+                shared,
+                compiled.invoker,
+                compiled.handler_name,
+                &compiled.hook_key,
+                query_string,
+                path_params,
+                compiled.attrs,
+                client_ip,
+            )
+            .await;
         }
     }
 
+    // Defer segments computation to this fallback branch — only allocated
+    // for built-in endpoints (/_api, /code, /doc, /_ws) when no ordinary
+    // route matched.
+    let segments: Vec<&str> = path
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .split('/')
+        .collect();
     match segments.first().copied() {
         #[cfg(feature = "binary")]
         Some("_api") => {
@@ -1264,8 +1308,7 @@ async fn handle_ordinary_ws_upgrade(
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_ws::WsHandlerInvoker,
     handler_name: &'static str,
-    service_name: &str,
-    route_path: &str,
+    hook_key: &str,
     query_string: &str,
     path_params: std::collections::HashMap<String, String>,
     attrs: &'static [crate::handler::Attr],
@@ -1328,7 +1371,7 @@ async fn handle_ordinary_ws_upgrade(
 
     // Clone hook data for use inside the spawned task.
     #[cfg(feature = "hook")]
-    let hook_key = format!("{}:{}", service_name, route_path);
+    let hook_key = hook_key.to_string();
     #[cfg(feature = "hook")]
     let named_hooks_for_spawn = shared.named_hooks.clone();
     let body_size_limit = shared.body_size_limit;
@@ -1512,8 +1555,7 @@ async fn handle_sse(
     shared: &SharedState,
     invoker: &'static dyn crate::app::ordinary_sse::SseHandlerInvoker,
     handler_name: &'static str,
-    service_name: &str,
-    route_path: &str,
+    hook_key: &str,
     query_string: String,
     path_params: std::collections::HashMap<String, String>,
     headers_json: serde_json::Value,
@@ -1543,7 +1585,7 @@ async fn handle_sse(
     #[cfg(feature = "hook")]
     let named_hooks_for_sse = shared.named_hooks.clone();
     #[cfg(feature = "hook")]
-    let hook_key = format!("{}:{}", service_name, route_path);
+    let hook_key = hook_key.to_string();
     #[cfg(feature = "hook")]
     let mut _conn_guards: Vec<Box<dyn crate::hook::ConnectionGuard>> = {
         named_hooks_for_sse

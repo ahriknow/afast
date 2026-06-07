@@ -145,13 +145,21 @@ impl RoutePattern {
 /// parameter segments (`:id`) use a single wildcard child.
 ///
 /// This replaces the previous O(n) linear scan over all routes.
-#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
 pub(crate) struct TrieRouter {
     /// Per-method trie roots: `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`.
     roots: std::collections::HashMap<&'static str, TrieNode>,
 }
 
-#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
 struct TrieNode {
     /// Static segment children: `"users"` → child node.
     static_children: std::collections::HashMap<String, TrieNode>,
@@ -162,7 +170,11 @@ struct TrieNode {
     route: Option<usize>,
 }
 
-#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
 impl TrieNode {
     fn new() -> Self {
         Self {
@@ -173,7 +185,11 @@ impl TrieNode {
     }
 }
 
-#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
 struct ParamChild {
     /// The parameter name (e.g. `"id"`).
     name: &'static str,
@@ -181,7 +197,11 @@ struct ParamChild {
     node: TrieNode,
 }
 
-#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
 impl TrieRouter {
     /// Creates an empty trie router.
     pub fn new() -> Self {
@@ -245,6 +265,8 @@ impl TrieRouter {
     /// Matches a request path against the trie for the given method.
     ///
     /// Returns `(route_index, path_params)` on match, or `None`.
+    /// For exact (non-parametric) routes, the returned HashMap is empty
+    /// and does not allocate on the heap.
     pub fn match_path(
         &self,
         method: &str,
@@ -255,30 +277,31 @@ impl TrieRouter {
 
         // Special case: root path "/" or empty
         if path.is_empty() {
-            // Check for empty-string static child (root route)
             if let Some(child) = root.static_children.get("")
                 && let Some(idx) = child.route
             {
                 return Some((idx, std::collections::HashMap::new()));
             }
-            // Also check for param child at root
-            // (Root path has no segment for a param — skip)
             return None;
         }
 
         let segments: Vec<&str> = path.split('/').collect();
-        Self::match_segments(root, &segments, 0, &mut std::collections::HashMap::new())
+        let mut params = std::collections::HashMap::new();
+        let idx = Self::match_segments(root, &segments, 0, &mut params)?;
+        Some((idx, params))
     }
 
+    /// Walks the trie node by node, filling `params` in-place on success.
+    /// Returns the route index on match, or `None`. No clone is needed
+    /// because params are built in the caller's HashMap and kept on success.
     fn match_segments(
         node: &TrieNode,
         segments: &[&str],
         idx: usize,
         params: &mut std::collections::HashMap<String, String>,
-    ) -> Option<(usize, std::collections::HashMap<String, String>)> {
+    ) -> Option<usize> {
         if idx >= segments.len() {
-            // All segments consumed — check if this node has a route.
-            return node.route.map(|r| (r, params.clone()));
+            return node.route;
         }
 
         let seg = segments[idx];
@@ -841,7 +864,18 @@ pub async fn read_body_bytes(
 ) -> Result<Vec<u8>, crate::Error> {
     use http_body_util::BodyExt;
     let max = BODY_SIZE_LIMIT.load(std::sync::atomic::Ordering::Relaxed);
-    let mut collected = Vec::new();
+
+    // Pre-allocate from Content-Length when available to avoid
+    // repeated reallocations for large bodies.
+    let content_length = req
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    let initial_cap = content_length.min(max);
+    let mut collected = Vec::with_capacity(initial_cap);
+
     let mut stream = req.into_body();
     while let Some(chunk) = stream.frame().await {
         let frame = chunk.map_err(|e| crate::Error::Custom {
