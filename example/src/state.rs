@@ -36,6 +36,7 @@ use tokio::sync::Mutex;
 ///
 /// Uses `Arc<Mutex<Database>>` so the database can be shared safely across
 /// async tasks. Each handler extracts this with `afast::State<AppState>`.
+/// The `State<T>` extractor holds a `&'static T` reference — zero per-request clone.
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,

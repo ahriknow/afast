@@ -15,6 +15,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 - **RESTful Endpoints** — `#[get]`/`#[post]`/`#[put]`/`#[delete]` with JSON
 - **WebSocket & SSE** — `#[ws]` and `#[sse]` route macros
 - **Long Connections** — bidirectional streaming via `Receiver`/`Sender`
+- **Zero-Copy State** — `State<T>` holds `&'static T`, no per-request clone
 - **Lifecycle Hooks** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
 - **Request Context** — `Ctx<T>` per-request context, hooks write, handlers read
 - **Rate Limiting** — named policies with pluggable storage backend
@@ -24,7 +25,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 
 ```toml
 [dependencies]
-afast = { version = "0.1.13", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.14", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -32,7 +33,6 @@ tokio = { version = "1", features = ["full"] }
 use afast::{AFast, Ctx, handler, service, State, Data, Result};
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
-#[derive(Clone)]
 struct AppState { greeting: String }
 
 #[derive(Clone)]

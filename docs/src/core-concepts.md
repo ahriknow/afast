@@ -73,14 +73,11 @@ impl Hook for MyHook {
 
 ## Multiple States
 
-AFast supports registering **multiple State types**. `StateMap` uses `TypeId` as keys, with one value per type:
+AFast supports registering **multiple State types**. `StateMap` uses `TypeId` as keys, with one value per type. `State<T>` holds a `&'static T` reference — the value is allocated once at startup via `Box::leak` and never cloned per-request:
 
 ```rust
-#[derive(Clone)]
 struct DbConfig { url: String }
-#[derive(Clone)]
 struct RedisConfig { url: String }
-#[derive(Clone)]
 struct AppConfig { name: String }
 
 let app = AFast::new()
@@ -100,6 +97,28 @@ async fn my_handler(
 ```
 
 If a handler references a State type that was not registered, it returns a `CODE_STATE_NOT_FOUND` error at runtime.
+
+### Interior Mutability
+
+Since `State<T>` provides a shared `&'static T` reference, mutations require interior mutability patterns. Wrap mutable fields in `Arc<Mutex<...>>` or `Arc<RwLock<...>>`:
+
+```rust
+use std::sync::{Arc, Mutex};
+
+struct AppState {
+    db: Arc<Mutex<Database>>,
+    counter: Arc<Mutex<u64>>,
+}
+
+#[handler(desc("Increment counter"))]
+async fn increment(state: State<AppState>) -> Result<()> {
+    let mut count = state.counter.lock().unwrap();
+    *count += 1;
+    Ok(())
+}
+```
+
+`State<T>` no longer requires `T: Clone` — only `T: 'static`.
 
 ## Multiple Data Params
 
@@ -133,7 +152,7 @@ async searchUsers(page: PageRequest, filter: FilterRequest): Promise<PageRespons
 
 | Extractor | Description | Protocols |
 |-----------|-------------|-----------|
-| `State<T>` | Injects shared state by type from StateMap (T: Clone) | All |
+| `State<T>` | Injects shared state by type from StateMap (T: 'static, zero-copy &'static T) | All |
 | `Ctx<T>` | Injects per-request context data set by hooks (T: Clone) | All |
 | `Data<T>` | Deserializes request body from binary payload | HTTP/WS/TCP |
 | `Custom<T>` | Deserializes client-side custom context (e.g., auth token) | HTTP/WS/TCP |

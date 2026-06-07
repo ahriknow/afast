@@ -524,7 +524,8 @@ impl AFast {
     /// call with the same type replaces the previous value. Handlers access
     /// state through the [`State<T>`](crate::State) extractor.
     pub fn state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
-        self.state.insert(value);
+        let leaked: &'static T = Box::leak(Box::new(value));
+        self.state.insert(leaked);
         self
     }
 

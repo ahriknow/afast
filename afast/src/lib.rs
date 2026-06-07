@@ -201,8 +201,13 @@ pub use afastdata::{AFastDeserialize, AFastSerialize};
 
 /// Injects shared application state into a handler.
 ///
-/// The value is retrieved from the [`StateMap`] by type. It must have been
-/// registered previously via [`AFast::state`](crate::AFast::state).
+/// The inner value is a `'static` reference to the state stored in the
+/// [`StateMap`](crate::state::StateMap). The state is allocated once at
+/// startup via [`AFast::state`](crate::AFast::state) and lives for the
+/// entire process — no per-request clone.
+///
+/// If the state needs interior mutability, wrap fields in
+/// `Arc<Mutex<...>>` or `Arc<RwLock<...>>`.
 ///
 /// # Examples
 ///
@@ -215,7 +220,7 @@ pub use afastdata::{AFastDeserialize, AFastSerialize};
 ///     Ok(())
 /// }
 /// ```
-pub struct State<T>(pub T);
+pub struct State<T: 'static>(pub &'static T);
 
 /// Injects per-request context data into a handler.
 ///

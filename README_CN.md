@@ -15,6 +15,7 @@
 - **RESTful 端点** — `#[get]`/`#[post]`/`#[put]`/`#[delete]` + JSON
 - **WebSocket & SSE** — `#[ws]` 和 `#[sse]` 路由宏
 - **长连接** — 通过 `Receiver`/`Sender` 双向流式通信
+- **零拷贝 State** — `State<T>` 持有 `&'static T`，无 per-request clone
 - **生命周期钩子** — `before_request`/`on_response`/`on_error`/`on_connect`/`on_disconnect`
 - **请求上下文** — `Ctx<T>` 请求级上下文，hook 写入，handler 读取
 - **请求限流** — 命名策略 + 可插拔存储后端
@@ -24,7 +25,7 @@
 
 ```toml
 [dependencies]
-afast = { version = "0.1.13", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.14", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -32,7 +33,6 @@ tokio = { version = "1", features = ["full"] }
 use afast::{AFast, Ctx, handler, service, State, Data, Result};
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
-#[derive(Clone)]
 struct AppState { greeting: String }
 
 #[derive(Clone)]

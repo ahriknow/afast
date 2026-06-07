@@ -2,6 +2,14 @@
 
 ## [0.1.14]
 
+### Breaking Changes
+
+- **`State<T>` 改为持有 `&'static T` 引用**: `State<T>` 不再 clone 整个值，而是持有 `'static` 引用。`AFast::state()` 启动时 `Box::leak` 分配一次，handler 每次请求零拷贝提取。
+  - **用户代码无需修改** — `State<AppState>` 签名不变，`state.db.lock().await` 用法不变。
+  - `State<T>` 不再要求 `T: Clone`，但需要 `T: 'static`。
+  - 需要可变内部状态的用户继续用 `Arc<Mutex<...>>` 或 `Arc<RwLock<...>>`。
+  - 直接调用 `StateMap::insert` 的用户需改为插入 `&'static T`（通常通过 `Box::leak`）。
+
 ### Added
 
 - **`RequestContext` 传输协议信息**: `RequestContext` 新增 `is_binary`、`method`、`long_connection` 字段，hook 可精确判断请求类型。
@@ -20,6 +28,7 @@
 
 ### Optimized
 
+- **`State<T>` 零拷贝提取**: `State<T>` 改为持有 `&'static T` 引用，`AFast::state()` 启动时 `Box::leak` 分配一次，handler 每次请求直接获取引用，消除 `T::clone()` 开销。需要可变内部状态的用户用 `Arc<Mutex<...>>`。
 - **减少 HTTP 热路径堆分配（6 项）**:
   - `TrieRouter::match_segments` 返回 `Option<usize>`，params 就地填充，消除 `params.clone()`。精确路由返回空 HashMap（Rust HashMap 不预分配堆内存）。
   - Hook key（`"service_name:path"`）在路由编译阶段预计算存入 `Compiled*Route`，运行时直接引用，消除每次请求的 `format!` 分配。

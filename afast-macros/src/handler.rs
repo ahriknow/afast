@@ -951,8 +951,8 @@ fn build_call_invoker_impl(
         match p.extractor.as_str() {
             "State" => {
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match state.get::<#inner>() {
-                        Some(v) => afast::State(v.clone()),
+                    let #var_name: afast::State<#inner> = match state.get::<&'static #inner>() {
+                        Some(v) => afast::State(*v),
                         None => {
                             let #err_var = afast::Error::StateNotFound { message: stringify!(#inner).to_string() };
                             return Box::pin(async move { Err(#err_var) });
@@ -1082,8 +1082,8 @@ fn build_stream_invoker_impl(
         match p.extractor.as_str() {
             "State" => {
                 sync_extractions.push(quote! {
-                    let #var_name: #full_type = match state.get::<#inner>() {
-                        Some(v) => afast::State(v.clone()),
+                    let #var_name: afast::State<#inner> = match state.get::<&'static #inner>() {
+                        Some(v) => afast::State(*v),
                         None => {
                             let #err_var = afast::Error::StateNotFound { message: stringify!(#inner).to_string() };
                             return Box::pin(async move { Err(#err_var) });
@@ -1296,8 +1296,8 @@ fn build_ordinary_invoker_impl(
         match p.extractor.as_str() {
             "State" => {
                 state_extractions.push(quote! {
-                    let #var_name: #full_type = match state.get::<#inner>() {
-                        Some(v) => afast::State(v.clone()),
+                    let #var_name: afast::State<#inner> = match state.get::<&'static #inner>() {
+                        Some(v) => afast::State(*v),
                         None => {
                             let #err_var = afast::Error::StateNotFound { message: stringify!(#inner).to_string() };
                             return Box::pin(async move { Err(#err_var) });
@@ -1597,14 +1597,14 @@ fn build_ws_invoker_impl(
 
     for p in params {
         let var_name = syn::Ident::new(&p.name, Span::call_site());
-        let full_type = &p.full_type;
+        let _full_type = &p.full_type;
         let inner = &p.inner_type;
 
         match p.extractor.as_str() {
             "State" => {
                 state_extractions.push(quote! {
-                    let #var_name: #full_type = match state.get::<#inner>() {
-                        Some(v) => afast::State(v.clone()),
+                    let #var_name: afast::State<#inner> = match state.get::<&'static #inner>() {
+                        Some(v) => afast::State(*v),
                         None => {
                             return Err(afast::Error::StateNotFound {
                                 message: stringify!(#inner).to_string()
@@ -1878,14 +1878,14 @@ fn build_sse_invoker_impl(
 
     for p in params {
         let var_name = syn::Ident::new(&p.name, Span::call_site());
-        let full_type = &p.full_type;
+        let _full_type = &p.full_type;
         let inner = &p.inner_type;
 
         match p.extractor.as_str() {
             "State" => {
                 state_extractions.push(quote! {
-                    let #var_name: #full_type = match state.get::<#inner>() {
-                        Some(v) => afast::State(v.clone()),
+                    let #var_name: afast::State<#inner> = match state.get::<&'static #inner>() {
+                        Some(v) => afast::State(*v),
                         None => {
                             return Err(afast::Error::StateNotFound {
                                 message: stringify!(#inner).to_string()
