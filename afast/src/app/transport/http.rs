@@ -44,6 +44,19 @@ use crate::rate_limit::{ConnectionContext, RateLimiter};
 #[cfg(feature = "ordinary-http")]
 use crate::service::OrdinaryRouteInfo;
 
+/// Populates a `ConnectionContext`'s header cache from a `HeaderMap`.
+#[cfg(feature = "rate-limit")]
+fn populate_header_cache(
+    headers: &hyper::header::HeaderMap,
+    cache: &mut std::collections::HashMap<String, String>,
+) {
+    for (name, value) in headers.iter() {
+        if let Ok(v) = value.to_str() {
+            cache.insert(name.as_str().to_lowercase(), v.to_string());
+        }
+    }
+}
+
 /// Configuration for the HTTP server.
 ///
 /// Aggregates all parameters needed by [`serve`] to avoid excessive
@@ -518,12 +531,7 @@ async fn handle_request(
             if let Some(ref limiter) = shared.rate_limiter {
                 let handler_name = compiled.handler_name;
                 let mut ctx = ConnectionContext::new(client_ip.to_string());
-                for (name, value) in req.headers().iter() {
-                    if let Ok(v) = value.to_str() {
-                        ctx.header_cache
-                            .insert(name.as_str().to_lowercase(), v.to_string());
-                    }
-                }
+                populate_header_cache(req.headers(), &mut ctx.header_cache);
                 if let Err(e) = limiter.check(handler_name, &mut ctx).await {
                     let retry = limiter.retry_after_secs(handler_name);
                     let status = StatusCode::TOO_MANY_REQUESTS;
@@ -658,12 +666,7 @@ async fn handle_request(
             #[cfg(feature = "rate-limit")]
             if let Some(ref limiter) = shared.rate_limiter {
                 let mut ctx = ConnectionContext::new(client_ip.to_string());
-                for (name, value) in req.headers().iter() {
-                    if let Ok(v) = value.to_str() {
-                        ctx.header_cache
-                            .insert(name.as_str().to_lowercase(), v.to_string());
-                    }
-                }
+                populate_header_cache(req.headers(), &mut ctx.header_cache);
                 if let Err(e) = limiter.check(compiled.handler_name, &mut ctx).await {
                     let retry = limiter.retry_after_secs(compiled.handler_name);
                     let status = StatusCode::TOO_MANY_REQUESTS;
@@ -720,12 +723,7 @@ async fn handle_request(
                 (&shared.rate_limiter, &shared.doc_code_rate_limit_policy)
             {
                 let mut ctx = ConnectionContext::new(client_ip.to_string());
-                for (name, value) in req.headers().iter() {
-                    if let Ok(v) = value.to_str() {
-                        ctx.header_cache
-                            .insert(name.as_str().to_lowercase(), v.to_string());
-                    }
-                }
+                populate_header_cache(req.headers(), &mut ctx.header_cache);
                 if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
                     let retry = limiter.retry_after_secs(policy);
                     let body = super::util::json_error_body(e.code(), e.message());
@@ -750,12 +748,7 @@ async fn handle_request(
                 (&shared.rate_limiter, &shared.doc_code_rate_limit_policy)
             {
                 let mut ctx = ConnectionContext::new(client_ip.to_string());
-                for (name, value) in req.headers().iter() {
-                    if let Ok(v) = value.to_str() {
-                        ctx.header_cache
-                            .insert(name.as_str().to_lowercase(), v.to_string());
-                    }
-                }
+                populate_header_cache(req.headers(), &mut ctx.header_cache);
                 if let Err(e) = limiter.check_by_policy(policy, &mut ctx).await {
                     let retry = limiter.retry_after_secs(policy);
                     let body = super::util::json_error_body(e.code(), e.message());
@@ -867,12 +860,7 @@ async fn handle_api(
             .unwrap_or("");
         if !handler_name.is_empty() {
             let mut ctx = ConnectionContext::new(client_ip.to_string());
-            for (name, value) in headers.iter() {
-                if let Ok(v) = value.to_str() {
-                    ctx.header_cache
-                        .insert(name.as_str().to_lowercase(), v.to_string());
-                }
-            }
+            populate_header_cache(&headers, &mut ctx.header_cache);
             if let Err(e) = limiter.check(handler_name, &mut ctx).await {
                 return error_response(StatusCode::TOO_MANY_REQUESTS, e.code(), e.message());
             }
@@ -1230,11 +1218,7 @@ async fn handle_ws_upgrade(
     #[cfg(feature = "rate-limit")]
     let mut header_cache = std::collections::HashMap::new();
     #[cfg(feature = "rate-limit")]
-    for (name, value) in req.headers().iter() {
-        if let Ok(v) = value.to_str() {
-            header_cache.insert(name.as_str().to_lowercase(), v.to_string());
-        }
-    }
+    populate_header_cache(req.headers(), &mut header_cache);
 
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.15]
+
+### Fixed
+
+- **Doc WS/SSE 面板路径参数**: WS/SSE 调试面板自动检测 `:param` 路径参数并添加输入框，连接时替换为实际值（之前直接用字面量 `:room` 连接）。
+- **Doc WS/SSE 面板端口**: WS/SSE 面板默认端口从 server 配置自动获取（HTTP port），不再硬编码 `3000`/`5000`。
+- **Doc WS 面板 Query 输入**: WS 调试面板新增 Query 参数输入框。
+- **Doc 输入框样式**: WS/SSE 面板路径参数和 Query 输入框改为全宽显示。
+- **Doc `_` 开头 service 隐藏**: service name 以 `_` 开头的 service 在 index 页面设置 `display:none`。
+- **TCP 启动重复 clone**: 移除 TCP server spawn 块中 `rl`/`hn` 的重复 clone（复制粘贴错误）。
+- **Header 提取代码重复**: 提取 `populate_header_cache()` 辅助函数，替换 HTTP transport 中 6 处重复的 header 遍历代码。
+- **原始类型检查列表重复**: 提取 `is_primitive_type()` 和 `is_primitive_or_container_type()` 函数，替换 proc macro 中 5 处重复的 match 模式。
+- **`Box::leak` 参数名安全文档**: 为 `RoutePattern::parse` 中的 `Box::leak` 添加 `# Safety` 文档，说明仅限启动时调用。
+- **路由收集逻辑重复**: 提取 `AFast::collect_routes()` 辅助函数，service merge 和 add-new 两条路径统一调用。
+
 ## [0.1.14]
 
 ### Breaking Changes

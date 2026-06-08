@@ -60,6 +60,7 @@ pub async fn chat_ws(
         match msg {
             afast::WsMessage::Text(text) => {
                 let reply = format!("[{}] {}", room, text);
+                println!("[ws-chat] received: {}, replying: {}", text, reply);
                 sender.send_text(&reply).await?;
             }
             afast::WsMessage::Close(_) => {

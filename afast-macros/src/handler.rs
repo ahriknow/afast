@@ -20,6 +20,31 @@ struct ParamInfo {
     full_type: Type,
 }
 
+/// Returns `true` if the type identifier is a Rust primitive or `String`.
+fn is_primitive_type(ident: Option<&str>) -> bool {
+    matches!(
+        ident,
+        Some(
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "String"
+        )
+    )
+}
+
+/// Returns `true` if the type identifier is a primitive, `String`, `Vec`, or `Option`.
+fn is_primitive_or_container_type(ident: Option<&str>) -> bool {
+    is_primitive_type(ident) || matches!(ident, Some("Vec" | "Option"))
+}
+
 /// Entry point for the `#[handler]` and `#[get]`/`#[post]`/etc. proc-macro
 /// attributes.
 ///
@@ -114,22 +139,7 @@ pub fn expand(
     // generator can recursively discover nested complex types.
     let return_structure = return_type_syn.as_ref().and_then(|ty| {
         let ident = extract_outermost_ident(ty);
-        let is_primitive = matches!(
-            ident.as_deref(),
-            Some(
-                "i8" | "i16"
-                    | "i32"
-                    | "i64"
-                    | "u8"
-                    | "u16"
-                    | "u32"
-                    | "u64"
-                    | "f32"
-                    | "f64"
-                    | "bool"
-                    | "String"
-            )
-        );
+        let is_primitive = is_primitive_type(ident.as_deref());
         let is_response_wrapper = matches!(
             ident.as_deref(),
             Some("Json" | "Text" | "Html" | "File" | "Status" | "Redirect")
@@ -144,22 +154,7 @@ pub fn expand(
             // is complex (non-primitive), emit a structure pointer to it.
             if let Ok(inner_ty) = extract_generic_inner(ty) {
                 let inner_ident = extract_outermost_ident(&inner_ty);
-                let inner_is_primitive = matches!(
-                    inner_ident.as_deref(),
-                    Some(
-                        "i8" | "i16"
-                            | "i32"
-                            | "i64"
-                            | "u8"
-                            | "u16"
-                            | "u32"
-                            | "u64"
-                            | "f32"
-                            | "f64"
-                            | "bool"
-                            | "String"
-                    )
-                );
+                let inner_is_primitive = is_primitive_type(inner_ident.as_deref());
                 if !inner_is_primitive {
                     return Some(quote! { || <#inner_ty as afast::Structure>::structure() });
                 }
@@ -170,22 +165,7 @@ pub fn expand(
                     && let Ok(nested) = extract_generic_inner(&inner_ty)
                 {
                     let nested_ident = extract_outermost_ident(&nested);
-                    let nested_is_primitive = matches!(
-                        nested_ident.as_deref(),
-                        Some(
-                            "i8" | "i16"
-                                | "i32"
-                                | "i64"
-                                | "u8"
-                                | "u16"
-                                | "u32"
-                                | "u64"
-                                | "f32"
-                                | "f64"
-                                | "bool"
-                                | "String"
-                        )
-                    );
+                    let nested_is_primitive = is_primitive_type(nested_ident.as_deref());
                     if !nested_is_primitive {
                         return Some(quote! { || <#nested as afast::Structure>::structure() });
                     }
@@ -200,24 +180,7 @@ pub fn expand(
                 && let Ok(inner_ty) = extract_generic_inner(ty)
             {
                 let inner_ident = extract_outermost_ident(&inner_ty);
-                let inner_is_primitive = matches!(
-                    inner_ident.as_deref(),
-                    Some(
-                        "i8" | "i16"
-                            | "i32"
-                            | "i64"
-                            | "u8"
-                            | "u16"
-                            | "u32"
-                            | "u64"
-                            | "f32"
-                            | "f64"
-                            | "bool"
-                            | "String"
-                            | "Vec"
-                            | "Option"
-                    )
-                );
+                let inner_is_primitive = is_primitive_or_container_type(inner_ident.as_deref());
                 if !inner_is_primitive {
                     return Some(quote! { || <#inner_ty as afast::Structure>::structure() });
                 }
@@ -227,24 +190,8 @@ pub fn expand(
                     && let Ok(nested) = extract_generic_inner(&inner_ty)
                 {
                     let nested_ident = extract_outermost_ident(&nested);
-                    let nested_is_primitive = matches!(
-                        nested_ident.as_deref(),
-                        Some(
-                            "i8" | "i16"
-                                | "i32"
-                                | "i64"
-                                | "u8"
-                                | "u16"
-                                | "u32"
-                                | "u64"
-                                | "f32"
-                                | "f64"
-                                | "bool"
-                                | "String"
-                                | "Vec"
-                                | "Option"
-                        )
-                    );
+                    let nested_is_primitive =
+                        is_primitive_or_container_type(nested_ident.as_deref());
                     if !nested_is_primitive {
                         return Some(quote! { || <#nested as afast::Structure>::structure() });
                     }

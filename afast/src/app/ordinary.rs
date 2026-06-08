@@ -74,8 +74,14 @@ impl RoutePattern {
             return RoutePattern::Exact(pattern.to_string());
         }
 
-        // Parameter names are leaked into static memory to avoid lifetime
-        // management on the pattern, which lives for the duration of the process.
+        // Parameter names are intentionally leaked into `'static` memory.
+        //
+        // # Safety
+        // This is called only at startup (inside `AFast::build` / `serve`) when
+        // compiling route patterns. Each leak is a small, bounded string (route
+        // param names like `"id"`, `"user_id"`). The total leaked memory is
+        // proportional to the number of unique route param names — typically a
+        // few hundred bytes. This must NOT be called in a loop or at runtime.
         let route_segments: Vec<RouteSegment> = segments
             .iter()
             .map(|s| {

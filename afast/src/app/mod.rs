@@ -621,63 +621,20 @@ impl AFast {
     pub fn service(mut self, mut service: Service) -> Self {
         // Check for duplicate service name — merge if found.
         if !service.name.is_empty()
-            && let Some(existing) = self.services.iter_mut().find(|s| s.name == service.name)
+            && let Some(idx) = self.services.iter().position(|s| s.name == service.name)
         {
-            // Merge handlers: assign offsets for new handlers continuing
-            // from the existing handler_table length.
-            #[cfg(feature = "binary")]
-            build_handler_table(&service.handlers, &mut self.handler_table);
-            #[cfg(not(feature = "binary"))]
-            build_handler_table(&service.handlers, &mut 0);
+            // Merge handlers and routes into self + existing.
+            self.collect_routes(&service);
 
+            let existing = &mut self.services[idx];
             #[cfg(feature = "ordinary-http")]
-            {
-                // Add routes to the global HTTP dispatch table
-                for route in &service.ordinary_routes {
-                    self.ordinary_routes.push(route.clone());
-                }
-                collect_ordinary_from_tree(
-                    &service.handlers,
-                    "",
-                    &service.name,
-                    &mut self.ordinary_routes,
-                );
-                // Also add to the existing service for code generation
-                existing
-                    .ordinary_routes
-                    .append(&mut service.ordinary_routes);
-            }
-
+            existing
+                .ordinary_routes
+                .append(&mut service.ordinary_routes);
             #[cfg(feature = "ordinary-ws")]
-            {
-                for route in &service.ws_routes {
-                    self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
-                        path: route.path,
-                        handler_name: route.handler_name,
-                        pattern: route.pattern.clone(),
-                        invoker: route.invoker,
-                        service_name: route.service_name.clone(),
-                        attrs: route.attrs,
-                    });
-                }
-                existing.ws_routes.append(&mut service.ws_routes);
-            }
-
+            existing.ws_routes.append(&mut service.ws_routes);
             #[cfg(feature = "ordinary-sse")]
-            {
-                for route in &service.sse_routes {
-                    self.sse_routes
-                        .push(crate::app::ordinary_sse::SseRouteInfo {
-                            path: route.path,
-                            handler_name: route.handler_name,
-                            pattern: route.pattern.clone(),
-                            invoker: route.invoker,
-                            service_name: route.service_name.clone(),
-                            attrs: route.attrs,
-                        });
-                }
-                existing.sse_routes.append(&mut service.sse_routes);
-            }
+            existing.sse_routes.append(&mut service.sse_routes);
 
             existing.handlers.append(&mut service.handlers);
 
@@ -689,6 +646,15 @@ impl AFast {
             return self;
         }
 
+        self.collect_routes(&service);
+        self.services.push(service);
+        self
+    }
+
+    /// Registers handlers in the dispatch table and copies ordinary/WS/SSE
+    /// routes into the global route lists. Shared between the merge and
+    /// add-new paths in [`service`](Self::service).
+    fn collect_routes(&mut self, service: &Service) {
         #[cfg(feature = "binary")]
         build_handler_table(&service.handlers, &mut self.handler_table);
         #[cfg(not(feature = "binary"))]
@@ -708,9 +674,21 @@ impl AFast {
         }
 
         #[cfg(feature = "ordinary-ws")]
-        {
-            for route in &service.ws_routes {
-                self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
+        for route in &service.ws_routes {
+            self.ws_routes.push(crate::app::ordinary_ws::WsRouteInfo {
+                path: route.path,
+                handler_name: route.handler_name,
+                pattern: route.pattern.clone(),
+                invoker: route.invoker,
+                service_name: route.service_name.clone(),
+                attrs: route.attrs,
+            });
+        }
+
+        #[cfg(feature = "ordinary-sse")]
+        for route in &service.sse_routes {
+            self.sse_routes
+                .push(crate::app::ordinary_sse::SseRouteInfo {
                     path: route.path,
                     handler_name: route.handler_name,
                     pattern: route.pattern.clone(),
@@ -718,26 +696,7 @@ impl AFast {
                     service_name: route.service_name.clone(),
                     attrs: route.attrs,
                 });
-            }
         }
-
-        #[cfg(feature = "ordinary-sse")]
-        {
-            for route in &service.sse_routes {
-                self.sse_routes
-                    .push(crate::app::ordinary_sse::SseRouteInfo {
-                        path: route.path,
-                        handler_name: route.handler_name,
-                        pattern: route.pattern.clone(),
-                        invoker: route.invoker,
-                        service_name: route.service_name.clone(),
-                        attrs: route.attrs,
-                    });
-            }
-        }
-
-        self.services.push(service);
-        self
     }
 
     /// Sets the client code generation targets.
@@ -1282,10 +1241,6 @@ impl AFast {
                                             let handlers = handlers_clone.clone();
                                             #[cfg(feature = "hook")]
                                             let hooks = hooks_clone.clone();
-                                            #[cfg(feature = "rate-limit")]
-                                            let rl = rl.clone();
-                                            #[cfg(feature = "rate-limit")]
-                                            let hn = hn.clone();
                                             #[cfg(feature = "rate-limit")]
                                             let rl = rl.clone();
                                             #[cfg(feature = "rate-limit")]

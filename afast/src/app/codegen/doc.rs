@@ -1178,6 +1178,9 @@ input[type="checkbox"] { width: auto; }
 // verbatim inside a <script> tag.
 
 const UI_JS: &str = r#"
+// Ports replaced at doc generation time
+const HTTP_PORT = 'REPLACE_HTTP_PORT';
+const WS_PORT = 'REPLACE_WS_PORT';
 // ─── af-field WebComponent ────────────────────────────────────
 class AfField extends HTMLElement {
     constructor() {
@@ -1910,7 +1913,7 @@ customElements.define('af-array', AfArray);
     transportSelect.value = LS('transport', 'ws');
     secureCheck.checked = LS('secure', window.location.protocol === 'https:' ? 'true' : '') === 'true';
     hostInput.value = LS('host', window.location.hostname || 'localhost');
-    portInput.value = LS('port', transportSelect.value === 'ws' ? '3000' : '5000');
+    portInput.value = LS('port', transportSelect.value === 'ws' ? WS_PORT : HTTP_PORT);
 
     function buildUrl() {
         const proto = transportSelect.value === 'ws'
@@ -1939,7 +1942,7 @@ customElements.define('af-array', AfArray);
 }
 
     transportSelect.addEventListener('change', () => {
-        const newPort = transportSelect.value === 'ws' ? '3000' : '5000';
+        const newPort = transportSelect.value === 'ws' ? WS_PORT : HTTP_PORT;
         portInput.placeholder = newPort;
         portInput.value = newPort;
         saveSettings();
@@ -1977,7 +1980,7 @@ customElements.define('af-array', AfArray);
         disconnectClient();
         const transport = transportSelect.value;
         const host = hostInput.value.trim() || 'localhost';
-        const port = parseInt(portInput.value.trim()) || (transport === 'ws' ? 3000 : 5000);
+        const port = parseInt(portInput.value.trim()) || (transport === 'ws' ? parseInt(WS_PORT) : parseInt(HTTP_PORT));
         const tls = secureCheck.checked;
 
         try {
@@ -2650,7 +2653,15 @@ customElements.define('af-array', AfArray);
         const body = document.createElement('div');
         body.className = 'endpoint-body';
         body.id = 'body-' + uid;
+        // Detect path parameters from route pattern
+        const wsPathParams = (route.path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+        let wsParamHtml = '';
+        wsPathParams.forEach(p => {
+            wsParamHtml += '<div style="margin-bottom:6px;"><label style="color:var(--text-secondary);font-size:13px;"><span style="display:inline-block;min-width:40px;padding:2px 6px;background:var(--accent-bg);color:var(--accent);border-radius:4px;font-size:11px;text-align:center;margin-right:4px;">path</span> <code>:' + p + '</code></label><br><input id="' + uid + '-param-' + p + '" placeholder="e.g. general" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;width:100%;margin-top:4px;box-sizing:border-box;"></div>';
+        });
         body.innerHTML = '<div style="margin-bottom:8px;font-size:13px;color:var(--text-secondary);">Path: <code>' + route.path + '</code> &nbsp; Handler: <code>' + route.handlerName + '</code></div>'
+            + wsParamHtml
+            + '<div style="margin-bottom:8px;"><label style="color:var(--text-secondary);font-size:13px;">Query</label><br><input id="' + uid + '-query" placeholder="key=value&key2=value2" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;width:100%;margin-top:4px;box-sizing:border-box;"></div>'
             + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
             + '<button class="btn btn-primary" id="' + uid + '-connect">Connect</button>'
             + '<button class="btn btn-secondary" id="' + uid + '-disconnect" disabled>Disconnect</button>'
@@ -2692,8 +2703,17 @@ customElements.define('af-array', AfArray);
             ev.stopPropagation();
             const proto = secureCheck.checked ? 'wss' : 'ws';
             const host = hostInput.value.trim() || 'localhost';
-            const port = portInput.value.trim() || '3000';
-            const url = proto + '://' + host + ':' + port + route.path;
+            const port = HTTP_PORT;
+            // Substitute path parameters (:param → actual value)
+            let urlPath = route.path;
+            (route.path.match(/:(\w+)/g) || []).forEach(m => {
+                const p = m.slice(1);
+                const inp = card.querySelector('#' + uid + '-param-' + p);
+                const val = (inp ? inp.value.trim() : '') || p;
+                urlPath = urlPath.replace(m, encodeURIComponent(val));
+            });
+            const qs = (card.querySelector('#' + uid + '-query') || {}).value || '';
+            const url = proto + '://' + host + ':' + port + urlPath + (qs.trim() ? '?' + qs.trim() : '');
             wsLog('\u2192', 'Connecting to ' + url + ' ...');
             wsConn = new WebSocket(url);
             wsConn.addEventListener('open', () => {
@@ -2745,7 +2765,14 @@ customElements.define('af-array', AfArray);
         const body = document.createElement('div');
         body.className = 'endpoint-body';
         body.id = 'body-' + uid;
+        // Detect path parameters from route pattern
+        const ssePathParams = (route.path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+        let sseParamHtml = '';
+        ssePathParams.forEach(p => {
+            sseParamHtml += '<div style="margin-bottom:6px;"><label style="color:var(--text-secondary);font-size:13px;"><span style="display:inline-block;min-width:40px;padding:2px 6px;background:var(--accent-bg);color:var(--accent);border-radius:4px;font-size:11px;text-align:center;margin-right:4px;">path</span> <code>:' + p + '</code></label><br><input id="' + uid + '-param-' + p + '" placeholder="' + p + '" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;width:100%;margin-top:4px;box-sizing:border-box;"></div>';
+        });
         body.innerHTML = '<div style="margin-bottom:8px;font-size:13px;color:var(--text-secondary);">Path: <code>GET ' + route.path + '</code> &nbsp; Handler: <code>' + route.handlerName + '</code></div>'
+            + sseParamHtml
             + '<div style="margin-bottom:8px;font-size:12px;">'
             + '<label style="color:var(--text-secondary);">Query: <input id="' + uid + '-query" placeholder="key=value&key2=value2" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-family:monospace;font-size:14px;width:400px;margin-left:4px;"></label>'
             + '</div>'
@@ -2785,8 +2812,16 @@ customElements.define('af-array', AfArray);
             ev.stopPropagation();
             const proto = secureCheck.checked ? 'https' : 'http';
             const host = hostInput.value.trim() || 'localhost';
-            const port = location.port || '5000';
-            let url = proto + '://' + host + ':' + port + route.path;
+            const port = location.port || HTTP_PORT;
+            // Substitute path parameters
+            let urlPath = route.path;
+            (route.path.match(/:(\w+)/g) || []).forEach(m => {
+                const p = m.slice(1);
+                const inp = card.querySelector('#' + uid + '-param-' + p);
+                const val = (inp ? inp.value.trim() : '') || p;
+                urlPath = urlPath.replace(m, encodeURIComponent(val));
+            });
+            let url = proto + '://' + host + ':' + port + urlPath;
             const qs = queryInput.value.trim();
             if (qs) url += '?' + qs;
             sseLog('\u2192', 'Connecting to ' + url + ' ...');
@@ -3540,9 +3575,14 @@ pub(crate) fn generate_index_html(services: &[Service], doc_title: Option<&str>)
             format!(r#"<p class="service-desc">{}</p>"#, html_escape(&svc.desc))
         };
         let safe_name = html_escape(&svc.name);
+        let style = if svc.name.starts_with('_') {
+            r#" style="display:none""#
+        } else {
+            ""
+        };
         cards.push_str(&format!(
-            r#"<a href="/doc/{name}" class="service-card"><h2>{name}</h2>{desc}<p>{count} handler(s)</p></a>"#,
-            name = safe_name, desc = desc_html, count = count
+            r#"<a href="/doc/{name}" class="service-card"{style}><h2>{name}</h2>{desc}<p>{count} handler(s)</p></a>"#,
+            name = safe_name, desc = desc_html, count = count, style = style
         ));
     }
 
@@ -3732,20 +3772,12 @@ pub(crate) fn generate_service_html(
         js_client = js_client,
         ui_js = UI_JS
             .replace(
-                "'3000' : '5000'",
-                &format!(
-                    "'{}' : '{}'",
-                    ws_port.unwrap_or(3000),
-                    http_port.unwrap_or(5000)
-                )
+                "'REPLACE_HTTP_PORT'",
+                &format!("'{}'", http_port.unwrap_or(5001)),
             )
             .replace(
-                "? 3000 : 5000)",
-                &format!(
-                    "? {} : {})",
-                    ws_port.unwrap_or(3000),
-                    http_port.unwrap_or(5000)
-                )
+                "'REPLACE_WS_PORT'",
+                &format!("'{}'", ws_port.unwrap_or(3001)),
             ),
         schema_json = schema_json,
         title = title,
