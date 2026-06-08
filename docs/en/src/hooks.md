@@ -1,0 +1,260 @@
+# Lifecycle Hooks
+
+Enable the `hook` feature to intercept request lifecycle events for observability, tracing, logging, or custom middleware.
+
+## Quick Example
+
+```rust
+use afast::hook::{Hook, RequestContext, RequestGuard, ConnectionGuard};
+
+struct LoggingHook;
+
+impl Hook for LoggingHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        println!("→ {} ({})", ctx.handler_name, ctx.transport);
+        Some(Box::new(std::time::Instant::now()))
+    }
+
+    fn on_connect(&self, ctx: &RequestContext) -> Option<Box<dyn ConnectionGuard>> {
+        println!("↕ connect: {} ({})", ctx.handler_name, ctx.transport);
+        Some(Box::new(()))
+    }
+}
+
+impl RequestGuard for std::time::Instant {
+    fn on_response(&mut self, ctx: &RequestContext, _resp: &[u8]) {
+        println!("← {} OK ({:?})", ctx.handler_name, self.elapsed());
+    }
+    fn on_error(&mut self, ctx: &RequestContext, err: &afast::Error) {
+        println!("✗ {} error: {}", ctx.handler_name, err);
+    }
+}
+
+impl ConnectionGuard for () {
+    fn on_disconnect(&mut self, ctx: &RequestContext) {
+        println!("✕ disconnect: {} ({})", ctx.handler_name, ctx.transport);
+    }
+}
+```
+
+## Hook Traits
+
+### `Hook` — Entry Point
+
+```rust
+pub trait Hook: Send + Sync + 'static {
+    /// Called before each request for request-response interfaces
+    /// (HTTP binary, WS binary, TCP binary, ordinary HTTP).
+    /// Return a `RequestGuard` to observe the response.
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> { None }
+
+    /// Called when a connection is established for connection-oriented interfaces
+    /// (WS long, TCP long, ordinary WS, SSE).
+    /// Return a `ConnectionGuard` to observe disconnection.
+    fn on_connect(&self, ctx: &RequestContext) -> Option<Box<dyn ConnectionGuard>> { None }
+}
+```
+
+### `RequestGuard` — Per-Request Observer
+
+```rust
+pub trait RequestGuard: Send + 'static {
+    /// Called when the handler returns Ok.
+    fn on_response(&mut self, ctx: &RequestContext, response: &[u8]) {}
+
+    /// Called when the handler returns Err.
+    fn on_error(&mut self, ctx: &RequestContext, error: &afast::Error) {}
+}
+```
+
+### `ConnectionGuard` — Long Connection Observer
+
+```rust
+pub trait ConnectionGuard: Send + 'static {
+    /// Called when the connection is closed.
+    fn on_disconnect(&mut self, ctx: &RequestContext) {}
+}
+```
+
+## Global and Service Hooks
+
+```rust
+let app = AFast::new()
+    .hook(LoggingHook)                   // Global: all handlers
+    .service(
+        service!("api" => { h(handler) })
+            .hook(ApiSpecificHook)       // Service: only this service's handlers
+    );
+```
+
+- **Global hooks** run for every handler across all services.
+- **Service hooks** run only for handlers in that service.
+- Both always execute — they never replace each other.
+- Execution order: global first, then service (onion model 🧅).
+
+## Hook Lifecycle by Transport
+
+Hooks are divided into two categories by interface type:
+
+- **`before_request`** (request-response): HTTP binary, WS binary, TCP binary, ordinary HTTP.
+- **`on_connect`** (connection-oriented): WS long, TCP long, ordinary WS, SSE.
+
+### Binary Protocol (HTTP `POST /_api`, WS `/_ws`, TCP)
+
+Regular handlers (request-response):
+
+```
+before_request → handler → on_response / on_error
+```
+
+Long-connection handlers (`call_stream`):
+
+```
+on_connect → handler → on_disconnect
+```
+
+### Ordinary HTTP (`ordinary-http`)
+
+```
+before_request → handler → on_response / on_error
+```
+
+`on_connect` / `on_disconnect` are **not** called for ordinary HTTP (stateless request/response).
+
+### Ordinary WebSocket (`ordinary-ws`)
+
+```
+on_connect → handler → on_disconnect
+```
+
+- `on_connect`: fires after the WebSocket handshake completes.
+- `on_disconnect`: fires after the handler returns and forwarding tasks are cleaned up.
+
+### Ordinary SSE (`ordinary-sse`)
+
+```
+on_connect → handler (spawned) → on_disconnect
+```
+
+- `on_connect`: fires before the SSE response is sent and the handler is spawned.
+- `on_disconnect`: fires after the handler task completes.
+
+## Request Context Integration
+
+Hooks can read and write per-request data via the `ctx` field on `RequestContext`. This data is then available to handlers via the `Ctx<T>` extractor.
+
+```rust
+use afast::hook::{Hook, RequestContext};
+
+#[derive(Clone)]
+struct RequestId(pub String);
+
+struct CtxHook;
+
+impl Hook for CtxHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // Write into the per-request context
+        ctx.ctx.insert(RequestId(format!("req-{:08x}", /* ... */)));
+        None
+    }
+}
+```
+
+The handler retrieves it automatically:
+
+```rust
+#[handler(desc("..."))]
+async fn my_handler(ctx: afast::Ctx<RequestId>) -> afast::Result<()> {
+    println!("request_id = {}", ctx.0 .0);
+    Ok(())
+}
+```
+
+The same context is shared across all hooks and the handler for a single request. For long-connection handlers (WS/TCP), the context lives for the entire connection duration.
+
+See [Request Context (`Ctx`)](./context.md) for full documentation.
+
+## Accessing Custom Attributes
+
+`RequestContext` exposes the handler's custom attributes via `ctx.attrs`:
+
+```rust
+impl Hook for DeprecationHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        for attr in ctx.attrs {
+            match attr.key {
+                "deprecated" => eprintln!("WARNING: {} is deprecated", ctx.handler_name),
+                "tag" => {
+                    if let AttrValue::Str(v) = attr.value {
+                        eprintln!("tag: {}", v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+```
+
+## Hook Key — Route Matching
+
+Hooks are matched by **`"service_name:route_path"`**, not by handler function name. This avoids conflicts when the same function name appears in different groups within the same service:
+
+```rust
+service!("admin" => {
+    group("users" => {
+        get("info", get_info),    // key: "admin:/users/info"
+    }),
+    group("posts" => {
+        get("info", get_info),    // key: "admin:/posts/info" — no conflict!
+    }),
+})
+```
+
+For merged services (same service name registered multiple times), hook entries are automatically deduplicated.
+
+## RequestContext Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `handler_name` | `&'static str` | Handler function name |
+| `handler_desc` | `&'static str` | Description from `#[handler(desc(...))]` |
+| `transport` | `&'static str` | `"http-binary"`, `"http"`, `"ws-binary"`, `"ws"`, `"tcp"`, or `"sse"` |
+| `is_binary` | `bool` | Whether this is a binary protocol handler |
+| `method` | `&'static str` | HTTP method (`"GET"`, `"POST"`, etc.), empty for non-HTTP |
+| `long_connection` | `bool` | Whether this is a long-connection handler (`Receiver`/`Sender`) |
+| `handler_id` | `usize` | Handler offset in binary dispatch table (0 for ordinary routes) |
+| `state` | `Arc<StateMap>` | Shared application state |
+| `ctx` | `RequestCtx` | Per-request context container (hooks write, handlers read via `Ctx<T>`) |
+| `attrs` | `&'static [Attr]` | Custom handler attributes from `#[handler(...)]` |
+
+## Supported Extractors
+
+All extractors work across all transports:
+
+| Extractor | HTTP | WS | SSE | TCP |
+|-----------|:---:|:---:|:---:|:---:|
+| `State<T>` | ✅ | ✅ | ✅ | ✅ |
+| `Query<T>` | ✅ | ✅ | ✅ | — |
+| `Param<T>` | ✅ | ✅ | ✅ | — |
+| `Header<T>` | ✅ | ✅ | ✅ | — |
+| `Body<T>` | ✅ | — | — | — |
+| `Custom<T>` | — | — | — | ✅ |
+| `Data` | — | — | — | ✅ |
+| `WsSender` | — | ✅ | — | — |
+| `WsReceiver` | — | ✅ | — | — |
+| `SseSender` | — | — | ✅ | — |
+| `Sender` | — | — | — | ✅ |
+| `Receiver` | — | — | — | ✅ |
+
+## Server Example Output
+
+```
+[hook] ↕ connect: chat_ws (ws)       ← on_connect
+[check-svc] ▶ chat_ws                ← service hook
+[ws-chat] client joined room: test   ← handler runs
+[ws-chat] client left room: test     ← handler returns
+[hook] ✕ disconnect: chat_ws (ws)    ← on_disconnect
+[check-svc] ◀ chat_ws done           ← service hook done
+```

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AFast Documentation</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh;
+            background: #1e1e2e; color: #cdd6f4;
+        }
+        .container { text-align: center; }
+        h1 { font-size: 2rem; margin-bottom: 2rem; }
+        .buttons { display: flex; gap: 1.5rem; justify-content: center; }
+        a.btn {
+            display: inline-block; padding: 14px 36px; border-radius: 8px;
+            font-size: 1.1rem; text-decoration: none; font-weight: 600;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        a.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        a.btn-en { background: #89b4fa; color: #1e1e2e; }
+        a.btn-zh { background: #a6e3a1; color: #1e1e2e; }
+        .auto { margin-top: 1.5rem; font-size: 0.85rem; color: #6c7086; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AFast Documentation</h1>
+        <div class="buttons">
+            <a class="btn btn-en" href="/en/">English</a>
+            <a class="btn btn-zh" href="/zh/">简体中文</a>
+        </div>
+        <p class="auto">Auto-redirecting based on browser language...</p>
+    </div>
+    <script>
+        (function() {
+            var lang = navigator.language || navigator.userLanguage || '';
+            if (lang.startsWith('zh')) {
+                window.location.href = '/zh/';
+            } else {
+                window.location.href = '/en/';
+            }
+        })();
+    </script>
+</body>
+</html>

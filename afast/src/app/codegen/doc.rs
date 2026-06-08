@@ -509,7 +509,15 @@ fn build_handler_tree(handlers: &[Handler], path_prefix: &[&str]) -> Vec<String>
         if h.meta.name.is_empty() {
             jb.number(-1);
         } else {
-            jb.number(h.stable_id as i64);
+            // Use FNV-1a hash of full path as unique ID.
+            // stable_id is 0 for ordinary HTTP handlers, so we hash the path instead.
+            let path_str = full_path.join(".");
+            let mut hash: u32 = 0x811c9dc5;
+            for b in path_str.bytes() {
+                hash ^= b as u32;
+                hash = hash.wrapping_mul(0x01000193);
+            }
+            jb.number(hash as i64);
         }
         jb.comma();
 
@@ -1178,9 +1186,8 @@ input[type="checkbox"] { width: auto; }
 // verbatim inside a <script> tag.
 
 const UI_JS: &str = r#"
-// Ports replaced at doc generation time
-const HTTP_PORT = 'REPLACE_HTTP_PORT';
-const WS_PORT = 'REPLACE_WS_PORT';
+// Default port replaced at doc generation time
+const DEFAULT_PORT = 'REPLACE_DEFAULT_PORT';
 // ─── af-field WebComponent ────────────────────────────────────
 class AfField extends HTMLElement {
     constructor() {
@@ -1913,7 +1920,7 @@ customElements.define('af-array', AfArray);
     transportSelect.value = LS('transport', 'ws');
     secureCheck.checked = LS('secure', window.location.protocol === 'https:' ? 'true' : '') === 'true';
     hostInput.value = LS('host', window.location.hostname || 'localhost');
-    portInput.value = LS('port', transportSelect.value === 'ws' ? WS_PORT : HTTP_PORT);
+    portInput.value = LS('port', DEFAULT_PORT);
 
     function buildUrl() {
         const proto = transportSelect.value === 'ws'
@@ -1942,7 +1949,7 @@ customElements.define('af-array', AfArray);
 }
 
     transportSelect.addEventListener('change', () => {
-        const newPort = transportSelect.value === 'ws' ? WS_PORT : HTTP_PORT;
+        const newPort = DEFAULT_PORT;
         portInput.placeholder = newPort;
         portInput.value = newPort;
         saveSettings();
@@ -1980,7 +1987,7 @@ customElements.define('af-array', AfArray);
         disconnectClient();
         const transport = transportSelect.value;
         const host = hostInput.value.trim() || 'localhost';
-        const port = parseInt(portInput.value.trim()) || (transport === 'ws' ? parseInt(WS_PORT) : parseInt(HTTP_PORT));
+        const port = parseInt(portInput.value.trim()) || parseInt(DEFAULT_PORT);
         const tls = secureCheck.checked;
 
         try {
@@ -2703,7 +2710,7 @@ customElements.define('af-array', AfArray);
             ev.stopPropagation();
             const proto = secureCheck.checked ? 'wss' : 'ws';
             const host = hostInput.value.trim() || 'localhost';
-            const port = HTTP_PORT;
+            const port = portInput.value.trim() || DEFAULT_PORT;
             // Substitute path parameters (:param → actual value)
             let urlPath = route.path;
             (route.path.match(/:(\w+)/g) || []).forEach(m => {
@@ -2812,7 +2819,7 @@ customElements.define('af-array', AfArray);
             ev.stopPropagation();
             const proto = secureCheck.checked ? 'https' : 'http';
             const host = hostInput.value.trim() || 'localhost';
-            const port = location.port || HTTP_PORT;
+            const port = portInput.value.trim() || location.port || DEFAULT_PORT;
             // Substitute path parameters
             let urlPath = route.path;
             (route.path.match(/:(\w+)/g) || []).forEach(m => {
@@ -3653,13 +3660,9 @@ pub(crate) fn generate_service_html(
     let safe_service_name = html_escape(service_name);
     let http_port = http_addr
         .rsplit(':')
-        .next_back()
+        .next()
         .and_then(|s| s.parse::<u16>().ok());
-    let ws_port = ws_addr.and_then(|a| {
-        a.rsplit(':')
-            .next_back()
-            .and_then(|s| s.parse::<u16>().ok())
-    });
+    let _ws_port = ws_addr.and_then(|a| a.rsplit(':').next().and_then(|s| s.parse::<u16>().ok()));
     let theme_icon = "☀️";
     let desc_line = if svc.desc.is_empty() {
         String::new()
@@ -3770,15 +3773,10 @@ pub(crate) fn generate_service_html(
 </html>"#,
         css = CSS,
         js_client = js_client,
-        ui_js = UI_JS
-            .replace(
-                "'REPLACE_HTTP_PORT'",
-                &format!("'{}'", http_port.unwrap_or(5001)),
-            )
-            .replace(
-                "'REPLACE_WS_PORT'",
-                &format!("'{}'", ws_port.unwrap_or(3001)),
-            ),
+        ui_js = UI_JS.replace(
+            "'REPLACE_DEFAULT_PORT'",
+            &format!("'{}'", http_port.unwrap_or(5001)),
+        ),
         schema_json = schema_json,
         title = title,
         safe_service_name = safe_service_name,

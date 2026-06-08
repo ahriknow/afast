@@ -39,13 +39,23 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build docs
-        run: mdbook build docs
+      - name: Build English docs
+        run: mdbook build docs/en
+
+      - name: Build Chinese docs
+        run: mdbook build docs/zh
+
+      - name: Merge into single site
+        run: |
+          mkdir -p site/en site/zh
+          cp -r docs/en/book/* site/en/
+          cp -r docs/zh/book/* site/zh/
+          cp docs/index.html site/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/book
+          path: site
 
   deploy:
     needs: build

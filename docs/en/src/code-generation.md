@@ -66,12 +66,12 @@ GET /code/api/rs?call=tcp-async
 import { ApiClient } from './api';
 
 // Dedicated WS port
-const wsClient = new ApiClient('ws://localhost:3000');
+const wsClient = new ApiClient('ws://localhost:3001');
 const wsResult = await wsClient.apis.user.list_users({ page: 1, size: 20 });
 
 // Merged mode (WS and HTTP on the same port)
-const mergedClient = new ApiClient('ws://localhost:5000');
-// Auto-connects to ws://localhost:5000/_ws
+const mergedClient = new ApiClient('ws://localhost:5001');
+// Auto-connects to ws://localhost:5001/_ws
 ```
 
 The client transport mode is fixed at construction time.

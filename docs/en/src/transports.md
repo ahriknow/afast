@@ -114,7 +114,7 @@ let svc = service!("chat" => {
 
 Connect: `ws://host:port/chat/general?token=abc`
 
-TS/JS 客户端自动生成平台感知的 WebSocket 连接方法，兼容浏览器、UniApp 和微信小程序。
+TS/JS clients auto-generate platform-aware WebSocket connection methods, compatible with browsers, UniApp, and WeChat Mini Programs.
 
 ## Server-Sent Events (SSE)
 

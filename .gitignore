@@ -4,3 +4,5 @@
 /example/client
 *.pem
 docs/book
+docs/zh/book
+docs/en/book
