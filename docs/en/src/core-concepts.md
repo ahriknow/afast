@@ -148,6 +148,49 @@ Generated TypeScript client method signature:
 async searchUsers(page: PageRequest, filter: FilterRequest): Promise<PageResponse>
 ```
 
+## Custom Error Types
+
+`afast::Result<T>` defaults to `Error`, but all handler macros support custom error types. Implement the `AFastError` trait:
+
+```rust
+use afast::AFastError;
+
+enum AppError {
+    NotFound { resource: String },
+    Forbidden { reason: String },
+}
+
+impl AFastError for AppError {
+    fn code(&self) -> i64 {
+        match self {
+            AppError::NotFound { .. } => 404,
+            AppError::Forbidden { .. } => 403,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            AppError::NotFound { resource } => format!("{} not found", resource),
+            AppError::Forbidden { reason } => reason.clone(),
+        }
+    }
+}
+```
+
+Then use `afast::Result<T, AppError>` in handlers:
+
+```rust
+#[handler(desc("Get user"))]
+async fn get_user(id: Data<UserId>) -> afast::Result<UserInfo, AppError> {
+    let user = find_user(&id).ok_or(AppError::NotFound { resource: "user".into() })?;
+    Ok(user)
+}
+```
+
+Works with all macros: `#[handler]`, `#[get]`/`#[post]`/`#[put]`/`#[delete]`, `#[ws]`, `#[sse]`.
+
+Using `afast::Result<T>` (without the second parameter) is equivalent to `Result<T, Error>` and is fully backward compatible.
+
 ## Extractor Types
 
 | Extractor | Description | Protocols |

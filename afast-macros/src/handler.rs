@@ -1111,7 +1111,7 @@ fn build_stream_invoker_impl(
     let spawn_body = if returns_result {
         quote! {
             if let Err(e) = #fn_name( #( #call_args ),* ).await {
-                eprintln!("afast: long-connection handler error: {}", e);
+                eprintln!("afast: long-connection handler error: {}", afast::AFastError::message(&e));
             }
         }
     } else {
@@ -1691,7 +1691,10 @@ fn build_ws_invoker_impl(
                     #( #state_extractions )*
                     #( #ctx_extractions )*
                     #( #extractions )*
-                    #fn_name( #( #all_call_args ),* ).await
+                    match #fn_name( #( #all_call_args ),* ).await {
+                        Ok(v) => Ok(v),
+                        Err(e) => Err(afast::AFastError::into_error(e)),
+                    }
                 })
             }
         }
@@ -1954,7 +1957,10 @@ fn build_sse_invoker_impl(
                     #( #state_extractions )*
                     #( #ctx_extractions )*
                     #( #extractions )*
-                    #fn_name( #( #all_call_args ),* ).await
+                    match #fn_name( #( #all_call_args ),* ).await {
+                        Ok(v) => Ok(v),
+                        Err(e) => Err(afast::AFastError::into_error(e)),
+                    }
                 })
             }
         }

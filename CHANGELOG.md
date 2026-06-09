@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.16]
+
+### Changed
+
+- **`Result<T>` 泛型化**: `afast::Result<T>` 改为 `afast::Result<T, E: AFastError = Error>`，所有 handler 宏（`#[handler]`、`#[get]`/`#[post]`/`#[put]`/`#[patch]`/`#[delete]`、`#[ws]`、`#[sse]`）均支持返回自定义错误类型，只要实现 `AFastError` trait。现有 `Result<T>` 用法完全兼容（默认 `E = Error`）。
+- **WS/SSE 生成代码错误转换**: `#[ws]` 和 `#[sse]` handler 的宏生成代码增加 `AFastError::into_error(e)` 转换，不再要求返回类型必须是 `Result<(), Error>`。
+- **`IntoResponse` 泛型化**: `impl IntoResponse for Result<T>` 改为 `impl<T, E: AFastError> IntoResponse for Result<T, E>`，ordinary HTTP handler 的自定义错误类型自动通过 `AFastError` trait 方法生成错误响应。
+- **Stream handler 错误日志**: 长连接 handler 的错误日志改用 `AFastError::message(&e)` 替代 `Display` 格式化。
+
 ## [0.1.15]
 
 ### Added

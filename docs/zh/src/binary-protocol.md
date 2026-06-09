@@ -37,3 +37,39 @@
 // 自定义错误（错误码必须在保留范围之外）
 return Err(afast::Error::custom(400, "invalid request parameter"));
 ```
+
+## 自定义错误类型
+
+实现 `AFastError` trait 即可定义自己的错误类型，handler 直接返回 `Result<T, MyError>`：
+
+```rust
+use afast::AFastError;
+
+enum MyError {
+    NotFound(String),
+    Unauthorized,
+}
+
+impl AFastError for MyError {
+    fn code(&self) -> i64 {
+        match self {
+            MyError::NotFound(_) => 404,
+            MyError::Unauthorized => 401,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            MyError::NotFound(name) => format!("{} not found", name),
+            MyError::Unauthorized => "unauthorized".into(),
+        }
+    }
+}
+
+#[handler(desc("Get user"))]
+async fn get_user(id: Data<UserId>) -> afast::Result<UserInfo, MyError> {
+    find_user(id).ok_or(MyError::NotFound("user".into()))
+}
+```
+
+所有 handler 宏（`#[handler]`、`#[get]`/`#[post]`/`#[put]`/`#[delete]`、`#[ws]`、`#[sse]`）均支持自定义错误类型。`afast::Result<T>` 默认使用 `Error`，完全向后兼容。

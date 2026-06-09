@@ -148,6 +148,49 @@ async fn search_users(
 async searchUsers(page: PageRequest, filter: FilterRequest): Promise<PageResponse>
 ```
 
+## 自定义错误类型
+
+`afast::Result<T>` 默认错误类型为 `Error`，但所有 handler 宏均支持自定义错误类型。实现 `AFastError` trait 即可：
+
+```rust
+use afast::AFastError;
+
+enum AppError {
+    NotFound { resource: String },
+    Forbidden { reason: String },
+}
+
+impl AFastError for AppError {
+    fn code(&self) -> i64 {
+        match self {
+            AppError::NotFound { .. } => 404,
+            AppError::Forbidden { .. } => 403,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            AppError::NotFound { resource } => format!("{} not found", resource),
+            AppError::Forbidden { reason } => reason.clone(),
+        }
+    }
+}
+```
+
+然后在 handler 中使用 `afast::Result<T, AppError>`：
+
+```rust
+#[handler(desc("Get user"))]
+async fn get_user(id: Data<UserId>) -> afast::Result<UserInfo, AppError> {
+    let user = find_user(&id).ok_or(AppError::NotFound { resource: "user".into() })?;
+    Ok(user)
+}
+```
+
+适用于所有宏：`#[handler]`、`#[get]`/`#[post]`/`#[put]`/`#[delete]`、`#[ws]`、`#[sse]`。
+
+使用 `afast::Result<T>`（不指定第二个参数）等价于 `Result<T, Error>`，完全向后兼容。
+
 ## 提取器类型
 
 | 提取器 | 描述 | 协议 |

@@ -549,22 +549,22 @@ impl IntoResponse for Redirect {
 }
 
 #[cfg(feature = "ordinary-http")]
-impl<T: IntoResponse> IntoResponse for Result<T> {
+impl<T: IntoResponse, E: AFastError> IntoResponse for std::result::Result<T, E> {
     fn into_response(self) -> hyper::Response<http_body_util::Full<hyper::body::Bytes>> {
         use http_body_util::Full;
         use hyper::body::Bytes;
         match self {
             Ok(val) => val.into_response(),
             Err(e) => {
-                let code = e.code();
-                let message = e.message();
+                let code = AFastError::code(&e);
+                let message = AFastError::message(&e);
                 let status = if (400..600).contains(&code) {
                     hyper::StatusCode::from_u16(code as u16)
                         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                 } else {
                     hyper::StatusCode::INTERNAL_SERVER_ERROR
                 };
-                let body = crate::app::transport::util::json_error_body(code, message);
+                let body = crate::app::transport::util::json_error_body(code, &message);
                 hyper::Response::builder()
                     .status(status)
                     .header("content-type", "application/json; charset=utf-8")
@@ -752,13 +752,14 @@ macro_rules! service {
     };
 }
 
-/// A `Result` type alias using [`Error`] as the error type.
+/// A `Result` type alias with [`Error`] as the default error type.
 ///
-/// Handler functions should return `afast::Result<T>`. Any type that
-/// implements [`AFastError`] can be returned — the framework will
-/// convert it to [`Error`] automatically via
-/// [`AFastError::into_error`].
-pub type Result<T> = std::result::Result<T, Error>;
+/// Handler functions should return `afast::Result<T>` (which defaults
+/// to `Result<T, Error>`). Custom error types that implement
+/// [`AFastError`] are also accepted — the framework will convert them
+/// to [`Error`] automatically via [`AFastError::into_error`].
+#[allow(type_alias_bounds)]
+pub type Result<T, E: AFastError = Error> = std::result::Result<T, E>;
 
 pub mod app;
 

@@ -37,3 +37,39 @@ System reserved error codes range from `-90011` to `-90000`. User-defined errors
 // Custom error (code must be outside the reserved range)
 return Err(afast::Error::custom(400, "invalid request parameter"));
 ```
+
+## Custom Error Types
+
+Implement the `AFastError` trait to define your own error types and return `Result<T, MyError>` from handlers:
+
+```rust
+use afast::AFastError;
+
+enum MyError {
+    NotFound(String),
+    Unauthorized,
+}
+
+impl AFastError for MyError {
+    fn code(&self) -> i64 {
+        match self {
+            MyError::NotFound(_) => 404,
+            MyError::Unauthorized => 401,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            MyError::NotFound(name) => format!("{} not found", name),
+            MyError::Unauthorized => "unauthorized".into(),
+        }
+    }
+}
+
+#[handler(desc("Get user"))]
+async fn get_user(id: Data<UserId>) -> afast::Result<UserInfo, MyError> {
+    find_user(id).ok_or(MyError::NotFound("user".into()))
+}
+```
+
+All handler macros (`#[handler]`, `#[get]`/`#[post]`/`#[put]`/`#[delete]`, `#[ws]`, `#[sse]`) support custom error types. `afast::Result<T>` defaults to `Error` and is fully backward compatible.
