@@ -132,3 +132,42 @@ pub async fn ping(
     );
     Ok(afast::Json(PongResponse { pong: true }))
 }
+
+// ─── Catch-all Route Handler ─────────────────────────────────────
+//
+// Demonstrates the `*` catch-all syntax that captures all requests
+// not matched by other routes. Uses `FullPath` extractor to get
+// the full request path and `Param<HashMap>` to get the captured
+// remaining path segments.
+
+/// Catch-all response — echoes the captured path information.
+#[derive(Serialize, Tag)]
+#[tag("Catch-all response")]
+pub struct CatchAllResponse {
+    #[tag("The full request path")]
+    pub full_path: String,
+    #[tag("The captured catch-all segments")]
+    pub caught: String,
+    #[tag("Message indicating this is the catch-all handler")]
+    pub message: String,
+}
+
+/// Catch-all handler — matches any GET request not matched by other routes.
+///
+/// This demonstrates:
+/// - `FullPath` extractor: gets the full request path (e.g., `/unknown/path`)
+/// - Catch-all routes have the lowest priority: exact > param > catch-all
+///
+/// Access via: GET http://localhost:5001/any/unknown/path
+/// Response: {"full_path":"/any/unknown/path","caught":"any/unknown/path","message":"catch-all"}
+#[get(desc("Catch-all handler"))]
+pub async fn catch_all_get(
+    path: afast::FullPath,
+) -> afast::HttpResult<afast::Json<CatchAllResponse>> {
+    let p = path.0.clone();
+    Ok(afast::Json(CatchAllResponse {
+        full_path: p.clone(),
+        caught: p.trim_start_matches('/').to_string(),
+        message: "catch-all".to_string(),
+    }))
+}

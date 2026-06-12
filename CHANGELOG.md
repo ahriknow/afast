@@ -6,6 +6,11 @@
 
 - **Catch-all 路由**: 支持 `*` 和 `*name` 通配符语法捕获所有未匹配的路径。用法：`get("*", handler)`、`post("*path", handler)` 等。匹配优先级：精确路由 > 参数路由 > catch-all，确保不会覆盖已注册的具体接口和内置端点（`/_api`、`/_ws`、`/code`、`/doc`）。
 - **`FullPath` 提取器**: 新增 `FullPath` 提取器，可在 ordinary HTTP handler 中获取完整请求路径（如 `/users/123`）。
+- **`Serve` 响应类型**: 新增 `Serve` 响应类型，仅设置 `Content-Type` 头（不设置 `Content-Disposition`），适用于内联提供静态资源（HTML、CSS、JS、图片、字体等），如 Vue / React SPA。
+
+### Fixed
+
+- **`FullPath` 宏生成修复**: 修复 `build_ordinary_invoker_impl` 中缺少 `FullPath` 提取代码的问题，之前使用 `FullPath` 提取器会导致编译错误。
 
 ## [0.1.16]
 

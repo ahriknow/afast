@@ -145,7 +145,7 @@ pub fn expand(
         let is_primitive = is_primitive_type(ident.as_deref());
         let is_response_wrapper = matches!(
             ident.as_deref(),
-            Some("Json" | "Text" | "Html" | "File" | "Status" | "Redirect")
+            Some("Json" | "Text" | "Html" | "File" | "Serve" | "Status" | "Redirect")
         );
         let is_container = matches!(ident.as_deref(), Some("Vec" | "Option"));
         let ty_str = type_to_string(ty);
@@ -1295,6 +1295,14 @@ fn build_ordinary_invoker_impl(
                 has_header = true;
                 header_var = Some(var_name);
                 header_inner = Some(inner.clone());
+            }
+            "FullPath" => {
+                // FullPath extracts the entire request URI path as a String.
+                // The variable is assigned before the async handler is called.
+                let fp_var = var_name.clone();
+                async_extractions.push(quote! {
+                    let #fp_var = afast::FullPath(req.uri().path().to_string());
+                });
             }
             _ => {}
         }

@@ -23,6 +23,12 @@ pub struct InnerInfoSecondData {
 pub struct InnerInfoResponst {
     pub message: String,
 }
+#[derive(Debug, Clone)]
+pub struct CatchAllGetCatchAllResponse {
+    pub full_path: String,
+    pub caught: String,
+    pub message: String,
+}
 /// Client for the `check` service.
 /// Check Service
 pub struct CheckClient {

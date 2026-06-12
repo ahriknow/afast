@@ -129,7 +129,7 @@ use handler::article::{
 use handler::auth::{create_token, get_user_id, login, register};
 use handler::chat::chat_echo;
 use handler::sse_stream::sse_stream;
-use handler::{health, info, ping};
+use handler::{catch_all_get, health, info, ping};
 use state::AppState;
 
 // ─── Hook Implementations ────────────────────────────────────────
@@ -254,7 +254,11 @@ async fn main() {
         h(health),
         group("inner" => {
             h(info),
-        })
+        }),
+        // Catch-all route: matches any GET path not matched by other routes.
+        // Has the lowest priority — exact routes and param routes take precedence.
+        // Built-in endpoints (/_api, /code, /doc, /_ws) are never intercepted.
+        get("*", catch_all_get),
     });
     // Add a service-level hook (runs after global hooks for this service's handlers)
     #[cfg(feature = "hook")]

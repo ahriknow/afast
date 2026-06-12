@@ -444,6 +444,17 @@ pub struct File {
     pub content_type: String,
 }
 
+/// Inline serve response. Sets `Content-Type` only (no `Content-Disposition`).
+///
+/// Unlike [`File`], this type does not force a download. It is designed for
+/// serving static web assets (HTML, CSS, JS, images, fonts, etc.) inline in the
+/// browser, e.g. for a Vue / React SPA.
+#[cfg(feature = "ordinary-http")]
+pub struct Serve {
+    pub data: Vec<u8>,
+    pub content_type: String,
+}
+
 /// Status-only response with an empty body.
 #[cfg(feature = "ordinary-http")]
 pub struct Status(pub hyper::StatusCode);
@@ -525,6 +536,18 @@ impl IntoResponse for File {
                 "content-disposition",
                 format!("attachment; filename=\"{}\"", filename),
             )
+            .body(Full::new(Bytes::from(self.data)))
+            .unwrap()
+    }
+}
+
+#[cfg(feature = "ordinary-http")]
+impl IntoResponse for Serve {
+    fn into_response(self) -> hyper::Response<http_body_util::Full<hyper::body::Bytes>> {
+        use http_body_util::Full;
+        use hyper::body::Bytes;
+        hyper::Response::builder()
+            .header("content-type", self.content_type)
             .body(Full::new(Bytes::from(self.data)))
             .unwrap()
     }
