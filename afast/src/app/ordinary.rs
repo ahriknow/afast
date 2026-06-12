@@ -36,6 +36,10 @@ pub(crate) enum RouteSegment {
     Static(String),
     /// A named parameter segment (e.g. `":id"` matches any value).
     Param(&'static str),
+    /// A catch-all segment (e.g. `"*"` or `"*rest"`) that consumes
+    /// all remaining path segments. The captured value is stored as
+    /// a single string with segments joined by `/`.
+    CatchAll(&'static str),
 }
 
 /// A compiled route pattern for matching request paths.
@@ -68,24 +72,35 @@ impl RoutePattern {
         }
 
         let segments: Vec<&str> = pattern.split('/').collect();
-        let has_params = segments.iter().any(|s| s.starts_with(':'));
+        let has_params = segments
+            .iter()
+            .any(|s| s.starts_with(':') || s.starts_with('*'));
 
         if !has_params {
             return RoutePattern::Exact(pattern.to_string());
         }
 
-        // Parameter names are intentionally leaked into `'static` memory.
+        // Parameter names and catch-all names are intentionally leaked
+        // into `'static` memory.
         //
         // # Safety
         // This is called only at startup (inside `AFast::build` / `serve`) when
         // compiling route patterns. Each leak is a small, bounded string (route
-        // param names like `"id"`, `"user_id"`). The total leaked memory is
-        // proportional to the number of unique route param names — typically a
-        // few hundred bytes. This must NOT be called in a loop or at runtime.
+        // param names like `"id"`, `"user_id"`, or catch-all names like
+        // `"path"`). The total leaked memory is proportional to the number of
+        // unique route param names — typically a few hundred bytes. This must
+        // NOT be called in a loop or at runtime.
         let route_segments: Vec<RouteSegment> = segments
             .iter()
             .map(|s| {
-                if let Some(param_name) = s.strip_prefix(':') {
+                if let Some(catch_name) = s.strip_prefix('*') {
+                    let name = if catch_name.is_empty() {
+                        "*"
+                    } else {
+                        Box::leak(catch_name.to_string().into_boxed_str())
+                    };
+                    RouteSegment::CatchAll(name)
+                } else if let Some(param_name) = s.strip_prefix(':') {
                     RouteSegment::Param(Box::leak(param_name.to_string().into_boxed_str()))
                 } else {
                     RouteSegment::Static(s.to_string())
@@ -117,21 +132,45 @@ impl RoutePattern {
             RoutePattern::Parametric { segments } => {
                 let path_segments: Vec<&str> = path.split('/').collect();
 
-                if path_segments.len() != segments.len() {
+                // Find the position of the CatchAll segment (if any).
+                let catch_all_pos = segments
+                    .iter()
+                    .position(|s| matches!(s, RouteSegment::CatchAll(_)));
+
+                if let Some(_ca_pos) = catch_all_pos {
+                    // With catch-all, the path must have at least as many
+                    // segments as non-catch-all pattern segments.
+                    if path_segments.len() < segments.len() - 1 {
+                        return None;
+                    }
+                } else if path_segments.len() != segments.len() {
                     return None;
                 }
 
                 let mut params = HashMap::new();
 
-                for (route_seg, path_seg) in segments.iter().zip(path_segments.iter()) {
+                for (i, route_seg) in segments.iter().enumerate() {
                     match route_seg {
                         RouteSegment::Static(s) => {
-                            if s != path_seg {
+                            if path_segments
+                                .get(i)
+                                .map(|p| *p != s.as_str())
+                                .unwrap_or(true)
+                            {
                                 return None;
                             }
                         }
                         RouteSegment::Param(name) => {
-                            params.insert(name.to_string(), path_seg.to_string());
+                            if let Some(path_seg) = path_segments.get(i) {
+                                params.insert(name.to_string(), path_seg.to_string());
+                            } else {
+                                return None;
+                            }
+                        }
+                        RouteSegment::CatchAll(name) => {
+                            // Consume all remaining segments.
+                            let rest = path_segments[i..].join("/");
+                            params.insert(name.to_string(), rest);
                         }
                     }
                 }
@@ -148,7 +187,8 @@ impl RoutePattern {
 ///
 /// Routes are organized into a tree where each node corresponds to a
 /// path segment. Static segments branch via a `HashMap`, while
-/// parameter segments (`:id`) use a single wildcard child.
+/// parameter segments (`:id`) use a single wildcard child and
+/// catch-all segments (`*name`) use a separate catch-all child.
 ///
 /// This replaces the previous O(n) linear scan over all routes.
 #[cfg(any(
@@ -172,6 +212,9 @@ struct TrieNode {
     /// Parameter segment child (`:id`, `:name`, etc.).
     /// Only one param child is allowed per node.
     param_child: Option<Box<ParamChild>>,
+    /// Catch-all segment child (`*`, `*path`, etc.).
+    /// Consumes all remaining path segments. Tried last (lowest priority).
+    catch_all_child: Option<Box<CatchAllChild>>,
     /// The route stored at this node (if it's a leaf).
     route: Option<usize>,
 }
@@ -186,6 +229,7 @@ impl TrieNode {
         Self {
             static_children: std::collections::HashMap::new(),
             param_child: None,
+            catch_all_child: None,
             route: None,
         }
     }
@@ -201,6 +245,18 @@ struct ParamChild {
     name: &'static str,
     /// The child node for the segment after the parameter.
     node: TrieNode,
+}
+
+#[cfg(any(
+    all(feature = "ordinary-http", feature = "http", feature = "binary"),
+    feature = "ordinary-ws",
+    feature = "ordinary-sse",
+))]
+struct CatchAllChild {
+    /// The catch-all parameter name (e.g. `"*"` or `"path"`).
+    name: &'static str,
+    /// The route index for this catch-all.
+    route: usize,
 }
 
 #[cfg(any(
@@ -261,6 +317,14 @@ impl TrieRouter {
                             param.name = name;
                             node = &mut param.node;
                         }
+                        RouteSegment::CatchAll(name) => {
+                            // Catch-all consumes all remaining segments.
+                            // Only one catch-all per node; last write wins.
+                            node.catch_all_child =
+                                Some(Box::new(CatchAllChild { name, route: index }));
+                            // Catch-all is always the last segment.
+                            return;
+                        }
                     }
                 }
                 node.route = Some(index);
@@ -300,6 +364,8 @@ impl TrieRouter {
     /// Walks the trie node by node, filling `params` in-place on success.
     /// Returns the route index on match, or `None`. No clone is needed
     /// because params are built in the caller's HashMap and kept on success.
+    ///
+    /// Matching priority: static > param > catch-all.
     fn match_segments(
         node: &TrieNode,
         segments: &[&str],
@@ -312,14 +378,14 @@ impl TrieRouter {
 
         let seg = segments[idx];
 
-        // Try static child first (more specific).
+        // 1. Try static child first (most specific).
         if let Some(child) = node.static_children.get(seg)
             && let Some(result) = Self::match_segments(child, segments, idx + 1, params)
         {
             return Some(result);
         }
 
-        // Try param child (wildcard).
+        // 2. Try param child (named wildcard).
         if let Some(ref param) = node.param_child {
             params.insert(param.name.to_string(), seg.to_string());
             if let Some(result) = Self::match_segments(&param.node, segments, idx + 1, params) {
@@ -328,7 +394,57 @@ impl TrieRouter {
             params.remove(param.name);
         }
 
+        // 3. Try catch-all child (lowest priority, consumes all remaining segments).
+        if let Some(ref catch_all) = node.catch_all_child {
+            let rest = segments[idx..].join("/");
+            params.insert(catch_all.name.to_string(), rest);
+            return Some(catch_all.route);
+        }
+
         None
+    }
+
+    /// Returns `true` if the given path would match a catch-all route
+    /// (and no more specific route) for the given method.
+    ///
+    /// Used to protect built-in endpoints (`/_api`, `/code`, `/doc`, `/_ws`)
+    /// from being intercepted by catch-all routes.
+    #[cfg(feature = "ordinary-http")]
+    pub fn is_catch_all_only(&self, method: &str, path: &str) -> bool {
+        let root = match self.roots.get(method) {
+            Some(r) => r,
+            None => return false,
+        };
+        let path = path.trim_start_matches('/').trim_end_matches('/');
+        if path.is_empty() {
+            return root.static_children.get("").and_then(|c| c.route).is_none()
+                && root.catch_all_child.is_some();
+        }
+        let segments: Vec<&str> = path.split('/').collect();
+        Self::is_catch_all_only_segments(root, &segments, 0)
+    }
+
+    #[cfg(feature = "ordinary-http")]
+    fn is_catch_all_only_segments(node: &TrieNode, segments: &[&str], idx: usize) -> bool {
+        if idx >= segments.len() {
+            // Reached end: if there's a direct route, it's not catch-all-only.
+            return node.route.is_none();
+        }
+        let seg = segments[idx];
+        // Try static child first.
+        if let Some(child) = node.static_children.get(seg)
+            && !Self::is_catch_all_only_segments(child, segments, idx + 1)
+        {
+            return false;
+        }
+        // Try param child.
+        if let Some(ref param) = node.param_child
+            && !Self::is_catch_all_only_segments(&param.node, segments, idx + 1)
+        {
+            return false;
+        }
+        // Only catch-all (or nothing) matches.
+        node.catch_all_child.is_some()
     }
 }
 
@@ -976,5 +1092,84 @@ mod tests {
         // Invalid UTF-8 sequence → replacement character
         let result = percent_decode("%FF%FE");
         assert!(result.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_catch_all_pattern() {
+        let pattern = RoutePattern::parse("/*path");
+        let params = pattern.matches("/anything/here").unwrap();
+        assert_eq!(params.get("path").unwrap(), "anything/here");
+    }
+
+    #[test]
+    fn test_catch_all_single_segment() {
+        let pattern = RoutePattern::parse("/*path");
+        let params = pattern.matches("/single").unwrap();
+        assert_eq!(params.get("path").unwrap(), "single");
+    }
+
+    #[test]
+    fn test_catch_all_unnamed() {
+        let pattern = RoutePattern::parse("/*");
+        let params = pattern.matches("/a/b/c").unwrap();
+        assert_eq!(params.get("*").unwrap(), "a/b/c");
+    }
+
+    #[test]
+    fn test_catch_all_with_prefix() {
+        let pattern = RoutePattern::parse("/files/*path");
+        let params = pattern.matches("/files/docs/readme.md").unwrap();
+        assert_eq!(params.get("path").unwrap(), "docs/readme.md");
+    }
+
+    #[test]
+    fn test_catch_all_priority_in_trie() {
+        // Catch-all registered first, specific route registered second.
+        let mut trie = TrieRouter::new();
+        let catch_all = RoutePattern::parse("/*rest");
+        let specific = RoutePattern::parse("/users/:id");
+        // Insert catch-all at index 0, specific at index 1.
+        trie.insert("GET", &catch_all, 0);
+        trie.insert("GET", &specific, 1);
+
+        // Specific route should win over catch-all.
+        let (idx, params) = trie.match_path("GET", "/users/123").unwrap();
+        assert_eq!(idx, 1);
+        assert_eq!(params.get("id").unwrap(), "123");
+
+        // Catch-all should match unmatched paths.
+        let (idx, params) = trie.match_path("GET", "/other/path").unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(params.get("rest").unwrap(), "other/path");
+    }
+
+    #[test]
+    fn test_catch_all_does_not_intercept_exact() {
+        let mut trie = TrieRouter::new();
+        let catch_all = RoutePattern::parse("/*rest");
+        let exact = RoutePattern::parse("/health");
+        trie.insert("GET", &catch_all, 0);
+        trie.insert("GET", &exact, 1);
+
+        // Exact match should win.
+        let (idx, _) = trie.match_path("GET", "/health").unwrap();
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_is_catch_all_only() {
+        let mut trie = TrieRouter::new();
+        let catch_all = RoutePattern::parse("/*rest");
+        let specific = RoutePattern::parse("/users/:id");
+        trie.insert("GET", &catch_all, 0);
+        trie.insert("GET", &specific, 1);
+
+        // /users/123 has a specific route, NOT catch-all only.
+        assert!(!trie.is_catch_all_only("GET", "/users/123"));
+        // /other/path only matches catch-all.
+        assert!(trie.is_catch_all_only("GET", "/other/path"));
+        // /unknown has no route at all → is_catch_all_only returns false
+        // when there's no catch-all... but we have one, so it returns true.
+        assert!(trie.is_catch_all_only("GET", "/unknown"));
     }
 }

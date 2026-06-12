@@ -205,6 +205,7 @@ async fn get_user(id: Data<UserId>) -> afast::Result<UserInfo, AppError> {
 | `Param<T>` | 从路由路径参数 (`:id`) 反序列化（需要 `ordinary-http`） | HTTP |
 | `Body<T>` | 从 HTTP JSON 请求体反序列化（需要 `ordinary-http`） | HTTP |
 | `Header<T>` | 从 HTTP 请求头反序列化（需要 `ordinary-http`） | HTTP |
+| `FullPath` | 获取完整请求路径，如 `/users/123`（需要 `ordinary-http`） | HTTP |
 
 ## 服务与嵌套
 
@@ -268,6 +269,42 @@ let internal_svc = service!("", "Internal" => {
     h(debug_info),
     get("ping", ping),
 });
+```
+
+### Catch-all 路由
+
+使用 `*` 或 `*name` 语法注册 catch-all 路由，捕获所有未匹配其他路由的请求：
+
+```rust
+let svc = service!("api" => {
+    get("users/:id", get_user),          // 精确匹配优先
+    get("*", catch_all_get),             // 捕获其余所有 GET
+    post("*path", catch_all_post),       // 捕获其余所有 POST，路径存入 "path"
+});
+```
+
+**匹配优先级**（从高到低）：
+
+1. 精确路由（如 `/users/list`）
+2. 参数路由（如 `/users/:id`）
+3. Catch-all 路由（`*` 或 `*name`）
+
+即使 catch-all 最先注册，具体路由仍然优先匹配。内置端点（`/_api`、`/_ws`、`/code`、`/doc`）不会被 catch-all 拦截。
+
+Catch-all 捕获的路径可通过 `Param` 提取器获取：
+
+```rust
+use std::collections::HashMap;
+use afast::{Param, Json, FullPath};
+
+#[get(desc("Catch-all handler"))]
+async fn catch_all_get(
+    path: FullPath,
+    Param(params): Param<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let rest = params.get("*").unwrap(); // 或 params.get("path") 如果写的是 *path
+    Json(serde_json::json!({ "full_path": path.0, "remaining": rest }))
+}
 ```
 
 ## 类型标签

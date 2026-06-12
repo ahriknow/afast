@@ -360,6 +360,13 @@ pub struct Body<T>(pub T);
 #[cfg(feature = "ordinary-http")]
 pub struct Header<T>(pub T);
 
+/// Extracts the full request path (e.g. `/users/123`).
+///
+/// Unlike `Param<T>` which only captures named parameters, `FullPath`
+/// provides the entire URL path as received by the server.
+#[cfg(feature = "ordinary-http")]
+pub struct FullPath(pub String);
+
 /// Returns `true` if the given header name is in the standard set.
 ///
 /// Standard headers are sent automatically by browsers and HTTP clients,

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17]
+
+### Added
+
+- **Catch-all 路由**: 支持 `*` 和 `*name` 通配符语法捕获所有未匹配的路径。用法：`get("*", handler)`、`post("*path", handler)` 等。匹配优先级：精确路由 > 参数路由 > catch-all，确保不会覆盖已注册的具体接口和内置端点（`/_api`、`/_ws`、`/code`、`/doc`）。
+- **`FullPath` 提取器**: 新增 `FullPath` 提取器，可在 ordinary HTTP handler 中获取完整请求路径（如 `/users/123`）。
+
 ## [0.1.16]
 
 ### Changed

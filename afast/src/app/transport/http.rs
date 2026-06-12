@@ -504,13 +504,11 @@ struct CompiledSseRoute {
 ///
 /// Resolution order:
 /// 1. Ordinary HTTP routes (compiled patterns, first match wins).
-/// 2. Ordinary SSE routes (`GET` with path matching).
-/// 3. Ordinary WS routes (`GET` WebSocket upgrade with path matching).
-/// 4. `POST /_api` for binary handler dispatch.
-/// 5. `GET /code/{service}/{lang}` for client code generation.
-/// 6. `GET /doc[/{service}]` for interactive documentation.
-/// 7. `GET /_ws` for WebSocket upgrade (merged mode only).
-/// 8. 404 for unmatched paths.
+/// 2. Built-in endpoints (`/_api`, `/code`, `/doc`, `/_ws`) — checked before
+///    catch-all routes to prevent catch-alls from intercepting framework paths.
+/// 3. Ordinary SSE routes (`GET` with path matching).
+/// 4. Ordinary WS routes (`GET` WebSocket upgrade with path matching).
+/// 5. 404 for unmatched paths.
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
@@ -525,106 +523,113 @@ async fn handle_request(
     {
         let method_str = method.as_str();
         if let Some((route_idx, path_params)) = shared.trie_router.match_path(method_str, path) {
-            let compiled = &shared.ordinary_routes[route_idx];
-            // Rate-limit check for ordinary routes.
-            #[cfg(feature = "rate-limit")]
-            if let Some(ref limiter) = shared.rate_limiter {
-                let handler_name = compiled.handler_name;
-                let mut ctx = ConnectionContext::new(client_ip.to_string());
-                populate_header_cache(req.headers(), &mut ctx.header_cache);
-                if let Err(e) = limiter.check(handler_name, &mut ctx).await {
-                    let retry = limiter.retry_after_secs(handler_name);
-                    let status = StatusCode::TOO_MANY_REQUESTS;
-                    let body = super::util::json_error_body(e.code(), e.message());
-                    return Ok(Response::builder()
-                        .status(status)
-                        .header("content-type", "application/json; charset=utf-8")
-                        .header("retry-after", retry.to_string())
-                        .body(Full::new(Bytes::from(body)).boxed())
-                        .expect("valid response builder"));
-                }
-            }
-
-            let query_string = uri.query().unwrap_or("");
-            let state = shared.state.clone();
-            let invoker = compiled.invoker;
-            let req_ctx = crate::ctx::RequestCtx::new();
-
-            // Hook: before_request
-            #[cfg(feature = "hook")]
-            let hook_ctx = crate::hook::RequestContext {
-                handler_name: compiled.handler_name,
-                handler_desc: "",
-                transport: "http",
-                is_binary: false,
-                method: compiled.method,
-                long_connection: false,
-                handler_id: 0,
-                state: state.clone(),
-                ctx: req_ctx.clone(),
-                attrs: compiled.attrs,
-            };
-            #[cfg(feature = "hook")]
-            let hook_key = &compiled.hook_key;
-            #[cfg(feature = "hook")]
-            let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
-                shared
-                    .named_hooks
-                    .get(hook_key)
-                    .map(|hooks| {
-                        hooks
-                            .iter()
-                            .filter_map(|h| h.before_request(&hook_ctx))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-
-            let result = invoker
-                .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
-                .await;
-
-            // Hook: on_response / on_error
-            #[cfg(feature = "hook")]
-            match &result {
-                Ok(_) => {
-                    for g in &mut _guards {
-                        g.on_response(&hook_ctx, &[]);
+            // If the match is a catch-all, defer to built-in endpoint checks below.
+            // This prevents catch-all routes from intercepting `/_api`, `/code`,
+            // `/doc`, `/_ws`, and other framework-reserved paths.
+            let is_catch_all = shared.trie_router.is_catch_all_only(method_str, path);
+            if !is_catch_all {
+                let compiled = &shared.ordinary_routes[route_idx];
+                // Rate-limit check for ordinary routes.
+                #[cfg(feature = "rate-limit")]
+                if let Some(ref limiter) = shared.rate_limiter {
+                    let handler_name = compiled.handler_name;
+                    let mut ctx = ConnectionContext::new(client_ip.to_string());
+                    populate_header_cache(req.headers(), &mut ctx.header_cache);
+                    if let Err(e) = limiter.check(handler_name, &mut ctx).await {
+                        let retry = limiter.retry_after_secs(handler_name);
+                        let status = StatusCode::TOO_MANY_REQUESTS;
+                        let body = super::util::json_error_body(e.code(), e.message());
+                        return Ok(Response::builder()
+                            .status(status)
+                            .header("content-type", "application/json; charset=utf-8")
+                            .header("retry-after", retry.to_string())
+                            .body(Full::new(Bytes::from(body)).boxed())
+                            .expect("valid response builder"));
                     }
                 }
-                Err(e) => {
-                    for g in &mut _guards {
-                        g.on_error(&hook_ctx, e);
+
+                let query_string = uri.query().unwrap_or("");
+                let state = shared.state.clone();
+                let invoker = compiled.invoker;
+                let req_ctx = crate::ctx::RequestCtx::new();
+
+                // Hook: before_request
+                #[cfg(feature = "hook")]
+                let hook_ctx = crate::hook::RequestContext {
+                    handler_name: compiled.handler_name,
+                    handler_desc: "",
+                    transport: "http",
+                    is_binary: false,
+                    method: compiled.method,
+                    long_connection: false,
+                    handler_id: 0,
+                    state: state.clone(),
+                    ctx: req_ctx.clone(),
+                    attrs: compiled.attrs,
+                };
+                #[cfg(feature = "hook")]
+                let hook_key = &compiled.hook_key;
+                #[cfg(feature = "hook")]
+                let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+                    shared
+                        .named_hooks
+                        .get(hook_key)
+                        .map(|hooks| {
+                            hooks
+                                .iter()
+                                .filter_map(|h| h.before_request(&hook_ctx))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+
+                let result = invoker
+                    .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
+                    .await;
+
+                // Hook: on_response / on_error
+                #[cfg(feature = "hook")]
+                match &result {
+                    Ok(_) => {
+                        for g in &mut _guards {
+                            g.on_response(&hook_ctx, &[]);
+                        }
+                    }
+                    Err(e) => {
+                        for g in &mut _guards {
+                            g.on_error(&hook_ctx, e);
+                        }
                     }
                 }
-            }
 
-            return match result {
-                Ok(response) => Ok(response.map(|b| b.boxed())),
-                Err(e) => {
-                    let code = e.code();
-                    let message = if shared.sanitize_errors {
-                        e.sanitized_message()
-                    } else {
-                        e.message()
-                    };
-                    let status = if (400..600).contains(&code) {
-                        StatusCode::from_u16(code as u16)
-                            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-                    } else {
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    };
-                    let body = super::util::json_error_body(code, message);
-                    Ok(Response::builder()
-                        .status(status)
-                        .header("content-type", "application/json; charset=utf-8")
-                        .body(Full::new(Bytes::from(body)).boxed())
-                        .expect("valid response builder"))
-                }
-            };
+                return match result {
+                    Ok(response) => Ok(response.map(|b| b.boxed())),
+                    Err(e) => {
+                        let code = e.code();
+                        let message = if shared.sanitize_errors {
+                            e.sanitized_message()
+                        } else {
+                            e.message()
+                        };
+                        let status = if (400..600).contains(&code) {
+                            StatusCode::from_u16(code as u16)
+                                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+                        } else {
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        };
+                        let body = super::util::json_error_body(code, message);
+                        Ok(Response::builder()
+                            .status(status)
+                            .header("content-type", "application/json; charset=utf-8")
+                            .body(Full::new(Bytes::from(body)).boxed())
+                            .expect("valid response builder"))
+                    }
+                };
+            } // end if !is_catch_all
         }
     }
-    // Note: unmatched ordinary routes fall through to SSE/WS/binary/doc handlers below.
+    // Note: unmatched ordinary routes (and deferred catch-all matches)
+    // fall through to SSE/WS/binary/doc handlers below.
 
     // Try ordinary-sse routes via trie router (O(path_depth))
     #[cfg(feature = "ordinary-sse")]
@@ -769,7 +774,49 @@ async fn handle_request(
             }
             not_found()
         }
-        _ => not_found(),
+        _ => {
+            // Built-in endpoint not matched. Try catch-all route as last resort.
+            #[cfg(feature = "ordinary-http")]
+            {
+                let method_str = method.as_str();
+                if let Some((route_idx, path_params)) =
+                    shared.trie_router.match_path(method_str, path)
+                {
+                    let compiled = &shared.ordinary_routes[route_idx];
+                    let query_string = uri.query().unwrap_or("");
+                    let state = shared.state.clone();
+                    let invoker = compiled.invoker;
+                    let req_ctx = crate::ctx::RequestCtx::new();
+                    let result = invoker
+                        .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
+                        .await;
+                    return match result {
+                        Ok(response) => Ok(response.map(|b| b.boxed())),
+                        Err(e) => {
+                            let code = e.code();
+                            let message = if shared.sanitize_errors {
+                                e.sanitized_message()
+                            } else {
+                                e.message()
+                            };
+                            let status = if (400..600).contains(&code) {
+                                StatusCode::from_u16(code as u16)
+                                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+                            } else {
+                                StatusCode::INTERNAL_SERVER_ERROR
+                            };
+                            let body = super::util::json_error_body(code, message);
+                            Ok(Response::builder()
+                                .status(status)
+                                .header("content-type", "application/json; charset=utf-8")
+                                .body(Full::new(Bytes::from(body)).boxed())
+                                .expect("valid response builder"))
+                        }
+                    };
+                }
+            }
+            not_found()
+        }
     }
 }
 

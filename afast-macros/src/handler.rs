@@ -75,9 +75,12 @@ pub fn expand(
     // Detect whether the handler mixes binary and ordinary extractors, which is
     // unsupported because the two transport layers use incompatible calling
     // conventions and dispatch paths.
-    let has_ordinary = params
-        .iter()
-        .any(|p| matches!(p.extractor.as_str(), "Query" | "Param" | "Body" | "Header"));
+    let has_ordinary = params.iter().any(|p| {
+        matches!(
+            p.extractor.as_str(),
+            "Query" | "Param" | "Body" | "Header" | "FullPath"
+        )
+    });
 
     let has_binary = params.iter().any(|p| {
         matches!(
@@ -89,7 +92,7 @@ pub fn expand(
     if has_ordinary && has_binary {
         return Err(syn::Error::new(
             Span::call_site(),
-            "cannot mix ordinary extractors (Query/Param/Body/Header) with binary extractors (Custom/Data/Receiver/Sender)",
+            "cannot mix ordinary extractors (Query/Param/Body/Header/FullPath) with binary extractors (Custom/Data/Receiver/Sender)",
         ));
     }
 
@@ -122,7 +125,7 @@ pub fn expand(
     if method.is_none() && has_ordinary {
         return Err(syn::Error::new(
             Span::call_site(),
-            "ordinary extractors (Query/Param/Body/Header) are only allowed with #[get], #[post], etc., not #[handler]",
+            "ordinary extractors (Query/Param/Body/Header/FullPath) are only allowed with #[get], #[post], etc., not #[handler]",
         ));
     }
     if method.is_some() && has_binary {
@@ -535,6 +538,9 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_ordinary && is_header_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("Header".to_string(), extract_ident_name(&inner), inner)
+                } else if is_ordinary && is_full_path_type(&pat_type.ty) {
+                    let str_type: Type = syn::parse_quote!(String);
+                    ("FullPath".to_string(), "String".to_string(), str_type)
                 } else if is_ordinary && is_ws_query_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("WsQuery".to_string(), extract_ident_name(&inner), inner)
@@ -550,7 +556,7 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                         format!(
                             "unsupported parameter type: expected State<T>, Ctx<T>, Custom<T>, Data<T>, Receiver, Sender{} got: {}",
                             if is_ordinary {
-                                ", Query<T>, Param<T>, Body<T>, Header<T>"
+                                ", Query<T>, Param<T>, Body<T>, Header<T>, FullPath"
                             } else {
                                 ""
                             },
@@ -624,6 +630,11 @@ fn is_body_type(ty: &Type) -> bool {
 /// Returns true when the outermost identifier of the type is `Header`.
 fn is_header_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "Header")
+}
+
+/// Returns true when the outermost identifier of the type is `FullPath`.
+fn is_full_path_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "FullPath")
 }
 
 /// Returns true when the outermost identifier of the type is `WsQuery`.

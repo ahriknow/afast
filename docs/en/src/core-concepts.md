@@ -205,6 +205,7 @@ Using `afast::Result<T>` (without the second parameter) is equivalent to `Result
 | `Param<T>` | Deserializes from route path params (`:id`) (requires `ordinary-http`) | HTTP |
 | `Body<T>` | Deserializes from HTTP JSON body (requires `ordinary-http`) | HTTP |
 | `Header<T>` | Deserializes from HTTP request headers (requires `ordinary-http`) | HTTP |
+| `FullPath` | Extracts the full request path (e.g. `/users/123`) (requires `ordinary-http`) | HTTP |
 
 ## Services and Nesting
 
@@ -268,6 +269,42 @@ let internal_svc = service!("", "Internal" => {
     h(debug_info),
     get("ping", ping),
 });
+```
+
+### Catch-all Routes
+
+Use `*` or `*name` syntax to register catch-all routes that capture all requests not matched by other routes:
+
+```rust
+let svc = service!("api" => {
+    get("users/:id", get_user),          // Exact match takes priority
+    get("*", catch_all_get),             // Catches all remaining GET requests
+    post("*path", catch_all_post),       // Catches all remaining POST, path stored as "path"
+});
+```
+
+**Matching priority** (highest to lowest):
+
+1. Exact routes (e.g., `/users/list`)
+2. Parameterized routes (e.g., `/users/:id`)
+3. Catch-all routes (`*` or `*name`)
+
+Even if the catch-all is registered first, specific routes still take precedence. Built-in endpoints (`/_api`, `/_ws`, `/code`, `/doc`) are never intercepted by catch-all routes.
+
+The captured path is available via the `Param` extractor:
+
+```rust
+use std::collections::HashMap;
+use afast::{Param, Json, FullPath};
+
+#[get(desc("Catch-all handler"))]
+async fn catch_all_get(
+    path: FullPath,
+    Param(params): Param<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let rest = params.get("*").unwrap(); // or params.get("path") if written as *path
+    Json(serde_json::json!({ "full_path": path.0, "remaining": rest }))
+}
 ```
 
 ## Type Tags

@@ -33,17 +33,17 @@
             <a class="btn btn-en" href="/en/">English</a>
             <a class="btn btn-zh" href="/zh/">简体中文</a>
         </div>
-        <p class="auto">Auto-redirecting based on browser language...</p>
+        <!-- <p class="auto">Auto-redirecting based on browser language...</p> -->
     </div>
     <script>
-        (function() {
-            var lang = navigator.language || navigator.userLanguage || '';
-            if (lang.startsWith('zh')) {
-                window.location.href = '/zh/';
-            } else {
-                window.location.href = '/en/';
-            }
-        })();
+        // (function() {
+        //     var lang = navigator.language || navigator.userLanguage || '';
+        //     if (lang.startsWith('zh')) {
+        //         window.location.href = '/zh/';
+        //     } else {
+        //         window.location.href = '/en/';
+        //     }
+        // })();
     </script>
 </body>
 </html>
