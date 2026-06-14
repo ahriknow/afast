@@ -197,6 +197,28 @@ impl Hook for DeprecationHook {
 }
 ```
 
+## 获取客户端 IP
+
+`RequestContext` 提供两个字段用于获取客户端 IP：
+
+```rust
+impl Hook for IpHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // TCP 连接的对端 IP
+        let peer_ip = &ctx.client_ip;
+
+        // 真实客户端 IP（从 X-Forwarded-For / X-Real-IP 头获取）
+        let real_ip = ctx.forwarded_for.as_deref().unwrap_or(&ctx.client_ip);
+
+        println!("client: {}, real: {}", peer_ip, real_ip);
+        None
+    }
+}
+```
+
+- `client_ip`：所有传输层均有值
+- `forwarded_for`：仅 HTTP/WS 有值，TCP 为 `None`
+
 ## 钩子键 — 路由匹配
 
 钩子通过 **`"service_name:route_path"`** 匹配，而不是通过 handler 函数名。这避免了同一服务中不同 group 内出现相同函数名时的冲突：

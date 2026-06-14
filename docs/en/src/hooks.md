@@ -197,6 +197,28 @@ impl Hook for DeprecationHook {
 }
 ```
 
+## Getting Client IP
+
+`RequestContext` provides two fields for obtaining the client's IP:
+
+```rust
+impl Hook for IpHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // TCP peer address
+        let peer_ip = &ctx.client_ip;
+
+        // Real client IP (from X-Forwarded-For / X-Real-IP headers)
+        let real_ip = ctx.forwarded_for.as_deref().unwrap_or(&ctx.client_ip);
+
+        println!("client: {}, real: {}", peer_ip, real_ip);
+        None
+    }
+}
+```
+
+- `client_ip`: Available for all transports
+- `forwarded_for`: Only available for HTTP/WS; `None` for TCP
+
 ## Hook Key — Route Matching
 
 Hooks are matched by **`"service_name:route_path"`**, not by handler function name. This avoids conflicts when the same function name appears in different groups within the same service:

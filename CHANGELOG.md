@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.18]
+
+### Added
+
+- **`RequestContext` 客户端 IP 字段**: `RequestContext` 新增 `client_ip` 和 `forwarded_for` 字段，Hook 中可直接获取客户端 IP 地址。
+  - `client_ip: String` — 从 TCP 连接的 `peer_addr` 获取的客户端 IP。当处于反向代理（Nginx/CDN）后面时，这是代理的 IP。
+  - `forwarded_for: Option<String>` — 从 HTTP 请求头 `X-Forwarded-For` 或 `X-Real-IP` 获取的真实客户端 IP。仅 HTTP/WS 传输层有值，TCP 为 `None`。
+  - 所有传输层（HTTP、WS、TCP、SSE）均已支持。
+
 ## [0.1.17]
 
 ### Added

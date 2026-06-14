@@ -159,6 +159,35 @@ impl RequestGuard for MyGuard {
 }
 ```
 
+## 获取客户端 IP
+
+`RequestContext` 提供两个字段用于获取客户端 IP 地址：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `client_ip` | `String` | TCP 连接的对端 IP（`peer_addr`） |
+| `forwarded_for` | `Option<String>` | 从 `X-Forwarded-For` / `X-Real-IP` 头获取的真实 IP |
+
+```rust
+impl Hook for MyHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // 直接连接的 IP（可能是代理 IP）
+        let ip = &ctx.client_ip;
+
+        // 真实客户端 IP（仅 HTTP/WS 有值）
+        let real_ip = ctx.forwarded_for.as_deref().unwrap_or(&ctx.client_ip);
+
+        println!("client: {} (real: {})", ip, real_ip);
+        None
+    }
+}
+```
+
+**说明**：
+- `client_ip` 在所有传输层（HTTP、WS、TCP、SSE）均有值
+- `forwarded_for` 仅在 HTTP 和 WebSocket 传输层有值，TCP 始终为 `None`
+- 当处于反向代理后面时，建议优先使用 `forwarded_for`
+
 ## API 参考
 
 ### `RequestCtx` — 容器

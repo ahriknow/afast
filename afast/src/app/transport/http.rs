@@ -57,6 +57,36 @@ fn populate_header_cache(
     }
 }
 
+/// Extracts the real client IP from `X-Forwarded-For` or `X-Real-IP` headers.
+///
+/// Returns `Some(ip)` if a valid header is found, `None` otherwise.
+/// When multiple IPs are in `X-Forwarded-For` (comma-separated), returns
+/// the first one (the original client).
+fn extract_forwarded_for(headers: &hyper::header::HeaderMap) -> Option<String> {
+    // Try X-Forwarded-For first (most common)
+    if let Some(value) = headers.get("x-forwarded-for")
+        && let Ok(v) = value.to_str()
+    {
+        // X-Forwarded-For: client, proxy1, proxy2
+        if let Some(first) = v.split(',').next() {
+            let ip = first.trim();
+            if !ip.is_empty() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+    // Try X-Real-IP as fallback
+    if let Some(value) = headers.get("x-real-ip")
+        && let Ok(v) = value.to_str()
+    {
+        let ip = v.trim();
+        if !ip.is_empty() {
+            return Some(ip.to_string());
+        }
+    }
+    None
+}
+
 /// Configuration for the HTTP server.
 ///
 /// Aggregates all parameters needed by [`serve`] to avoid excessive
@@ -552,6 +582,7 @@ async fn handle_request(
                 let state = shared.state.clone();
                 let invoker = compiled.invoker;
                 let req_ctx = crate::ctx::RequestCtx::new();
+                let forwarded_for = extract_forwarded_for(req.headers());
 
                 // Hook: before_request
                 #[cfg(feature = "hook")]
@@ -566,6 +597,8 @@ async fn handle_request(
                     state: state.clone(),
                     ctx: req_ctx.clone(),
                     attrs: compiled.attrs,
+                    client_ip: client_ip.to_string(),
+                    forwarded_for,
                 };
                 #[cfg(feature = "hook")]
                 let hook_key = &compiled.hook_key;
@@ -639,6 +672,7 @@ async fn handle_request(
         let compiled = &shared.sse_routes[route_idx];
         let query_string = uri.query().unwrap_or("");
         let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
+        let forwarded_for = extract_forwarded_for(req.headers());
         return handle_sse(
             shared,
             compiled.invoker,
@@ -649,6 +683,7 @@ async fn handle_request(
             headers_json,
             compiled.attrs,
             client_ip,
+            forwarded_for,
         )
         .await;
     }
@@ -916,6 +951,7 @@ async fn handle_api(
 
     let payload = &body[4..];
     let req_ctx = crate::ctx::RequestCtx::new();
+    let forwarded_for = extract_forwarded_for(&headers);
 
     // Hook: before_request
     #[cfg(feature = "hook")]
@@ -931,6 +967,8 @@ async fn handle_api(
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
             attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
+            client_ip: client_ip.to_string(),
+            forwarded_for: forwarded_for.clone(),
         };
         shared
             .hooks
@@ -958,6 +996,8 @@ async fn handle_api(
             state: shared.state.clone(),
             ctx: req_ctx.clone(),
             attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
+            client_ip: client_ip.to_string(),
+            forwarded_for,
         };
         match &result {
             Ok(bytes) => {
@@ -1274,7 +1314,6 @@ async fn handle_ws_upgrade(
     let hooks = shared.hooks.clone();
     let body_size_limit = shared.body_size_limit;
 
-    #[cfg(feature = "rate-limit")]
     let client_ip_owned = _client_ip.to_string();
     #[cfg(feature = "rate-limit")]
     let rate_limiter = shared.rate_limiter.clone();
@@ -1291,7 +1330,7 @@ async fn handle_ws_upgrade(
                 ws_config.max_frame_size = Some(body_size_limit);
                 let ws = WebSocketStream::from_raw_socket(io, Role::Server, Some(ws_config)).await;
                 #[cfg(feature = "rate-limit")]
-                let mut ctx = ConnectionContext::new(client_ip_owned);
+                let mut ctx = ConnectionContext::new(client_ip_owned.clone());
                 #[cfg(feature = "rate-limit")]
                 {
                     ctx.header_cache = header_cache;
@@ -1308,6 +1347,7 @@ async fn handle_ws_upgrade(
                     rate_limiter,
                     #[cfg(feature = "rate-limit")]
                     handler_names,
+                    client_ip_owned,
                 )
                 .await;
             }
@@ -1394,11 +1434,13 @@ async fn handle_ordinary_ws_upgrade(
 
     // Extract request headers as JSON before the request is consumed by upgrade.
     let headers_json = crate::app::ordinary::req_headers_to_json(req.headers());
+    let forwarded_for = extract_forwarded_for(req.headers());
 
     let on_upgrade = hyper::upgrade::on(req);
     let state = shared.state.clone();
     let query_owned = query_string.to_string();
     let req_ctx = crate::ctx::RequestCtx::new();
+    let client_ip_owned = _client_ip.to_string();
 
     // Clone hook data for use inside the spawned task.
     #[cfg(feature = "hook")]
@@ -1449,6 +1491,8 @@ async fn handle_ordinary_ws_upgrade(
                         state: state.clone(),
                         ctx: req_ctx.clone(),
                         attrs,
+                        client_ip: client_ip_owned.clone(),
+                        forwarded_for: forwarded_for.clone(),
                     };
                     _hooks_for_spawn
                         .iter()
@@ -1556,6 +1600,8 @@ async fn handle_ordinary_ws_upgrade(
                         state: state.clone(),
                         ctx: req_ctx.clone(),
                         attrs,
+                        client_ip: client_ip_owned.clone(),
+                        forwarded_for: forwarded_for.clone(),
                     };
                     for g in &mut _conn_guards {
                         g.on_disconnect(&ctx);
@@ -1592,6 +1638,7 @@ async fn handle_sse(
     headers_json: serde_json::Value,
     attrs: &'static [crate::handler::Attr],
     _client_ip: &str,
+    forwarded_for: Option<String>,
 ) -> Result<Response<BoxBody>, hyper::Error> {
     // Create channel for SSE events
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);
@@ -1612,6 +1659,8 @@ async fn handle_sse(
         state: state.clone(),
         ctx: req_ctx.clone(),
         attrs,
+        client_ip: _client_ip.to_string(),
+        forwarded_for: forwarded_for.clone(),
     };
     #[cfg(feature = "hook")]
     let named_hooks_for_sse = shared.named_hooks.clone();
@@ -1633,6 +1682,7 @@ async fn handle_sse(
     // Spawn the handler — it pushes events into `tx` via the SseSender.
     // When `tx` is dropped (handler returns), the `rx` stream ends.
     let state_for_spawn = state.clone();
+    let client_ip_owned = _client_ip.to_string();
     tokio::spawn(async move {
         let handler_result = invoker
             .call_sse(
@@ -1663,6 +1713,8 @@ async fn handle_sse(
                 state,
                 ctx: req_ctx.clone(),
                 attrs,
+                client_ip: client_ip_owned.clone(),
+                forwarded_for,
             };
             for g in &mut _conn_guards {
                 g.on_disconnect(&ctx);

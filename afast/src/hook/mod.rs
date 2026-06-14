@@ -68,6 +68,18 @@ pub struct RequestContext {
     pub ctx: RequestCtx,
     /// Custom attributes from handler macros (e.g. `tag("admin")`, `deprecated`).
     pub attrs: &'static [crate::handler::Attr],
+    /// Client IP address extracted from the TCP peer address.
+    ///
+    /// This is the direct IP of the connecting client. When behind a reverse
+    /// proxy (Nginx, CDN, etc.), this will be the proxy's IP, not the real
+    /// client IP. Use `forwarded_for` to get the real client IP in that case.
+    pub client_ip: String,
+    /// Real client IP from `X-Forwarded-For` or `X-Real-IP` header.
+    ///
+    /// Only available for HTTP and WebSocket transports. For TCP connections,
+    /// this is always `None` since there are no HTTP headers.
+    /// When behind a reverse proxy, this contains the actual client IP.
+    pub forwarded_for: Option<String>,
 }
 
 /// Extension point for request lifecycle events.

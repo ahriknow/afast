@@ -159,6 +159,35 @@ impl RequestGuard for MyGuard {
 }
 ```
 
+## Getting Client IP
+
+`RequestContext` provides two fields for obtaining the client's IP address:
+
+| Field | Type | Description |
+|---|---|---|
+| `client_ip` | `String` | TCP peer address (`peer_addr`) |
+| `forwarded_for` | `Option<String>` | Real IP from `X-Forwarded-For` / `X-Real-IP` headers |
+
+```rust
+impl Hook for MyHook {
+    fn before_request(&self, ctx: &RequestContext) -> Option<Box<dyn RequestGuard>> {
+        // Direct connection IP (may be proxy IP)
+        let ip = &ctx.client_ip;
+
+        // Real client IP (only available for HTTP/WS)
+        let real_ip = ctx.forwarded_for.as_deref().unwrap_or(&ctx.client_ip);
+
+        println!("client: {} (real: {})", ip, real_ip);
+        None
+    }
+}
+```
+
+**Notes**:
+- `client_ip` is available for all transports (HTTP, WS, TCP, SSE)
+- `forwarded_for` is only available for HTTP and WebSocket transports; always `None` for TCP
+- When behind a reverse proxy, prefer using `forwarded_for`
+
 ## API Reference
 
 ### `RequestCtx` — Container
