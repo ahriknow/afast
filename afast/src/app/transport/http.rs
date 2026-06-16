@@ -582,6 +582,7 @@ async fn handle_request(
                 let state = shared.state.clone();
                 let invoker = compiled.invoker;
                 let req_ctx = crate::ctx::RequestCtx::new();
+                #[cfg(feature = "hook")]
                 let forwarded_for = extract_forwarded_for(req.headers());
 
                 // Hook: before_request

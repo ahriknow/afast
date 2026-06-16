@@ -168,8 +168,6 @@ pub async fn handle_connection(
     #[cfg(feature = "rate-limit")]
     let mut conn_ctx = ConnectionContext::new(peer_ip.clone());
     let client_ip = peer_ip;
-    #[cfg(not(feature = "rate-limit"))]
-    let client_ip = peer_ip;
 
     let (mut reader, mut writer) = stream.into_split();
     let connections: Arc<Mutex<HashMap<u32, ConnectionState>>> =
@@ -364,7 +362,7 @@ pub async fn handle_connection(
                             hooks.get(&handler_id).map(|v| v.as_slice()).unwrap_or(&[]).iter().filter_map(|h| h.on_connect(&ctx)).collect()
                         };
 
-                        let client_ip_for_spawn = client_ip.clone();
+                        let _client_ip_for_spawn = client_ip.clone();
                         tokio::spawn(async move {
                             let result = invoker.call_stream(&state, &req_ctx, &payload, from_handler_tx, to_handler_rx).await;
 
@@ -394,7 +392,7 @@ pub async fn handle_connection(
                                     state: state.clone(),
                                     ctx: req_ctx.clone(),
                                     attrs: invoker.meta().map(|m| m.attrs).unwrap_or(&[]),
-                                    client_ip: client_ip_for_spawn.clone(),
+                                    client_ip: _client_ip_for_spawn.clone(),
                                     forwarded_for: None,
                                 };
                                 for g in &mut _conn_guards { g.on_disconnect(&ctx); }

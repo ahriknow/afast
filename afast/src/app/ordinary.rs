@@ -191,21 +191,13 @@ impl RoutePattern {
 /// catch-all segments (`*name`) use a separate catch-all child.
 ///
 /// This replaces the previous O(n) linear scan over all routes.
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 pub(crate) struct TrieRouter {
     /// Per-method trie roots: `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`.
     roots: std::collections::HashMap<&'static str, TrieNode>,
 }
 
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 struct TrieNode {
     /// Static segment children: `"users"` → child node.
     static_children: std::collections::HashMap<String, TrieNode>,
@@ -219,11 +211,7 @@ struct TrieNode {
     route: Option<usize>,
 }
 
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 impl TrieNode {
     fn new() -> Self {
         Self {
@@ -235,11 +223,7 @@ impl TrieNode {
     }
 }
 
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 struct ParamChild {
     /// The parameter name (e.g. `"id"`).
     name: &'static str,
@@ -247,11 +231,7 @@ struct ParamChild {
     node: TrieNode,
 }
 
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 struct CatchAllChild {
     /// The catch-all parameter name (e.g. `"*"` or `"path"`).
     name: &'static str,
@@ -259,11 +239,7 @@ struct CatchAllChild {
     route: usize,
 }
 
-#[cfg(any(
-    all(feature = "ordinary-http", feature = "http", feature = "binary"),
-    feature = "ordinary-ws",
-    feature = "ordinary-sse",
-))]
+#[cfg(all(feature = "ordinary-http", feature = "http", feature = "binary"))]
 impl TrieRouter {
     /// Creates an empty trie router.
     pub fn new() -> Self {

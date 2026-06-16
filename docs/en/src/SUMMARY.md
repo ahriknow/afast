@@ -12,3 +12,4 @@
 - [Interactive Documentation](./api-docs.md)
 - [Project Structure](./project-structure.md)
 - [Testing](./testing.md)
+- [🤖 AI Development Guide](./ai-prompt.md)

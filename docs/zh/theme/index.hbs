@@ -381,5 +381,162 @@
         }
     })();
     </script>
+
+    <!-- AI Prompt Copy Button -->
+    <style>
+        #ai-prompt-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: linear-gradient(135deg, #a6e3a1, #f9e2af);
+            color: #1e1e2e;
+            border: none;
+            border-radius: 50px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #ai-prompt-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+        }
+        #ai-prompt-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        #ai-toast {
+            position: fixed;
+            bottom: 5rem;
+            right: 2rem;
+            background: #a6e3a1;
+            color: #1e1e2e;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 1001;
+        }
+        #ai-toast.show { opacity: 1; }
+    </style>
+    <button id="ai-prompt-btn" title="复制页面内容给">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        🤖 复制给
+    </button>
+    <div id="ai-toast">已复制到剪贴板！</div>
+    <script>
+    (function() {
+        const btn = document.getElementById('ai-prompt-btn');
+        const toast = document.getElementById('ai-toast');
+
+        btn.addEventListener('click', async function() {
+            const mainContent = document.querySelector('main');
+            if (!mainContent) {
+                toast.textContent = '未找到内容！';
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 2000);
+                return;
+            }
+
+            function htmlToMarkdown(element) {
+                let result = '';
+                const walk = (node) => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        result += node.textContent;
+                        return;
+                    }
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    
+                    const tag = node.tagName.toLowerCase();
+                    const content = Array.from(node.childNodes).map(child => htmlToMarkdown(child)).join('');
+                    
+                    switch(tag) {
+                        case 'h1': result += '# ' + content.trim() + '\n\n'; break;
+                        case 'h2': result += '## ' + content.trim() + '\n\n'; break;
+                        case 'h3': result += '### ' + content.trim() + '\n\n'; break;
+                        case 'h4': result += '#### ' + content.trim() + '\n\n'; break;
+                        case 'h5': result += '##### ' + content.trim() + '\n\n'; break;
+                        case 'h6': result += '###### ' + content.trim() + '\n\n'; break;
+                        case 'p': case 'div': result += content.trim() + '\n\n'; break;
+                        case 'br': result += '\n'; break;
+                        case 'strong': case 'b': result += '**' + content + '**'; break;
+                        case 'em': case 'i': result += '*' + content + '*'; break;
+                        case 'code':
+                            if (node.parentElement && node.parentElement.tagName.toLowerCase() === 'pre') {
+                                result += content;
+                            } else {
+                                result += '`' + content + '`';
+                            }
+                            break;
+                        case 'pre':
+                            const lang = node.querySelector('code')?.className?.replace('language-', '') || '';
+                            result += '```' + lang + '\n' + content.trim() + '\n```\n\n';
+                            break;
+                        case 'a': result += '[' + content + '](' + (node.href || '') + ')'; break;
+                        case 'img': result += '![' + (node.alt || '') + '](' + (node.src || '') + ')'; break;
+                        case 'ul':
+                            node.querySelectorAll(':scope > li').forEach(li => {
+                                result += '- ' + htmlToMarkdown(li).trim() + '\n';
+                            });
+                            result += '\n';
+                            break;
+                        case 'ol':
+                            let i = 1;
+                            node.querySelectorAll(':scope > li').forEach(li => {
+                                result += i++ + '. ' + htmlToMarkdown(li).trim() + '\n';
+                            });
+                            result += '\n';
+                            break;
+                        case 'li': result += content; break;
+                        case 'blockquote': result += '> ' + content.trim() + '\n\n'; break;
+                        case 'hr': result += '---\n\n'; break;
+                        case 'table':
+                            const rows = node.querySelectorAll('tr');
+                            rows.forEach((row, rowIdx) => {
+                                const cells = row.querySelectorAll('th, td');
+                                result += '| ' + Array.from(cells).map(c => htmlToMarkdown(c).trim()).join(' | ') + ' |\n';
+                                if (rowIdx === 0) {
+                                    result += '| ' + Array.from(cells).map(() => '---').join(' | ') + ' |\n';
+                                }
+                            });
+                            result += '\n';
+                            break;
+                        default: result += content;
+                    }
+                };
+                walk(element);
+                return result;
+            }
+            
+            let markdown = htmlToMarkdown(mainContent);
+            markdown = markdown.replace(/\n{3,}/g, '\n\n').trim();
+            
+            try {
+                await navigator.clipboard.writeText(markdown);
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 2000);
+            } catch (err) {
+                const textarea = document.createElement('textarea');
+                textarea.value = markdown;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 2000);
+            }
+        });
+    })();
+    </script>
     </body>
 </html>

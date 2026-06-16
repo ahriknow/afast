@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.19]
+
+### Added
+
+- **AI 开发指南**: 新增中英文 `ai-prompt.md` 文档，专为 AI 助手设计，包含完整的 handler 签名模式、服务注册、类型派生规则、HTTP/WS/SSE 示例、客户端代码示例等。
+- **文档页面一键复制按钮**: 所有文档页面右下角新增 复制按钮，点击可将当前页面 Markdown 内容复制到剪贴板，方便粘贴给 AI 助手。
+
+### Fixed
+
+- **Feature 条件编译修复**: 修复 `TrieRouter` 及相关结构体的 `cfg` 门控，之前在仅启用 `ordinary-ws` 或 `ordinary-sse` 时会编译未使用的代码产生警告。改为仅在 `ordinary-http + http + binary` 同时启用时编译。
+- **`forwarded_for` 未使用警告**: 修复 `hook` feature 未启用时 `forwarded_for` 变量未使用的警告，改为仅在 `hook` 启用时提取。
+- **`peer_ip` 重复 move 错误**: 修复 `tcp.rs` 和 `ws.rs` 中 `peer_ip` 在 `rate-limit` 未启用时被 move 两次的编译错误。
+- **`client_ip_for_spawn` 未使用警告**: 修复 `tcp.rs` 和 `ws.rs` 中 `client_ip_for_spawn` 在 `hook` 未启用时的未使用警告。
+
 ## [0.1.18]
 
 ### Added
