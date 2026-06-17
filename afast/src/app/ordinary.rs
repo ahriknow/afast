@@ -328,6 +328,12 @@ impl TrieRouter {
             {
                 return Some((idx, std::collections::HashMap::new()));
             }
+            // Also check catch-all child for root path
+            if let Some(ref catch_all) = root.catch_all_child {
+                let mut params = std::collections::HashMap::new();
+                params.insert(catch_all.name.to_string(), String::new());
+                return Some((catch_all.route, params));
+            }
             return None;
         }
 
