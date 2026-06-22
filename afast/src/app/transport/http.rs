@@ -137,6 +137,9 @@ pub struct HttpConfig {
     pub sanitize_errors: bool,
     /// Security headers added to every HTTP response.
     pub security_headers: Vec<(&'static str, &'static str)>,
+    /// CORS configuration for HTTP responses and preflight handling.
+    #[cfg(feature = "http")]
+    pub cors_config: Option<crate::app::CorsConfig>,
     /// Rate-limit policy name for /code and /doc endpoints.
     #[cfg(feature = "rate-limit")]
     pub doc_code_rate_limit_policy: Option<String>,
@@ -285,6 +288,8 @@ pub async fn serve(
         body_size_limit: config.body_size_limit,
         sanitize_errors: config.sanitize_errors,
         security_headers: config.security_headers,
+        #[cfg(feature = "http")]
+        cors_config: config.cors_config,
         #[cfg(feature = "rate-limit")]
         doc_code_rate_limit_policy: config.doc_code_rate_limit_policy,
     });
@@ -475,6 +480,9 @@ struct SharedState {
     sanitize_errors: bool,
     /// Security headers added to every HTTP response.
     security_headers: Vec<(&'static str, &'static str)>,
+    /// CORS configuration for HTTP responses and preflight handling.
+    #[cfg(feature = "http")]
+    cors_config: Option<crate::app::CorsConfig>,
     /// Rate-limit policy name for /code and /doc endpoints.
     #[cfg(feature = "rate-limit")]
     #[allow(dead_code)]
@@ -547,6 +555,79 @@ async fn handle_request(
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path = uri.path();
+    let request_origin = req
+        .headers()
+        .get(hyper::header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Handle CORS preflight (OPTIONS) requests.
+    #[cfg(feature = "http")]
+    if method == hyper::Method::OPTIONS
+        && let Some(ref cors) = shared.cors_config
+    {
+        let origin_allowed = request_origin
+            .as_deref()
+            .map(|o| cors.is_origin_allowed(o))
+            .unwrap_or(false);
+        if origin_allowed {
+            let mut builder = Response::builder()
+                .status(StatusCode::NO_CONTENT)
+                .header(
+                    "access-control-allow-origin",
+                    request_origin.as_deref().unwrap_or("*"),
+                )
+                .header(
+                    "access-control-allow-methods",
+                    cors.allowed_methods.join(", "),
+                )
+                .header(
+                    "access-control-allow-headers",
+                    cors.allowed_headers.join(", "),
+                );
+            if let Some(max_age) = cors.max_age {
+                builder = builder.header("access-control-max-age", max_age.to_string());
+            }
+            if cors.allow_credentials {
+                builder = builder.header("access-control-allow-credentials", "true");
+            }
+            return Ok(builder
+                .body(Full::new(Bytes::new()).boxed())
+                .expect("valid response builder"));
+        }
+    }
+
+    // Helper closure: inject CORS headers into a response.
+    #[cfg(feature = "http")]
+    let inject_cors = |mut resp: Response<BoxBody>,
+                       origin: &Option<String>,
+                       cors: &crate::app::CorsConfig|
+     -> Response<BoxBody> {
+        if let Some(o) = origin
+            && cors.is_origin_allowed(o)
+        {
+            let headers = resp.headers_mut();
+            headers.insert(
+                "access-control-allow-origin",
+                hyper::header::HeaderValue::from_str(o)
+                    .unwrap_or_else(|_| hyper::header::HeaderValue::from_static("*")),
+            );
+            if cors.allow_credentials {
+                headers.insert(
+                    "access-control-allow-credentials",
+                    hyper::header::HeaderValue::from_static("true"),
+                );
+            }
+            if !cors.expose_headers.is_empty() {
+                headers.insert(
+                    "access-control-expose-headers",
+                    hyper::header::HeaderValue::from_str(&cors.expose_headers.join(", "))
+                        .unwrap_or_else(|_| hyper::header::HeaderValue::from_static("")),
+                );
+            }
+        }
+        resp
+    };
 
     // Try ordinary HTTP routes via trie router (O(path_depth))
     #[cfg(feature = "ordinary-http")]
@@ -637,7 +718,14 @@ async fn handle_request(
                 }
 
                 return match result {
-                    Ok(response) => Ok(response.map(|b| b.boxed())),
+                    Ok(response) => {
+                        let resp = response.map(|b| b.boxed());
+                        #[cfg(feature = "http")]
+                        if let Some(ref cors) = shared.cors_config {
+                            return Ok(inject_cors(resp, &request_origin, cors));
+                        }
+                        Ok(resp)
+                    }
                     Err(e) => {
                         let code = e.code();
                         let message = if shared.sanitize_errors {
@@ -652,11 +740,16 @@ async fn handle_request(
                             StatusCode::INTERNAL_SERVER_ERROR
                         };
                         let body = super::util::json_error_body(code, message);
-                        Ok(Response::builder()
+                        let resp = Response::builder()
                             .status(status)
                             .header("content-type", "application/json; charset=utf-8")
                             .body(Full::new(Bytes::from(body)).boxed())
-                            .expect("valid response builder"))
+                            .expect("valid response builder");
+                        #[cfg(feature = "http")]
+                        if let Some(ref cors) = shared.cors_config {
+                            return Ok(inject_cors(resp, &request_origin, cors));
+                        }
+                        Ok(resp)
                     }
                 };
             } // end if !is_catch_all
@@ -751,7 +844,12 @@ async fn handle_request(
             if method != hyper::Method::POST {
                 return method_not_allowed();
             }
-            handle_api(req, shared, client_ip).await
+            let resp = handle_api(req, shared, client_ip).await?;
+            #[cfg(feature = "http")]
+            if let Some(ref cors) = shared.cors_config {
+                return Ok(inject_cors(resp, &request_origin, cors));
+            }
+            Ok(resp)
         }
         #[cfg(feature = "code")]
         Some("code") => {
@@ -827,7 +925,14 @@ async fn handle_request(
                         .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
                         .await;
                     return match result {
-                        Ok(response) => Ok(response.map(|b| b.boxed())),
+                        Ok(response) => {
+                            let resp = response.map(|b| b.boxed());
+                            #[cfg(feature = "http")]
+                            if let Some(ref cors) = shared.cors_config {
+                                return Ok(inject_cors(resp, &request_origin, cors));
+                            }
+                            Ok(resp)
+                        }
                         Err(e) => {
                             let code = e.code();
                             let message = if shared.sanitize_errors {
@@ -842,11 +947,16 @@ async fn handle_request(
                                 StatusCode::INTERNAL_SERVER_ERROR
                             };
                             let body = super::util::json_error_body(code, message);
-                            Ok(Response::builder()
+                            let resp = Response::builder()
                                 .status(status)
                                 .header("content-type", "application/json; charset=utf-8")
                                 .body(Full::new(Bytes::from(body)).boxed())
-                                .expect("valid response builder"))
+                                .expect("valid response builder");
+                            #[cfg(feature = "http")]
+                            if let Some(ref cors) = shared.cors_config {
+                                return Ok(inject_cors(resp, &request_origin, cors));
+                            }
+                            Ok(resp)
                         }
                     };
                 }

@@ -10,7 +10,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```no_run
+//! ```ignore
 //! use afast::{AFast, handler, service, State, Data, Result};
 //! use afast::{AFastDeserialize, AFastSerialize, Tag};
 //!
@@ -30,7 +30,7 @@
 //!     state: State<AppState>,
 //!     req: Data<HelloReq>,
 //! ) -> Result<HelloResp> {
-//!     Ok(HelloResp { message: format!("Hello, {}!", req.name) })
+//!     Ok(HelloResp { message: format!("Hello, {}!", req.0.name) })
 //! }
 //!
 //! #[tokio::main]
@@ -211,7 +211,7 @@ pub use afastdata::{AFastDeserialize, AFastSerialize};
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// #[handler(desc("Uses shared state"))]
 /// async fn my_handler(
 ///     state: afast::State<AppState>,
@@ -253,7 +253,7 @@ pub struct Ctx<T>(pub T);
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// #[derive(AFastDeserialize, Tag)]
 /// #[tag("Request body")]
 /// struct MyReq { name: String }
@@ -279,7 +279,7 @@ pub struct Data<T>(pub T);
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// #[derive(AFastDeserialize, Tag)]
 /// #[tag("Credentials")]
 /// struct Auth { token: i64 }
@@ -459,9 +459,58 @@ pub struct Serve {
 #[cfg(feature = "ordinary-http")]
 pub struct Status(pub hyper::StatusCode);
 
-/// Redirect response. Sets `302 Found` with a `Location` header.
+/// Redirect response with a `Location` header.
+///
+/// Use [`Redirect::permanent`] for `301 Moved Permanently` or
+/// [`Redirect::temporary`] (default) for `302 Found`.
+///
+/// # Examples
+///
+/// ```ignore
+/// // 302 Found (default)
+/// Redirect::temporary("/login")
+///
+/// // 301 Moved Permanently
+/// Redirect::permanent("/new-url")
+/// ```
 #[cfg(feature = "ordinary-http")]
-pub struct Redirect(pub String);
+pub struct Redirect {
+    pub location: String,
+    status: hyper::StatusCode,
+}
+
+#[cfg(feature = "ordinary-http")]
+impl Redirect {
+    /// Creates a `301 Moved Permanently` redirect.
+    pub fn permanent(location: impl Into<String>) -> Self {
+        Self {
+            location: location.into(),
+            status: hyper::StatusCode::MOVED_PERMANENTLY,
+        }
+    }
+
+    /// Creates a `302 Found` redirect (default).
+    pub fn temporary(location: impl Into<String>) -> Self {
+        Self {
+            location: location.into(),
+            status: hyper::StatusCode::FOUND,
+        }
+    }
+}
+
+#[cfg(feature = "ordinary-http")]
+impl From<String> for Redirect {
+    fn from(location: String) -> Self {
+        Self::temporary(location)
+    }
+}
+
+#[cfg(feature = "ordinary-http")]
+impl From<&str> for Redirect {
+    fn from(location: &str) -> Self {
+        Self::temporary(location)
+    }
+}
 
 /// Type alias for ordinary HTTP handler return types.
 #[cfg(feature = "ordinary-http")]
@@ -571,8 +620,8 @@ impl IntoResponse for Redirect {
         use http_body_util::Full;
         use hyper::body::Bytes;
         hyper::Response::builder()
-            .status(hyper::StatusCode::FOUND)
-            .header("location", self.0)
+            .status(self.status)
+            .header("location", self.location)
             .body(Full::new(Bytes::new()))
             .unwrap()
     }
@@ -794,6 +843,8 @@ pub type Result<T, E: AFastError = Error> = std::result::Result<T, E>;
 pub mod app;
 
 pub use app::AFast;
+#[cfg(feature = "http")]
+pub use app::CorsConfig;
 #[cfg(feature = "doc")]
 pub use app::DocConfig;
 #[cfg(feature = "kt")]

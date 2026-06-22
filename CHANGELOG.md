@@ -2,9 +2,18 @@
 
 ## [0.1.20]
 
+### Added
+
+- **CORS support**: New `CorsConfig` (requires `http` feature) for automatic `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` injection and `OPTIONS` preflight handling. Applies to all HTTP endpoints (`_api`, ordinary routes, etc.). Enable via `AFast::cors(CorsConfig)`. Ships with `CorsConfig::permissive()` for development and `CorsConfig::new(origins)` for production.
+
+### Changed
+
+- **Security headers upgrade**: Replaced deprecated `x-xss-protection: 1; mode=block` with `content-security-policy: default-src 'self'` for modern, effective XSS protection.
+
 ### Fixed
 
-- **Catch-all 路由匹配根路径**: 修复 `/*path` 等通配符路由无法匹配根路径 `/` 的问题。访问 `/` 时现在正确匹配 catch-all 路由，path 参数为空字符串。
+- **Catch-all route matching root path**: Fixed `/*path` wildcard routes not matching the root path `/`. Now correctly matches catch-all routes with an empty string for the path parameter.
+- **Doctest fixes**: Fixed 4 failing doctests in lib.rs (Quick Start, State, Data, Custom examples), eliminating `cargo test --doc` failures.
 
 ## [0.1.19]
 

@@ -41,8 +41,8 @@
 //! ```
 
 use afast::{
-    AFast, Algorithm, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang, RateLimitConfig,
-    RateLimitKey, RateLimitPolicy, RsCallType, service,
+    AFast, Algorithm, CorsConfig, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang,
+    RateLimitConfig, RateLimitKey, RateLimitPolicy, RsCallType, service,
 };
 
 #[cfg(feature = "hook")]
@@ -428,6 +428,12 @@ async fn main() {
         // Fields with #[afast(skip_with("afast"))] are excluded from
         // serialization when this marker is set.
         .marker("afast")
+        // ── CORS ──────────────────────────────────────────────────
+        //
+        // Enable CORS for all HTTP endpoints (including /_api).
+        // Use CorsConfig::permissive() for development or
+        // CorsConfig::new(vec!["https://example.com"]) for production.
+        .cors(CorsConfig::permissive())
         // ── Rate Limiting ────────────────────────────────────────
         //
         // Named policies that handlers reference by ID via
@@ -438,7 +444,7 @@ async fn main() {
                 // Uses sliding window to avoid burst at window boundary
                 .policy(RateLimitPolicy {
                     id: "login".into(),
-                    max_requests: 5,
+                    max_requests: 100,
                     window_secs: 60,
                     key: RateLimitKey::Ip,
                     algorithm: Algorithm::SlidingWindow,
@@ -449,7 +455,7 @@ async fn main() {
                 .policy(RateLimitPolicy {
                     id: "global".into(),
                     max_requests: 100,
-                    window_secs: 1,
+                    window_secs: 60,
                     key: RateLimitKey::Ip,
                     algorithm: Algorithm::SlidingWindow,
                 }),

@@ -246,6 +246,118 @@ impl Default for DocConfig {
     }
 }
 
+/// CORS (Cross-Origin Resource Sharing) configuration.
+///
+/// Passed to [`AFast::cors`] to enable CORS headers on HTTP responses
+/// and handle `OPTIONS` preflight requests automatically.
+///
+/// # Example
+///
+/// ```ignore
+/// AFast::new()
+///     .cors(CorsConfig::permissive())
+///     .http("0.0.0.0:5000")
+///     .run()
+///     .await
+/// ```
+#[cfg(feature = "http")]
+#[derive(Clone)]
+pub struct CorsConfig {
+    /// Allowed origins. Use `["*"]` to allow all origins.
+    pub allowed_origins: Vec<String>,
+    /// Allowed HTTP methods (e.g. `GET`, `POST`, `PUT`, `DELETE`).
+    pub allowed_methods: Vec<String>,
+    /// Allowed request headers.
+    pub allowed_headers: Vec<String>,
+    /// Headers exposed to the browser (e.g. `Content-Type`, `Authorization`).
+    pub expose_headers: Vec<String>,
+    /// Max age in seconds for preflight cache.
+    pub max_age: Option<u64>,
+    /// Whether to include `Access-Control-Allow-Credentials`.
+    pub allow_credentials: bool,
+}
+
+#[cfg(feature = "http")]
+impl CorsConfig {
+    /// Creates a permissive CORS config that allows all origins, methods,
+    /// and headers. Suitable for development.
+    pub fn permissive() -> Self {
+        Self {
+            allowed_origins: vec!["*".to_string()],
+            allowed_methods: vec![
+                "GET".to_string(),
+                "POST".to_string(),
+                "PUT".to_string(),
+                "DELETE".to_string(),
+                "PATCH".to_string(),
+                "OPTIONS".to_string(),
+            ],
+            allowed_headers: vec!["*".to_string()],
+            expose_headers: Vec::new(),
+            max_age: Some(3600),
+            allow_credentials: false,
+        }
+    }
+
+    /// Creates a CORS config for a specific set of origins.
+    pub fn new(origins: Vec<impl Into<String>>) -> Self {
+        Self {
+            allowed_origins: origins.into_iter().map(Into::into).collect(),
+            allowed_methods: vec![
+                "GET".to_string(),
+                "POST".to_string(),
+                "PUT".to_string(),
+                "DELETE".to_string(),
+                "PATCH".to_string(),
+            ],
+            allowed_headers: vec![
+                "Content-Type".to_string(),
+                "Authorization".to_string(),
+                "Accept".to_string(),
+            ],
+            expose_headers: Vec::new(),
+            max_age: Some(3600),
+            allow_credentials: false,
+        }
+    }
+
+    /// Sets the allowed HTTP methods.
+    pub fn allowed_methods(mut self, methods: Vec<impl Into<String>>) -> Self {
+        self.allowed_methods = methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the allowed request headers.
+    pub fn allowed_headers(mut self, headers: Vec<impl Into<String>>) -> Self {
+        self.allowed_headers = headers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the exposed response headers.
+    pub fn expose_headers(mut self, headers: Vec<impl Into<String>>) -> Self {
+        self.expose_headers = headers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the preflight cache max age in seconds.
+    pub fn max_age(mut self, secs: u64) -> Self {
+        self.max_age = Some(secs);
+        self
+    }
+
+    /// Enables `Access-Control-Allow-Credentials`.
+    pub fn allow_credentials(mut self, allow: bool) -> Self {
+        self.allow_credentials = allow;
+        self
+    }
+
+    /// Returns `true` if the given origin is allowed.
+    pub fn is_origin_allowed(&self, origin: &str) -> bool {
+        self.allowed_origins.contains(&"*".to_string())
+            || self.allowed_origins.iter().any(|o| o == origin)
+    }
+}
+
 /// TLS configuration for HTTPS server.
 ///
 /// Passed to [`AFast::https`] to enable TLS on the HTTP server.
@@ -348,8 +460,11 @@ pub struct AFast {
     sanitize_errors: bool,
     /// Security headers added to every HTTP response.
     /// Defaults to `[("x-content-type-options", "nosniff"), ("x-frame-options", "DENY"),
-    /// ("x-xss-protection", "1; mode=block")]`.
+    /// ("content-security-policy", "default-src 'self'")]`.
     security_headers: Vec<(&'static str, &'static str)>,
+    /// CORS configuration for HTTP responses and preflight handling.
+    #[cfg(feature = "http")]
+    cors_config: Option<CorsConfig>,
     /// Rate-limit policy name applied to `/code` and `/doc` endpoints.
     /// Only effective when the `rate-limit` feature is enabled and a
     /// policy with this name exists in the [`RateLimitConfig`].
@@ -401,8 +516,10 @@ impl AFast {
             security_headers: vec![
                 ("x-content-type-options", "nosniff"),
                 ("x-frame-options", "DENY"),
-                ("x-xss-protection", "1; mode=block"),
+                ("content-security-policy", "default-src 'self'"),
             ],
+            #[cfg(feature = "http")]
+            cors_config: None,
             doc_code_rate_limit_policy: None,
         }
     }
@@ -491,6 +608,31 @@ impl AFast {
     /// ```
     pub fn security_headers(mut self, headers: Vec<(&'static str, &'static str)>) -> Self {
         self.security_headers = headers;
+        self
+    }
+
+    /// Sets CORS (Cross-Origin Resource Sharing) configuration.
+    ///
+    /// When set, the server automatically adds CORS headers to every HTTP
+    /// response (including binary `/_api` endpoints) and handles `OPTIONS`
+    /// preflight requests.
+    ///
+    /// Requires the `http` feature.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use afast::app::CorsConfig;
+    ///
+    /// AFast::new()
+    ///     .cors(CorsConfig::new(vec!["https://example.com"]).max_age(7200))
+    ///     .http("0.0.0.0:5000")
+    ///     .run()
+    ///     .await
+    /// ```
+    #[cfg(feature = "http")]
+    pub fn cors(mut self, config: CorsConfig) -> Self {
+        self.cors_config = Some(config);
         self
     }
 
@@ -1082,6 +1224,8 @@ impl AFast {
                     let doc_code_rate_limit_policy_http = doc_code_rate_limit_policy.clone();
                     #[cfg(feature = "ws")]
                     let ws_origins_http = self.allowed_ws_origins.clone();
+                    #[cfg(feature = "http")]
+                    let cors_http = self.cors_config.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1120,6 +1264,8 @@ impl AFast {
                                 request_timeout_secs: self.request_timeout_secs,
                                 sanitize_errors: self.sanitize_errors,
                                 security_headers: security_headers_http,
+                                #[cfg(feature = "http")]
+                                cors_config: cors_http,
                                 #[cfg(feature = "rate-limit")]
                                 doc_code_rate_limit_policy: doc_code_rate_limit_policy_http,
                             },
@@ -1161,6 +1307,8 @@ impl AFast {
                     let hn = rate_handler_names_outer.clone();
                     #[cfg(feature = "ws")]
                     let ws_origins_https = self.allowed_ws_origins.clone();
+                    #[cfg(feature = "http")]
+                    let cors_https = self.cors_config.clone();
 
                     let server = tokio::spawn(async move {
                         crate::app::transport::serve(
@@ -1199,6 +1347,8 @@ impl AFast {
                                 request_timeout_secs: self.request_timeout_secs,
                                 sanitize_errors: self.sanitize_errors,
                                 security_headers: security_headers.clone(),
+                                #[cfg(feature = "http")]
+                                cors_config: cors_https,
                                 #[cfg(feature = "rate-limit")]
                                 doc_code_rate_limit_policy: doc_code_rate_limit_policy.clone(),
                             },

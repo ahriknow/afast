@@ -81,7 +81,59 @@ async fn get_user(
 | `Html` | 200 | `text/html` |
 | `File` | 200 | Custom + `Content-Disposition: attachment` |
 | `Status(code)` | Custom | — |
-| `Redirect(url)` | 302 | `Location` header |
+| `Redirect::temporary(url)` / `Redirect::permanent(url)` | 302 / 301 | `Location` header |
+
+### CORS
+
+Enable CORS (Cross-Origin Resource Sharing) via `AFast::cors()` (requires the `http` feature). All HTTP endpoints — including binary `/_api`, ordinary HTTP routes, and code/doc endpoints — automatically include CORS headers:
+
+```rust
+use afast::{AFast, CorsConfig};
+
+// Development: allow all origins
+AFast::new()
+    .cors(CorsConfig::permissive())
+    .http("0.0.0.0:5000")
+    .run().await;
+
+// Production: specific origins with credentials
+AFast::new()
+    .cors(
+        CorsConfig::new(vec!["https://example.com", "https://app.example.com"])
+            .allow_credentials(true)
+            .max_age(7200)
+    )
+    .http("0.0.0.0:5000")
+    .run().await;
+```
+
+The server automatically:
+- Responds to `OPTIONS` preflight requests with `204 No Content`
+- Injects `Access-Control-Allow-Origin` into every HTTP response
+- Sets `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and `Access-Control-Max-Age` for preflight
+
+### Security Headers
+
+Every HTTP response includes these security headers by default:
+
+| Header | Value |
+|--------|-------|
+| `x-content-type-options` | `nosniff` |
+| `x-frame-options` | `DENY` |
+| `content-security-policy` | `default-src 'self'` |
+
+Override via `AFast::security_headers()`:
+
+```rust
+AFast::new()
+    .security_headers(vec![
+        ("x-content-type-options", "nosniff"),
+        ("x-frame-options", "SAMEORIGIN"),
+        ("content-security-policy", "default-src 'self'; script-src 'self' 'unsafe-inline'"),
+    ])
+    .http("0.0.0.0:5000")
+    .run().await;
+```
 
 ## Ordinary WebSocket
 

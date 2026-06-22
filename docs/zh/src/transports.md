@@ -81,7 +81,59 @@ async fn get_user(
 | `Html` | 200 | `text/html` |
 | `File` | 200 | 自定义 + `Content-Disposition: attachment` |
 | `Status(code)` | 自定义 | — |
-| `Redirect(url)` | 302 | `Location` 头 |
+| `Redirect::temporary(url)` / `Redirect::permanent(url)` | 302 / 301 | `Location` 头 |
+
+### CORS
+
+通过 `AFast::cors()` 启用 CORS（跨源资源共享），需要 `http` feature。所有 HTTP 端点——包括二进制 `/_api`、普通 HTTP 路由以及代码/文档端点——都会自动包含 CORS 头：
+
+```rust
+use afast::{AFast, CorsConfig};
+
+// 开发环境：允许所有来源
+AFast::new()
+    .cors(CorsConfig::permissive())
+    .http("0.0.0.0:5000")
+    .run().await;
+
+// 生产环境：指定来源并启用凭证
+AFast::new()
+    .cors(
+        CorsConfig::new(vec!["https://example.com", "https://app.example.com"])
+            .allow_credentials(true)
+            .max_age(7200)
+    )
+    .http("0.0.0.0:5000")
+    .run().await;
+```
+
+服务器会自动：
+- 响应 `OPTIONS` 预检请求，返回 `204 No Content`
+- 在每个 HTTP 响应中注入 `Access-Control-Allow-Origin`
+- 为预检请求设置 `Access-Control-Allow-Methods`、`Access-Control-Allow-Headers` 和 `Access-Control-Max-Age`
+
+### 安全头
+
+每个 HTTP 响应默认包含以下安全头：
+
+| 头部 | 值 |
+|------|------|
+| `x-content-type-options` | `nosniff` |
+| `x-frame-options` | `DENY` |
+| `content-security-policy` | `default-src 'self'` |
+
+可通过 `AFast::security_headers()` 覆盖：
+
+```rust
+AFast::new()
+    .security_headers(vec![
+        ("x-content-type-options", "nosniff"),
+        ("x-frame-options", "SAMEORIGIN"),
+        ("content-security-policy", "default-src 'self'; script-src 'self' 'unsafe-inline'"),
+    ])
+    .http("0.0.0.0:5000")
+    .run().await;
+```
 
 ## Ordinary WebSocket
 
