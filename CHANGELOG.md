@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.21]
+
+### Added
+
+- **Multipart file upload**: New `Multipart` extractor for raw `multipart/form-data` access via `multer` crate. New `MultipartForm<T>` extractor for typed form data extraction with `#[derive(FromFormData)]` macro. Supported field types: `String`, `i64`/`i32`/`f64`/`bool` (parsed from text), `FileField` (file upload), `Option<T>` (optional fields).
+- **`#[derive(FromFormData)]` macro**: Auto-implements `FromFormData` trait for structs. Reads all multipart fields in a single pass, matches by field name, handles text and file fields automatically.
+- **`FileField` type**: Represents an uploaded file with `name`, `filename`, `content_type`, and `bytes` fields. Implements `Structure` trait for code generation.
+- **TLS hot-reload via channel**: `app.https()` accepts an optional `broadcast::Receiver<Option<TlsReloadMessage>>` channel. Send `None` to reload with original paths, or `Some(TlsReloadMessage { cert_path, key_path })` for new paths. Replaces SIGHUP-based reload.
+- **Server failure detection**: If any server (WS/HTTP/HTTPS/TCP) fails to start, the framework prints the error and stops all other servers gracefully via `JoinSet`.
+- **Debug-only diagnostic messages**: TLS handshake timeouts, cert-not-found messages, and reload diagnostics only print in debug builds (`#[cfg(debug_assertions)]`). Real errors (accept errors, handler errors) always print.
+- **Client code generation for multipart**: TS/JS/KT code generators now handle `Multipart` and `MultipartForm` extractors, generating `FormData`-based upload code.
+
+### Changed
+
+- **`app.https()` signature**: Now takes an additional `reload_rx: Option<broadcast::Receiver<Option<TlsReloadMessage>>>` parameter for channel-based certificate reload.
+
 ## [0.1.20]
 
 ### Added

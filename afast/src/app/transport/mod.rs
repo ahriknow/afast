@@ -4,7 +4,7 @@
 //! Each is gated behind its respective Cargo feature (`ws`, `http`, `tcp`).
 
 #[cfg(all(feature = "http", feature = "binary"))]
-mod http;
+pub mod http;
 #[cfg(feature = "tcp")]
 mod tcp;
 #[cfg(any(

@@ -1076,11 +1076,13 @@ fn ordinary_handler_method_js(
     let mut param_param: Option<&ParamMeta> = None;
     let mut query_param: Option<&ParamMeta> = None;
     let mut body_param: Option<&ParamMeta> = None;
+    let mut multipart_param: Option<&ParamMeta> = None;
     for param in meta.params {
         match param.extractor {
             "Param" => param_param = Some(param),
             "Query" => query_param = Some(param),
             "Body" => body_param = Some(param),
+            "Multipart" | "MultipartForm" => multipart_param = Some(param),
             _ => {}
         }
     }
@@ -1107,6 +1109,9 @@ fn ordinary_handler_method_js(
         } else {
             data_fields.push(format!("body: {}", rust_type_to_js(p.ty)));
         }
+    }
+    if multipart_param.is_some() {
+        data_fields.push("body: FormData".to_string());
     }
 
     let fn_sig = if cache_seconds > 0 {
@@ -1192,6 +1197,7 @@ fn ordinary_handler_method_js(
     }
 
     let needs_body = body_param.is_some()
+        || multipart_param.is_some()
         || method == "POST"
         || method == "PUT"
         || method == "PATCH"
@@ -1258,9 +1264,12 @@ fn ordinary_handler_method_js(
         if body_param.is_some() {
             body_lines.push(format!("{}hdrs['Content-Type'] = 'application/json';", ind));
         }
+        // Don't set Content-Type for multipart — browser sets it with boundary
         body_lines.push(format!("{}opts.headers = hdrs;", ind));
         if body_param.is_some() {
             body_lines.push(format!("{}opts.body = JSON.stringify(request.body);", ind));
+        } else if multipart_param.is_some() {
+            body_lines.push(format!("{}opts.body = request.body;", ind));
         }
         body_lines.push(format!(
             "{}const data = await this._request(url, opts);",
@@ -1377,7 +1386,7 @@ fn generate_handler_object_js(
                             };
                             if param.structure.is_some() {
                                 let suffix = ordinary_suffix(param.extractor, 0);
-                                let type_name = format!("{}{}", &prefix_str, suffix);
+                                let type_name = format!("{}{}", prefix_str, suffix);
                                 let jsdoc_type = match param.extractor {
                                     "Query" => format!("{{queries: {}}}", type_name),
                                     "Param" => format!("{{params: {}}}", type_name),
@@ -1402,7 +1411,7 @@ fn generate_handler_object_js(
                 if h.meta.return_type != "()" {
                     if let Some(structure_fn) = h.meta.return_structure {
                         let structure = structure_fn();
-                        let mut type_name = format!("{}Response", &prefix_str);
+                        let mut type_name = format!("{}Response", prefix_str);
                         let normalized = normalize_rust_type(h.meta.return_type);
                         if normalized.starts_with("Option<") {
                             type_name = format!("{} | null", type_name);

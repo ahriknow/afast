@@ -6,3 +6,4 @@ pub mod auth;
 pub mod chat;
 pub mod check;
 pub mod common;
+pub mod tls;

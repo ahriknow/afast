@@ -1,3 +1,4 @@
+mod formdata;
 mod handler;
 mod register;
 mod tag;
@@ -267,6 +268,35 @@ pub fn register_sse(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Tag, attributes(tag, afast))]
 pub fn derive_tag(input: TokenStream) -> TokenStream {
     tag::expand(input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives the `FromFormData` trait for structs with named fields.
+///
+/// Automatically implements multipart form data extraction. Each struct field
+/// name must match the corresponding form field name.
+///
+/// Supported field types:
+/// - `String` — text field value
+/// - `i64`, `i32`, `i16`, `i8`, `u64`, `u32`, `u16`, `u8`, `f64`, `f32` — parsed from text
+/// - `bool` — parsed from text ("true"/"false"/"1"/"0")
+/// - `FileField` — file upload field (collects bytes and metadata)
+/// - `Option<T>` — optional field (defaults to `None` if missing)
+///
+/// ```no_run
+/// use afast::{FromFormData, FileField};
+///
+/// #[derive(FromFormData)]
+/// struct UploadForm {
+///     name: String,
+///     file: FileField,
+/// }
+/// ```
+#[proc_macro_derive(FromFormData)]
+pub fn derive_from_form_data(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    formdata::expand_derive(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

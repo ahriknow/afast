@@ -349,6 +349,151 @@ pub use crate::app::extractors::Param;
 #[cfg(feature = "ordinary-http")]
 pub struct Body<T>(pub T);
 
+/// Represents an uploaded file in a multipart form.
+///
+/// When using `Multipart<FormData>`, file fields should be typed as `FileField`.
+/// A file field extracted from a `multipart/form-data` request.
+///
+/// Used as a field type in structs that implement [`FromFormData`].
+/// Contains the file's metadata and content bytes.
+#[cfg(feature = "ordinary-http")]
+pub struct FileField {
+    /// The field name from the form (`<input name="...">`).
+    pub name: String,
+    /// The original filename, if provided.
+    pub filename: Option<String>,
+    /// The MIME content type, if provided.
+    pub content_type: Option<String>,
+    /// The raw file bytes.
+    pub bytes: Vec<u8>,
+}
+
+#[cfg(feature = "ordinary-http")]
+impl crate::handler::Structure for FileField {
+    fn structure() -> &'static crate::handler::TagMeta {
+        use crate::handler::{FieldMeta, TagKind, TagMeta};
+        use std::sync::LazyLock;
+        static META: LazyLock<TagMeta> = LazyLock::new(|| TagMeta {
+            name: "FileField",
+            desc: "File upload field",
+            kind: TagKind::Struct(&[
+                FieldMeta {
+                    name: "name",
+                    ty: "String",
+                    desc: "The field name",
+                    structure: None,
+                    validations: &[],
+                    skip: false,
+                    skip_with: "",
+                },
+                FieldMeta {
+                    name: "filename",
+                    ty: "Option<String>",
+                    desc: "The original filename",
+                    structure: None,
+                    validations: &[],
+                    skip: false,
+                    skip_with: "",
+                },
+                FieldMeta {
+                    name: "content_type",
+                    ty: "Option<String>",
+                    desc: "The MIME content type",
+                    structure: None,
+                    validations: &[],
+                    skip: false,
+                    skip_with: "",
+                },
+                FieldMeta {
+                    name: "bytes",
+                    ty: "Vec<u8>",
+                    desc: "The raw file bytes",
+                    structure: None,
+                    validations: &[],
+                    skip: false,
+                    skip_with: "",
+                },
+            ]),
+        });
+        &META
+    }
+}
+
+/// Implement this on your struct to use `Multipart<YourStruct>`.
+/// Each struct field name must match the corresponding form field name.
+///
+/// Supported field types:
+/// - `String` — text field value
+/// - `i64`, `i32`, `i16`, `i8`, `u64`, `u32`, `u16`, `u8`, `f64`, `f32` — parsed from text
+/// - `bool` — parsed from text ("true"/"false"/"1"/"0")
+/// - `FileField` — file upload field
+/// - `Option<T>` — optional field (defaults to `None` if missing)
+#[cfg(feature = "ordinary-http")]
+pub trait FromFormData: Sized {
+    /// Extracts `Self` from the multipart form fields.
+    fn from_multipart(
+        multipart: multer::Multipart<'static>,
+    ) -> impl Future<Output = Result<Self, Error>> + Send;
+}
+
+/// Extracts a `multipart/form-data` request body.
+///
+/// # Without generic (raw multer access)
+///
+/// ```ignore
+/// #[post(desc("Upload file"))]
+/// async fn upload(mut form: Multipart) -> HttpResult<Json<UploadResult>> {
+///     while let Some(mut field) = form.next_field().await? {
+///         let data = field.bytes().await?;
+///         // ...
+///     }
+/// }
+/// ```
+///
+/// # With generic (typed extraction via `FromFormData`)
+///
+/// ```ignore
+/// struct UploadForm {
+///     name: String,
+///     file: FileField,
+/// }
+///
+/// #[post(desc("Upload file"))]
+/// async fn upload(form: Multipart<UploadForm>) -> HttpResult<Json<UploadResult>> {
+///     let data = form.0;
+///     // data.name is a String, data.file is a FileField
+/// }
+/// ```
+#[cfg(feature = "ordinary-http")]
+pub struct Multipart(pub multer::Multipart<'static>);
+
+#[cfg(feature = "ordinary-http")]
+impl Multipart {
+    /// Returns the next field in the multipart stream, or `None` when exhausted.
+    pub async fn next_field(&mut self) -> Result<Option<multer::Field<'static>>, multer::Error> {
+        self.0.next_field().await
+    }
+}
+
+/// Typed multipart form data wrapper.
+///
+/// Used by the proc macro when the handler parameter is `Multipart<T>`.
+/// The inner type `T` must implement [`FromFormData`].
+#[cfg(feature = "ordinary-http")]
+pub struct MultipartForm<T: FromFormData>(pub T);
+
+/// Re-export multer for use in proc-macro generated code.
+#[cfg(feature = "ordinary-http")]
+pub use multer;
+
+/// Re-export http_body_util for use in proc-macro generated code.
+#[cfg(feature = "ordinary-http")]
+pub use http_body_util;
+
+/// Re-export futures_util for use in proc-macro generated code.
+#[cfg(any(feature = "ordinary-http", feature = "ws"))]
+pub use futures_util;
+
 /// Extracts HTTP request headers into `T`.
 ///
 /// Field names are converted from snake_case to Header-Case:
@@ -662,7 +807,9 @@ pub use afast_macros::register_ws;
 pub use afast_macros::sse;
 #[cfg(feature = "ordinary-ws")]
 pub use afast_macros::ws;
-pub use afast_macros::{Tag, handler, register, register_ordinary, register_with_path};
+pub use afast_macros::{
+    FromFormData, Tag, handler, register, register_ordinary, register_with_path,
+};
 #[cfg(feature = "ordinary-http")]
 pub use afast_macros::{delete, get, patch, post, put};
 
@@ -853,6 +1000,10 @@ pub use app::KtCallType;
 pub use app::RsCallType;
 #[cfg(feature = "tls")]
 pub use app::TlsConfig;
+#[cfg(feature = "tls")]
+pub use app::TlsReloadMessage;
+#[cfg(feature = "tls")]
+pub use app::build_tls_acceptor;
 #[cfg(any(
     feature = "ordinary-http",
     feature = "ordinary-ws",

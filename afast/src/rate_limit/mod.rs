@@ -503,13 +503,7 @@ impl RateLimiter {
         }
 
         // Validate that the default policy ID actually exists.
-        let default_policy = config.default_policy.and_then(|id| {
-            if policies.contains_key(&id) {
-                Some(id)
-            } else {
-                None
-            }
-        });
+        let default_policy = config.default_policy.filter(|id| policies.contains_key(id));
 
         let mut name_to_policy = HashMap::new();
         for meta in all_handlers {

@@ -541,6 +541,28 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                 } else if is_ordinary && is_full_path_type(&pat_type.ty) {
                     let str_type: Type = syn::parse_quote!(String);
                     ("FullPath".to_string(), "String".to_string(), str_type)
+                } else if is_ordinary && is_multipart_type(&pat_type.ty) {
+                    // Check if Multipart has a generic parameter
+                    if let Some(inner) = extract_generic_inner_optional(&pat_type.ty) {
+                        // Multipart<T> → typed extraction via FromFormData
+                        (
+                            "MultipartForm".to_string(),
+                            extract_ident_name(&inner),
+                            inner,
+                        )
+                    } else {
+                        // Multipart (no generic) → raw multer access
+                        let unit_type: Type = syn::parse_quote!(());
+                        ("Multipart".to_string(), "()".to_string(), unit_type)
+                    }
+                } else if is_ordinary && is_multipart_form_type(&pat_type.ty) {
+                    // MultipartForm<T> → typed extraction via FromFormData
+                    let inner = extract_generic_inner(&pat_type.ty)?;
+                    (
+                        "MultipartForm".to_string(),
+                        extract_ident_name(&inner),
+                        inner,
+                    )
                 } else if is_ordinary && is_ws_query_type(&pat_type.ty) {
                     let inner = extract_generic_inner(&pat_type.ty)?;
                     ("WsQuery".to_string(), extract_ident_name(&inner), inner)
@@ -556,7 +578,7 @@ fn parse_handler_params(input_fn: &ItemFn, method: Option<&str>) -> syn::Result<
                         format!(
                             "unsupported parameter type: expected State<T>, Ctx<T>, Custom<T>, Data<T>, Receiver, Sender{} got: {}",
                             if is_ordinary {
-                                ", Query<T>, Param<T>, Body<T>, Header<T>, FullPath"
+                                ", Query<T>, Param<T>, Body<T>, Header<T>, FullPath, Multipart, MultipartForm<T>"
                             } else {
                                 ""
                             },
@@ -637,6 +659,16 @@ fn is_full_path_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "FullPath")
 }
 
+/// Returns true when the outermost identifier of the type is `Multipart`.
+fn is_multipart_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "Multipart")
+}
+
+/// Returns true when the outermost identifier of the type is `MultipartForm`.
+fn is_multipart_form_type(ty: &Type) -> bool {
+    extract_outermost_ident(ty).is_some_and(|s| s == "MultipartForm")
+}
+
 /// Returns true when the outermost identifier of the type is `WsQuery`.
 fn is_ws_query_type(ty: &Type) -> bool {
     extract_outermost_ident(ty).is_some_and(|s| s == "WsQuery")
@@ -709,6 +741,19 @@ fn extract_generic_inner(ty: &Type) -> syn::Result<Type> {
     ))
 }
 
+/// Like `extract_generic_inner` but returns `None` instead of erroring
+/// when no generic argument is found.
+fn extract_generic_inner_optional(ty: &Type) -> Option<Type> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+    {
+        return Some(inner_ty.clone());
+    }
+    None
+}
+
 /// Returns true when the identifier is `Result` or `HttpResult`, the two
 /// return-type wrappers recognized by the framework.
 fn is_result_ident(ident: &syn::Ident) -> bool {
@@ -770,7 +815,7 @@ fn build_param_meta_entries(params: &[ParamInfo]) -> Vec<TokenStream> {
             let ty = &p.ty_str;
             let extractor = &p.extractor;
             let structure = match extractor.as_str() {
-                "Custom" | "Data" | "Query" | "Param" | "Body" | "Header" => {
+                "Custom" | "Data" | "Query" | "Param" | "Body" | "Header" | "MultipartForm" => {
                     let inner = &p.inner_type;
                     quote! { Some(|| <#inner as afast::Structure>::structure()) }
                 }
@@ -1302,6 +1347,52 @@ fn build_ordinary_invoker_impl(
                 let fp_var = var_name.clone();
                 async_extractions.push(quote! {
                     let #fp_var = afast::FullPath(req.uri().path().to_string());
+                });
+            }
+            "Multipart" => {
+                // Multipart extracts a multipart/form-data body (raw multer access).
+                // This consumes the request body stream, so it must be the last extraction.
+                let mp_var = var_name.clone();
+                async_extractions.push(quote! {
+                    use afast::futures_util::StreamExt;
+                    let __content_type = req.headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    let __boundary = afast::multer::parse_boundary(&__content_type).map_err(|e| {
+                        afast::Error::Custom {
+                            code: 400,
+                            message: format!("multipart parse error: {}", e),
+                        }
+                    })?;
+                    let __body_stream = afast::http_body_util::BodyExt::into_data_stream(req.into_body())
+                        .map(|chunk| chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+                    let #mp_var = afast::Multipart(afast::multer::Multipart::new(__body_stream, __boundary));
+                });
+            }
+            "MultipartForm" => {
+                // MultipartForm<T> extracts typed form data via FromFormData.
+                // This consumes the request body stream.
+                let mp_var = var_name.clone();
+                let inner = inner.clone();
+                async_extractions.push(quote! {
+                    use afast::futures_util::StreamExt;
+                    let __content_type = req.headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    let __boundary = afast::multer::parse_boundary(&__content_type).map_err(|e| {
+                        afast::Error::Custom {
+                            code: 400,
+                            message: format!("multipart parse error: {}", e),
+                        }
+                    })?;
+                    let __body_stream = afast::http_body_util::BodyExt::into_data_stream(req.into_body())
+                        .map(|chunk| chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+                    let __multipart = afast::multer::Multipart::new(__body_stream, __boundary);
+                    let #mp_var = afast::MultipartForm(<#inner as afast::FromFormData>::from_multipart(__multipart).await?);
                 });
             }
             _ => {}

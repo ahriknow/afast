@@ -43,6 +43,12 @@
 | `tag-u16` | 枚举标签使用 `u16` |
 | `tag-u32` | 枚举标签使用 `u32` |
 
+## TLS
+
+| Feature | 描述 | 依赖 |
+|---------|------|------|
+| `tls` | 基于 rustls 的 HTTPS，ALPN 协商 HTTP/2，支持 channel 热重载 | `http`, tokio-rustls, rustls, rustls-pemfile |
+
 ## 可选能力
 
 | Feature | 描述 |

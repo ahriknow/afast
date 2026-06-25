@@ -10,6 +10,7 @@
 //! - Rate limiting with named policies
 //! - Client code generation for TypeScript, JavaScript, Kotlin, and Rust
 //! - Interactive API documentation
+//! - TLS/HTTPS with graceful fallback and hot-reload via channel
 //!
 //! ## Running
 //!
@@ -21,6 +22,23 @@
 //! - WebSocket server on port 3001
 //! - HTTP server on port 5001
 //! - TCP server on port 4001
+//! - HTTPS server on port 5443 (falls back to plain HTTP if no certs)
+//!
+//! ## TLS/HTTPS
+//!
+//! The HTTPS server on port 5443 supports:
+//! - **Graceful fallback**: If certificate files don't exist, starts as plain HTTP
+//! - **Hot-reload**: Use a `broadcast` channel to reload certificates at runtime
+//!
+//! ```bash
+//! # Generate self-signed certificates for testing
+//! openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+//!
+//! # Start server (will use TLS if certs exist, plain HTTP otherwise)
+//! cargo run -p example --bin example
+//! ```
+//!
+//! Call `reload_tx.send(...)` to reload certificates at runtime.
 //!
 //! ## Testing
 //!
@@ -44,6 +62,9 @@ use afast::{
     AFast, Algorithm, CorsConfig, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang,
     RateLimitConfig, RateLimitKey, RateLimitPolicy, RsCallType, service,
 };
+
+#[cfg(feature = "tls")]
+use afast::TlsReloadMessage;
 
 #[cfg(feature = "hook")]
 use afast::hook::{ConnectionGuard, Hook, RequestContext, RequestGuard};
@@ -128,8 +149,10 @@ use handler::article::{
 };
 use handler::auth::{create_token, get_user_id, login, register};
 use handler::chat::chat_echo;
+#[cfg(feature = "tls")]
+use handler::reload_tls;
 use handler::sse_stream::sse_stream;
-use handler::{catch_all_get, health, info, ping};
+use handler::{catch_all_get, health, info, ping, upload_file, upload_file_typed};
 use state::AppState;
 
 // ─── Hook Implementations ────────────────────────────────────────
@@ -259,6 +282,10 @@ async fn main() {
         // Has the lowest priority — exact routes and param routes take precedence.
         // Built-in endpoints (/_api, /code, /doc, /_ws) are never intercepted.
         get("*", catch_all_get),
+        // File upload via multipart/form-data
+        post("/upload", upload_file),
+        // Typed file upload via multipart/form-data
+        post("/upload/typed", upload_file_typed),
     });
     // Add a service-level hook (runs after global hooks for this service's handlers)
     #[cfg(feature = "hook")]
@@ -342,16 +369,35 @@ async fn main() {
         get("ping", ping),
     });
 
+    // "tls" service: TLS certificate hot-reload endpoint
+    #[cfg(feature = "tls")]
+    let tls_svc = service!("tls", "TLS Management" => {
+        get("/tls/reload", reload_tls),
+    });
+
     // ── Application Builder ──────────────────────────────────────
     //
     // AFast::new() creates the application builder. Use the builder pattern
     // to configure state, services, code generation, rate limiting, and
     // transport servers. Call .run() to start all servers.
 
+    // Create TLS reload channel (must be before AppState so sender can be stored)
+    #[cfg(feature = "tls")]
+    let (reload_tx, reload_rx) = tokio::sync::broadcast::channel::<Option<TlsReloadMessage>>(1);
+
     #[allow(unused_mut)]
     let mut app = AFast::new()
         // Register shared application state (accessible via State<T> in handlers)
-        .state(AppState::new())
+        .state({
+            #[cfg(feature = "tls")]
+            {
+                AppState::new(reload_tx)
+            }
+            #[cfg(not(feature = "tls"))]
+            {
+                AppState::new()
+            }
+        })
         // Enable interactive API documentation at /doc
         .document(DocConfig::with("Blog API Docs", "./client/doc"));
 
@@ -423,7 +469,13 @@ async fn main() {
         .service(article_svc)
         .service(chat_svc)
         .service(admin_extra_svc) // merges into "admin"
-        .service(internal_svc) // empty name: excluded from codegen/docs
+        .service(internal_svc); // empty name: excluded from codegen/docs
+
+    // Register TLS management service
+    #[cfg(feature = "tls")]
+    let app = app.service(tls_svc);
+
+    let app = app
         // Marker for conditional field skipping (afastdata 0.0.7+)
         // Fields with #[afast(skip_with("afast"))] are excluded from
         // serialization when this marker is set.
@@ -470,7 +522,14 @@ async fn main() {
 
     // TLS/HTTPS (only when "tls" feature is enabled)
     #[cfg(feature = "tls")]
-    let app = app.https("[::]:5443", "./cert.pem", "./key.pem");
+    let app = app.https("[::]:5443", "./cert.pem", "./key.pem", Some(reload_rx));
+
+    println!("afast: ws server listening on [::]:3001");
+    println!("afast: tcp server listening on [::]:4001");
+    println!("afast: http server listening on [::]:5001");
+    #[cfg(feature = "tls")]
+    println!("afast: https server listening on [::]:5553");
+    println!("afast: docs written to ./client/doc");
 
     // Start all servers and block until Ctrl+C
     app.run().await.unwrap();

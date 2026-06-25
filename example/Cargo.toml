@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["ordinary-http", "ordinary-ws", "ordinary-sse", "hook"]
+default = ["ordinary-http", "ordinary-ws", "ordinary-sse", "hook", "tls"]
 ordinary-http = ["afast/ordinary-http"]
 ordinary-ws = ["afast/ordinary-ws"]
 ordinary-sse = ["afast/ordinary-sse"]
@@ -41,6 +41,7 @@ tokio.workspace = true
 hyper.workspace = true
 http-body-util.workspace = true
 tokio-tungstenite = { workspace = true }
+multer.workspace = true
 
 [[bin]]
 name = "test_client"

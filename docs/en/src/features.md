@@ -43,6 +43,12 @@
 | `tag-u16` | Enum tag uses `u16` |
 | `tag-u32` | Enum tag uses `u32` |
 
+## TLS
+
+| Feature | Description | Dependencies |
+|---------|-------------|-------------|
+| `tls` | HTTPS via rustls with ALPN for HTTP/2, hot-reload via channel | `http`, tokio-rustls, rustls, rustls-pemfile |
+
 ## Optional Capabilities
 
 | Feature | Description |

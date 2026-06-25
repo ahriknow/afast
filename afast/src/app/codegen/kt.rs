@@ -1573,12 +1573,14 @@ fn ordinary_handler_method_kt(
     let mut param_param: Option<&ParamMeta> = None;
     let mut query_param: Option<&ParamMeta> = None;
     let mut body_param: Option<&ParamMeta> = None;
+    let mut multipart_param: Option<&ParamMeta> = None;
 
     for param in meta.params {
         match param.extractor {
             "Param" => param_param = Some(param),
             "Query" => query_param = Some(param),
             "Body" => body_param = Some(param),
+            "Multipart" | "MultipartForm" => multipart_param = Some(param),
             _ => {}
         }
     }
@@ -1602,6 +1604,9 @@ fn ordinary_handler_method_kt(
     }
     if let Some(p) = body_param {
         fn_params.push(format!("body: {}", kt_type_of(p, "Body")));
+    }
+    if multipart_param.is_some() {
+        fn_params.push("body: okhttp3.MultipartBody".to_string());
     }
     if cache_seconds > 0 {
         fn_params.push("force: Boolean = false".to_string());
@@ -1828,6 +1833,7 @@ fn ordinary_handler_method_kt(
             in_ctx
         ));
     }
+    // Don't set Content-Type for multipart — OkHttp sets it with boundary
     body_lines.push(format!("{}for ((k, v) in hdrs) {{", in_ctx));
     body_lines.push(format!("{}    conn.setRequestProperty(k, v)", in_ctx));
     body_lines.push(format!("{}}}", in_ctx));
@@ -1839,6 +1845,12 @@ fn ordinary_handler_method_kt(
             "{}conn.outputStream.write(bodyJson.toByteArray(Charsets.UTF_8))",
             in_ctx
         ));
+        body_lines.push(format!("{}conn.outputStream.flush()", in_ctx));
+    } else if multipart_param.is_some() {
+        // For multipart, use the provided MultipartBody directly
+        body_lines.push(format!("{}conn.doOutput = true", in_ctx));
+        body_lines.push(format!("{}conn.setRequestProperty(\"Content-Type\", body.headers().get(\"Content-Type\") ?: \"multipart/form-data\")", in_ctx));
+        body_lines.push(format!("{}body.writeTo(conn.outputStream)", in_ctx));
         body_lines.push(format!("{}conn.outputStream.flush()", in_ctx));
     }
 

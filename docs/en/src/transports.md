@@ -49,6 +49,46 @@ let app = AFast::new()
     .http("0.0.0.0:5000");  // Same address, auto-merged
 ```
 
+## TLS / HTTPS
+
+AFast supports TLS/HTTPS via rustls with ALPN negotiation for HTTP/2.
+
+### Basic Usage
+
+```rust
+let app = AFast::new()
+    .service(svc)
+    .https("0.0.0.0:5443", "./cert.pem", "./key.pem", None);
+```
+
+### Graceful Fallback
+
+If certificate files don't exist, the server automatically falls back to plain HTTP:
+
+```text
+afast: TLS cert files not found, starting without encryption: [::]:5443
+```
+
+### Hot-Reload Certificates
+
+Reload certificates at runtime via a `broadcast` channel without restarting:
+
+```rust
+let (reload_tx, reload_rx) = tokio::sync::broadcast::channel(1);
+
+let app = AFast::new()
+    .https("0.0.0.0:5443", "./cert.pem", "./key.pem", Some(reload_rx));
+
+// Reload with original paths
+reload_tx.send(None).unwrap();
+
+// Reload with new paths
+reload_tx.send(Some(TlsReloadMessage {
+    cert_path: "/new/cert.pem".into(),
+    key_path: "/new/key.pem".into(),
+})).unwrap();
+```
+
 ## Ordinary HTTP (REST)
 
 With `ordinary-http`, define RESTful routes using `get`/`post`/`put`/`patch`/`delete` inside the `service!` macro:

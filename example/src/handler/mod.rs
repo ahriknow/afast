@@ -15,7 +15,7 @@ pub mod chat;
 pub mod sse_stream;
 pub mod ws_chat;
 
-use afast::{AFastDeserialize, AFastSerialize, Tag, get, handler};
+use afast::{AFastDeserialize, AFastSerialize, Tag, get, handler, post};
 use serde::Serialize;
 
 // ─── Health Check Handler ────────────────────────────────────────
@@ -169,5 +169,142 @@ pub async fn catch_all_get(
         full_path: p.clone(),
         caught: p.trim_start_matches('/').to_string(),
         message: "catch-all".to_string(),
+    }))
+}
+
+// ─── TLS Reload Handler ──────────────────────────────────────────
+
+/// TLS reload response.
+#[derive(Serialize, Tag)]
+#[tag("TLS reload result")]
+pub struct TlsReloadResponse {
+    #[tag("Whether the reload signal was sent successfully")]
+    pub success: bool,
+    #[tag("Status message")]
+    pub message: String,
+}
+
+/// Reload TLS certificates at runtime via GET request.
+///
+/// Access via: GET http://localhost:5443/tls/reload
+#[cfg(feature = "tls")]
+#[get(desc("Reload TLS certificates"))]
+pub async fn reload_tls(
+    afast::State(state): afast::State<crate::state::AppState>,
+) -> afast::HttpResult<afast::Json<TlsReloadResponse>> {
+    match state.reload_tx.send(None) {
+        Ok(_) => Ok(afast::Json(TlsReloadResponse {
+            success: true,
+            message: "TLS reload signal sent".to_string(),
+        })),
+        Err(_) => Ok(afast::Json(TlsReloadResponse {
+            success: false,
+            message: "no receivers (TLS server not running)".to_string(),
+        })),
+    }
+}
+
+// ─── File Upload Handler ─────────────────────────────────────────
+
+/// Upload response.
+#[derive(Serialize, Tag)]
+#[tag("File upload result")]
+pub struct UploadResponse {
+    #[tag("Uploaded file name")]
+    pub filename: String,
+    #[tag("Field name")]
+    pub field_name: String,
+    #[tag("Content type")]
+    pub content_type: String,
+    #[tag("File size in bytes")]
+    pub size: usize,
+}
+
+/// Upload a file via multipart/form-data (raw multer access).
+///
+/// Access via: POST http://localhost:5001/upload
+/// Content-Type: multipart/form-data
+///
+/// # Example (curl)
+///
+/// ```bash
+/// curl -F "file=@test.txt" http://localhost:5001/upload
+/// ```
+#[post(desc("Upload file (raw)"))]
+pub async fn upload_file(
+    mut form: afast::Multipart,
+) -> afast::HttpResult<afast::Json<UploadResponse>> {
+    if let Some(field) = form.next_field().await.map_err(|e| afast::Error::Custom {
+        code: 400,
+        message: format!("multipart error: {}", e),
+    })? {
+        let field_name = field.name().unwrap_or("unknown").to_string();
+        let filename = field.file_name().unwrap_or("unknown").to_string();
+        let content_type = field
+            .content_type()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let data = field.bytes().await.map_err(|e| afast::Error::Custom {
+            code: 400,
+            message: format!("read field error: {}", e),
+        })?;
+        return Ok(afast::Json(UploadResponse {
+            filename,
+            field_name,
+            content_type,
+            size: data.len(),
+        }));
+    }
+    Err(afast::Error::Custom {
+        code: 400,
+        message: "no file provided".to_string(),
+    })
+}
+
+/// Form data for typed file upload.
+#[derive(afast::FromFormData, Tag)]
+#[tag("Upload form data")]
+pub struct UploadForm {
+    #[tag("Number field")]
+    pub id: i64,
+    #[tag("Boolean field")]
+    pub validate: bool,
+    #[tag("Description text field")]
+    pub description: String,
+    #[tag("The uploaded file")]
+    pub file: afast::FileField,
+}
+
+/// Upload a file with typed form data extraction via `#[derive(FromFormData)]`.
+///
+/// Demonstrates the `MultipartForm<T>` extractor with `#[derive(FromFormData)]`
+/// macro. Fields are automatically extracted from the multipart stream by name.
+/// `String` fields are parsed as text, `FileField` fields collect file bytes.
+///
+/// Access via: POST http://localhost:5001/upload/typed
+/// Content-Type: multipart/form-data
+///
+/// # Example (curl)
+///
+/// ```bash
+/// curl -F "description=My file" -F "file=@test.txt" http://localhost:5001/upload/typed
+/// ```
+#[post(desc("Upload file (typed)"))]
+pub async fn upload_file_typed(
+    form: afast::MultipartForm<UploadForm>,
+) -> afast::HttpResult<afast::Json<UploadResponse>> {
+    let data = form.0;
+    println!(
+        "upload_file_typed: {} {} {}",
+        data.id, data.validate, data.description
+    );
+    Ok(afast::Json(UploadResponse {
+        filename: data.file.filename.unwrap_or_else(|| "unknown".to_string()),
+        field_name: data.file.name,
+        content_type: data
+            .file
+            .content_type
+            .unwrap_or_else(|| "application/octet-stream".to_string()),
+        size: data.file.bytes.len(),
     }))
 }

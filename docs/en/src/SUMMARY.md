@@ -7,6 +7,7 @@
 - [Lifecycle Hooks](./hooks.md)
 - [Request Context (`Ctx`)](./context.md)
 - [Transport Layer](./transports.md)
+- [File Upload](./file-upload.md)
 - [Code Generation](./code-generation.md)
 - [Binary Protocol](./binary-protocol.md)
 - [Interactive Documentation](./api-docs.md)

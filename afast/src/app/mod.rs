@@ -371,6 +371,47 @@ pub struct TlsConfig {
     pub key_path: String,
 }
 
+/// Message for triggering TLS certificate reload at runtime.
+///
+/// Send through the [`tokio::sync::broadcast`] channel passed to
+/// [`AFast::https`] to reload TLS certificates without restarting.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Reload using the original paths (re-read cert files)
+/// sender.send(TlsReloadMessage::default()).unwrap();
+///
+/// // Reload with new paths
+/// sender.send(TlsReloadMessage {
+///     cert_path: Some("/new/cert.pem".into()),
+///     key_path: Some("/new/key.pem".into()),
+/// }).unwrap();
+/// ```
+#[cfg(feature = "tls")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TlsReloadMessage {
+    /// Certificate file path.
+    pub cert_path: String,
+    /// Private key file path.
+    pub key_path: String,
+}
+
+/// Builds a TLS acceptor from certificate and key file paths.
+///
+/// Returns `Ok(Some(TlsAcceptor))` if both files exist and are valid.
+/// Returns `Ok(None)` if either file doesn't exist (graceful fallback to plain HTTP).
+/// Returns `Err` if files exist but cannot be parsed.
+///
+/// This function is useful for dynamically reloading certificates at runtime.
+#[cfg(feature = "tls")]
+pub fn build_tls_acceptor(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<Option<tokio_rustls::TlsAcceptor>, Error> {
+    transport::http::build_tls_acceptor(cert_path, key_path)
+}
+
 /// The top-level application builder and runtime.
 ///
 /// `AFast` configures shared state, services, and transport servers, then
@@ -426,6 +467,11 @@ pub struct AFast {
     /// TLS configuration for HTTPS, if enabled.
     #[cfg(feature = "tls")]
     tls_config: Option<TlsConfig>,
+    /// TLS reload channel receiver for hot-reloading certificates at runtime.
+    /// Sends `Option<TlsReloadMessage>`: `None` = reload with original paths,
+    /// `Some(msg)` = reload with new paths.
+    #[cfg(feature = "tls")]
+    tls_reload_rx: Option<tokio::sync::broadcast::Receiver<Option<TlsReloadMessage>>>,
     /// HTTPS listen address (`"host:port"`), if bound.
     #[cfg(feature = "tls")]
     https_addr: Option<String>,
@@ -459,8 +505,10 @@ pub struct AFast {
     /// returned as-is. Default `true`.
     sanitize_errors: bool,
     /// Security headers added to every HTTP response.
-    /// Defaults to `[("x-content-type-options", "nosniff"), ("x-frame-options", "DENY"),
-    /// ("content-security-policy", "default-src 'self'")]`.
+    /// Defaults to `[("x-content-type-options", "nosniff"), ("x-frame-options", "DENY")]`.
+    /// Note: `content-security-policy` is not included by default because it
+    /// breaks the interactive `/doc` page (inline scripts). Add it manually
+    /// via `security_headers()` if needed.
     security_headers: Vec<(&'static str, &'static str)>,
     /// CORS configuration for HTTP responses and preflight handling.
     #[cfg(feature = "http")]
@@ -502,6 +550,8 @@ impl AFast {
             #[cfg(feature = "tls")]
             tls_config: None,
             #[cfg(feature = "tls")]
+            tls_reload_rx: None,
+            #[cfg(feature = "tls")]
             https_addr: None,
             #[cfg(feature = "rate-limit")]
             rate_limit_config: None,
@@ -516,7 +566,6 @@ impl AFast {
             security_headers: vec![
                 ("x-content-type-options", "nosniff"),
                 ("x-frame-options", "DENY"),
-                ("content-security-policy", "default-src 'self'"),
             ],
             #[cfg(feature = "http")]
             cors_config: None,
@@ -603,7 +652,6 @@ impl AFast {
     ///     .security_headers(vec![
     ///         ("x-content-type-options", "nosniff"),
     ///         ("x-frame-options", "SAMEORIGIN"),
-    ///         ("content-security-policy", "default-src 'self'"),
     ///     ])
     /// ```
     pub fn security_headers(mut self, headers: Vec<(&'static str, &'static str)>) -> Self {
@@ -721,13 +769,51 @@ impl AFast {
     /// Requires the `tls` feature. The server uses `rustls` for TLS and
     /// supports ALPN negotiation for HTTP/2. The address must use the form
     /// `"host:port"` (e.g. `"0.0.0.0:443"`).
+    ///
+    /// If the certificate or key files don't exist at startup, the server
+    /// falls back to plain HTTP. Use the `reload_rx` channel to reload
+    /// certificates at runtime without restarting.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Listen address (e.g. `"[::]:5443"`)
+    /// * `cert_path` - Path to PEM certificate chain file
+    /// * `key_path` - Path to PEM private key file
+    /// * `reload_rx` - Optional channel to receive reload notifications.
+    ///   Send `None` to reload with original paths, `Some(TlsReloadMessage)`
+    ///   to reload with new paths. Pass `None` to disable runtime reload.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let (reload_tx, reload_rx) = tokio::sync::broadcast::channel(1);
+    ///
+    /// let app = AFast::new()
+    ///     .https("[::]:5443", "./cert.pem", "./key.pem", Some(reload_rx));
+    ///
+    /// // Reload with original paths:
+    /// reload_tx.send(None).unwrap();
+    ///
+    /// // Or with new paths:
+    /// reload_tx.send(Some(TlsReloadMessage {
+    ///     cert_path: "/new/cert.pem".into(),
+    ///     key_path: "/new/key.pem".into(),
+    /// })).unwrap();
+    /// ```
     #[cfg(feature = "tls")]
-    pub fn https(mut self, addr: &str, cert_path: &str, key_path: &str) -> Self {
+    pub fn https(
+        mut self,
+        addr: &str,
+        cert_path: &str,
+        key_path: &str,
+        reload_rx: Option<tokio::sync::broadcast::Receiver<Option<TlsReloadMessage>>>,
+    ) -> Self {
         self.https_addr = Some(addr.to_string());
         self.tls_config = Some(TlsConfig {
             cert_path: cert_path.to_string(),
             key_path: key_path.to_string(),
         });
+        self.tls_reload_rx = reload_rx;
         self
     }
 
@@ -886,7 +972,8 @@ impl AFast {
     ///
     /// If no transport server is configured (code generation only), the
     /// application waits for Ctrl+C to keep the process alive.
-    pub async fn run(self) -> Result<(), Error> {
+    #[allow(unused_mut)]
+    pub async fn run(mut self) -> Result<(), Error> {
         // Set the code-generation marker before any codegen runs.
         // This is read immutably by should_include_field during code generation.
         crate::marker::set_codegen_marker(&self.marker);
@@ -906,7 +993,6 @@ impl AFast {
                     message: e.to_string(),
                 }
             })?;
-            println!("afast: docs written to {}", dir.display());
         }
 
         #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
@@ -1087,7 +1173,8 @@ impl AFast {
                     }
                 };
 
-                let mut handles: Vec<tokio::task::JoinHandle<Result<(), Error>>> = Vec::new();
+                let mut join_set: tokio::task::JoinSet<Result<(), Error>> =
+                    tokio::task::JoinSet::new();
 
                 // Pre-clone rate limiter for use across multiple server spawns.
                 #[cfg(feature = "rate-limit")]
@@ -1128,7 +1215,6 @@ impl AFast {
                         let listener = TcpListener::bind(addr).await.map_err(|e| Error::Ws {
                             message: e.to_string(),
                         })?;
-                        println!("afast: ws server listening on {}", addr);
 
                         let state_clone = state.clone();
                         let handlers_clone = handlers.clone();
@@ -1187,7 +1273,13 @@ impl AFast {
                             }
                             Ok(())
                         });
-                        handles.push(server);
+                        join_set.spawn(async move {
+                            server.await.unwrap_or_else(|e| {
+                                Err(Error::Ws {
+                                    message: e.to_string(),
+                                })
+                            })
+                        });
                     } // end else (standalone WS)
                 } // end if let Some(addr)
 
@@ -1255,6 +1347,8 @@ impl AFast {
                                 allowed_ws_origins: ws_origins_http,
                                 #[cfg(feature = "tls")]
                                 tls_config: None,
+                                #[cfg(feature = "tls")]
+                                tls_reload_rx: None,
                                 #[cfg(feature = "rate-limit")]
                                 rate_limiter: rl,
                                 #[cfg(feature = "rate-limit")]
@@ -1273,7 +1367,13 @@ impl AFast {
                         )
                         .await
                     });
-                    handles.push(server);
+                    join_set.spawn(async move {
+                        server.await.unwrap_or_else(|e| {
+                            Err(Error::Http {
+                                message: e.to_string(),
+                            })
+                        })
+                    });
                 }
 
                 // Start HTTPS server (TLS)
@@ -1301,6 +1401,7 @@ impl AFast {
                     #[cfg(feature = "ordinary-sse")]
                     let sse_routes = self.sse_routes.clone();
                     let tls_config = self.tls_config.clone();
+                    let tls_reload_rx = self.tls_reload_rx.take();
                     #[cfg(feature = "rate-limit")]
                     let rl = rate_limiter_outer.clone();
                     #[cfg(feature = "rate-limit")]
@@ -1338,6 +1439,8 @@ impl AFast {
                                 allowed_ws_origins: ws_origins_https,
                                 #[cfg(feature = "tls")]
                                 tls_config,
+                                #[cfg(feature = "tls")]
+                                tls_reload_rx,
                                 #[cfg(feature = "rate-limit")]
                                 rate_limiter: rl,
                                 #[cfg(feature = "rate-limit")]
@@ -1356,7 +1459,13 @@ impl AFast {
                         )
                         .await
                     });
-                    handles.push(server);
+                    join_set.spawn(async move {
+                        server.await.unwrap_or_else(|e| {
+                            Err(Error::Http {
+                                message: e.to_string(),
+                            })
+                        })
+                    });
                 }
 
                 // Start TCP server
@@ -1367,7 +1476,6 @@ impl AFast {
                     let listener = TcpListener::bind(addr).await.map_err(|e| Error::Tcp {
                         message: e.to_string(),
                     })?;
-                    println!("afast: tcp server listening on {}", addr);
 
                     let state_clone = state.clone();
                     let handlers_clone = handlers.clone();
@@ -1422,18 +1530,55 @@ impl AFast {
                         }
                         Ok(())
                     });
-                    handles.push(server);
+                    join_set.spawn(async move {
+                        server.await.unwrap_or_else(|e| {
+                            Err(Error::Tcp {
+                                message: e.to_string(),
+                            })
+                        })
+                    });
                 }
 
-                // Wait for Ctrl+C
-                tokio::signal::ctrl_c().await.map_err(|e| Error::Signal {
-                    message: e.to_string(),
-                })?;
-                println!("\nafast: shutting down...");
+                // Wait for Ctrl+C or any server failure
+                let shutdown_reason = tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        println!("\nafast: shutting down...");
+                        None
+                    }
+                    Some(result) = join_set.join_next() => {
+                        match result {
+                            Ok(Ok(())) => {
+                                eprintln!("afast: a server exited unexpectedly");
+                                Some("server exited unexpectedly".to_string())
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("afast: server error: {}", e);
+                                Some(e.to_string())
+                            }
+                            Err(e) => {
+                                eprintln!("afast: server task panicked: {}", e);
+                                Some(e.to_string())
+                            }
+                        }
+                    }
+                };
+
+                // Send shutdown signal to all remaining servers
                 let _ = shutdown_tx.send(());
 
-                for handle in handles {
-                    let _ = handle.await;
+                // Wait for all remaining tasks to complete
+                while let Some(result) = join_set.join_next().await {
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => eprintln!("afast: server shutdown error: {}", e),
+                        Err(e) => eprintln!("afast: server task panicked during shutdown: {}", e),
+                    }
+                }
+
+                if let Some(reason) = shutdown_reason {
+                    return Err(Error::Http {
+                        message: format!("server failed: {}", reason),
+                    });
                 }
 
                 return Ok(());

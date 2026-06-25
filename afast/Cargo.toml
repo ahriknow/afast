@@ -16,7 +16,7 @@ binary = []
 ts = []
 js = []
 rs = []
-ws = ["tokio-tungstenite", "futures-util"]
+ws = ["tokio-tungstenite", "dep:futures-util"]
 http = ["hyper", "hyper-util", "http-body-util"]
 tcp = ["binary"]
 code = ["http"]
@@ -24,10 +24,10 @@ doc = ["http", "js"]
 kt = []
 seq64 = []
 len64 = []
-tls = ["http", "dep:tokio-rustls", "dep:rustls", "dep:rustls-pemfile"]
-ordinary-http = ["http", "dep:serde", "dep:serde_json"]
+tls = ["http", "binary", "dep:serde", "dep:tokio-rustls", "dep:rustls", "dep:rustls-pemfile"]
+ordinary-http = ["http", "dep:serde", "dep:serde_json", "dep:multer", "dep:futures-util"]
 ordinary-ws = ["ws", "ordinary-http"]
-ordinary-sse = ["ordinary-http", "futures-util"]
+ordinary-sse = ["ordinary-http"]
 tag-u8 = ["afastdata/tag-u8"]
 tag-u16 = ["afastdata/tag-u16"]
 tag-u32 = ["afastdata/tag-u32"]
@@ -50,3 +50,4 @@ serde_json = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 rustls-pemfile = { workspace = true, optional = true }
+multer = { workspace = true, optional = true }

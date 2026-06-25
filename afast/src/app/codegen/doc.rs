@@ -1177,6 +1177,35 @@ input[type="checkbox"] { width: auto; }
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 * { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+.file-upload-wrapper {
+    display: flex; align-items: center; gap: 8px;
+}
+.file-upload-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px;
+    background: var(--accent-bg); color: var(--accent);
+    border: 1px dashed var(--accent); border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+}
+.file-upload-btn:hover {
+    background: var(--accent); color: #fff; border-style: solid;
+}
+.file-upload-btn svg {
+    width: 14px; height: 14px; flex-shrink: 0;
+}
+.file-upload-name {
+    font-size: 13px; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 200px;
+}
+.file-upload-clear {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1;
+    display: none;
+}
+.file-upload-clear:hover { color: var(--danger); }
+.file-upload-wrapper input[type="file"] { display: none; }
 "#;
 
 // ─── JS: WebComponent + UI Logic ──────────────────────────────────
@@ -3080,6 +3109,160 @@ customElements.define('af-array', AfArray);
             body.appendChild(inputGroup);
         });
 
+        // Multipart form inputs (Multipart / MultipartForm<T>)
+        const multipartParams = h.params.filter(p => p.extractor === 'Multipart' || p.extractor === 'MultipartForm');
+        if (multipartParams.length > 0) {
+            const mpParam = multipartParams[0];
+            const mpDiv = document.createElement('div');
+            mpDiv.style.marginBottom = '8px';
+            mpDiv.setAttribute('data-endpoint', h.offset);
+            mpDiv.setAttribute('data-extractor', 'Multipart');
+
+            if (mpParam.extractor === 'MultipartForm' && mpParam.structure && schema.types[mpParam.structure]) {
+                // Typed form: render individual fields based on type structure
+                const typeInfo = schema.types[mpParam.structure];
+                const label = document.createElement('div');
+                label.className = 'field-label';
+                label.innerHTML = '<span class="badge badge-data">form</span> ' + mpParam.name + ' <span class="field-type">' + mpParam.ty + '</span>' + (mpParam.tag ? ' <span class="text-secondary" style="font-size:11px">' + mpParam.tag + '</span>' : '');
+                mpDiv.appendChild(label);
+
+                if (typeInfo.fields) {
+                    for (const f of typeInfo.fields) {
+                        const group = document.createElement('div');
+                        group.className = 'af-field-group';
+
+                        const label = document.createElement('div');
+                        label.className = 'field-label';
+                        let labelHtml = f.name + ' <span class="field-type">' + (f.ty || '') + '</span>';
+                        if (f.desc) labelHtml += ' <span class="field-desc">' + f.desc + '</span>';
+                        label.innerHTML = labelHtml;
+                        group.appendChild(label);
+
+                        const row = document.createElement('div');
+                        row.className = 'field-row';
+
+                        const fty = f.ty || '';
+                        if (fty === 'FileField' || fty === 'Option<FileField>' || fty.endsWith('::FileField') || fty.endsWith('::FileField>')) {
+                            const wrapper = document.createElement('div');
+                            wrapper.className = 'file-upload-wrapper';
+                            const inp = document.createElement('input');
+                            inp.type = 'file';
+                            inp.setAttribute('data-endpoint', h.offset);
+                            inp.setAttribute('data-param', f.name);
+                            inp.setAttribute('data-extractor', 'MultipartFile');
+                            const btn = document.createElement('label');
+                            btn.className = 'file-upload-btn';
+                            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Choose File';
+                            btn.htmlFor = 'file_' + h.offset + '_' + f.name;
+                            inp.id = 'file_' + h.offset + '_' + f.name;
+                            const nameSpan = document.createElement('span');
+                            nameSpan.className = 'file-upload-name';
+                            nameSpan.textContent = 'No file chosen';
+                            const clearBtn = document.createElement('button');
+                            clearBtn.type = 'button';
+                            clearBtn.className = 'file-upload-clear';
+                            clearBtn.innerHTML = '&times;';
+                            clearBtn.title = 'Clear';
+                            clearBtn.addEventListener('click', () => {
+                                inp.value = '';
+                                nameSpan.textContent = 'No file chosen';
+                                clearBtn.style.display = 'none';
+                            });
+                            inp.addEventListener('change', () => {
+                                if (inp.files.length > 0) {
+                                    nameSpan.textContent = inp.files[0].name;
+                                    clearBtn.style.display = 'inline';
+                                } else {
+                                    nameSpan.textContent = 'No file chosen';
+                                    clearBtn.style.display = 'none';
+                                }
+                            });
+                            wrapper.appendChild(inp);
+                            wrapper.appendChild(btn);
+                            wrapper.appendChild(nameSpan);
+                            wrapper.appendChild(clearBtn);
+                            row.appendChild(wrapper);
+                        } else if (fty === 'bool') {
+                            const inp = document.createElement('input');
+                            inp.type = 'checkbox';
+                            inp.setAttribute('data-endpoint', h.offset);
+                            inp.setAttribute('data-param', f.name);
+                            inp.setAttribute('data-extractor', 'MultipartText');
+                            row.appendChild(inp);
+                        } else {
+                            const step = (fty === 'f32' || fty === 'f64') ? ' step="any"' : '';
+                            const inputType = (/^(i|u)(8|16|32|64)$/.test(fty) || fty === 'usize' || fty === 'f32' || fty === 'f64') ? 'number' : 'text';
+                            const inp = document.createElement('input');
+                            inp.type = inputType;
+                            if (step && inputType === 'number') inp.setAttribute('step', 'any');
+                            inp.setAttribute('data-endpoint', h.offset);
+                            inp.setAttribute('data-param', f.name);
+                            inp.setAttribute('data-extractor', 'MultipartText');
+                            inp.placeholder = fty;
+                            row.appendChild(inp);
+                        }
+
+                        group.appendChild(row);
+                        mpDiv.appendChild(group);
+                    }
+                }
+            } else {
+                // Raw Multipart: just a file input
+                const group = document.createElement('div');
+                group.className = 'af-field-group';
+                const label = document.createElement('div');
+                label.className = 'field-label';
+                label.innerHTML = '<span class="badge badge-data">multipart</span> ' + mpParam.name + ' <span class="field-type">' + mpParam.ty + '</span>';
+                group.appendChild(label);
+                const row = document.createElement('div');
+                row.className = 'field-row';
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'file-upload-wrapper';
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.multiple = true;
+                inp.setAttribute('data-endpoint', h.offset);
+                inp.setAttribute('data-param', 'files');
+                inp.setAttribute('data-extractor', 'MultipartFile');
+                const btn = document.createElement('label');
+                btn.className = 'file-upload-btn';
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Choose Files';
+                btn.htmlFor = 'file_' + h.offset + '_files';
+                inp.id = 'file_' + h.offset + '_files';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'file-upload-name';
+                nameSpan.textContent = 'No files chosen';
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'file-upload-clear';
+                clearBtn.innerHTML = '&times;';
+                clearBtn.title = 'Clear';
+                clearBtn.addEventListener('click', () => {
+                    inp.value = '';
+                    nameSpan.textContent = 'No files chosen';
+                    clearBtn.style.display = 'none';
+                });
+                inp.addEventListener('change', () => {
+                    if (inp.files.length > 0) {
+                        nameSpan.textContent = inp.files.length + ' file(s) selected';
+                        clearBtn.style.display = 'inline';
+                    } else {
+                        nameSpan.textContent = 'No files chosen';
+                        clearBtn.style.display = 'none';
+                    }
+                });
+                wrapper.appendChild(inp);
+                wrapper.appendChild(btn);
+                wrapper.appendChild(nameSpan);
+                wrapper.appendChild(clearBtn);
+                row.appendChild(wrapper);
+                group.appendChild(row);
+                mpDiv.appendChild(group);
+            }
+            body.appendChild(mpDiv);
+        }
+
         // Send button row
         const sendRow = document.createElement('div');
         sendRow.style.marginTop = '12px';
@@ -3270,20 +3453,62 @@ customElements.define('af-array', AfArray);
                 }
             }
             const hasBody = !['GET', 'HEAD'].includes(handler.method || 'GET');
-            if (hasBody) headers['Content-Type'] = 'application/json';
 
             // Build body
             let fetchBody = undefined;
-            const bodyParams = handler.params.filter(p => p.extractor === 'Body');
-            if (bodyParams.length > 0 && hasBody) {
-                const p = bodyParams[0];
-                const el = document.querySelector('[data-endpoint="' + handler.offset + '"][data-param="' + p.name + '"][data-extractor="Body"]');
-                if (el) {
-                    if (el.tagName === 'AF-FIELD') {
-                        fetchBody = JSON.stringify(el.getValue());
-                    } else {
-                        fetchBody = el.value || '{}';
+            const multipartParams = handler.params.filter(p => p.extractor === 'Multipart' || p.extractor === 'MultipartForm');
+
+            if (multipartParams.length > 0 && hasBody) {
+                // Multipart form data — construct FormData
+                const formData = new FormData();
+                const mpDiv = document.querySelector('[data-endpoint="' + handler.offset + '"][data-extractor="Multipart"]');
+
+                // File inputs
+                const fileInputs = mpDiv ? mpDiv.querySelectorAll('[data-extractor="MultipartFile"]') : [];
+                for (const inp of fileInputs) {
+                    const fieldName = inp.getAttribute('data-param');
+                    if (inp.files && inp.files.length > 0) {
+                        if (fieldName === 'files') {
+                            // Raw multipart: append all files
+                            for (const f of inp.files) {
+                                formData.append('file', f, f.name);
+                            }
+                        } else {
+                            // Typed form: append with field name
+                            formData.append(fieldName, inp.files[0], inp.files[0].name);
+                        }
                     }
+                }
+
+                // Text inputs
+                const textInputs = mpDiv ? mpDiv.querySelectorAll('[data-extractor="MultipartText"]') : [];
+                for (const inp of textInputs) {
+                    const fieldName = inp.getAttribute('data-param');
+                    if (inp.type === 'checkbox') {
+                        formData.append(fieldName, inp.checked ? 'true' : 'false');
+                    } else if (inp.value) {
+                        formData.append(fieldName, inp.value);
+                    }
+                }
+
+                fetchBody = formData;
+                // Don't set Content-Type for FormData — browser sets it with boundary
+                delete headers['Content-Type'];
+            } else {
+                const bodyParams = handler.params.filter(p => p.extractor === 'Body');
+                if (bodyParams.length > 0 && hasBody) {
+                    if (hasBody) headers['Content-Type'] = 'application/json';
+                    const p = bodyParams[0];
+                    const el = document.querySelector('[data-endpoint="' + handler.offset + '"][data-param="' + p.name + '"][data-extractor="Body"]');
+                    if (el) {
+                        if (el.tagName === 'AF-FIELD') {
+                            fetchBody = JSON.stringify(el.getValue());
+                        } else {
+                            fetchBody = el.value || '{}';
+                        }
+                    }
+                } else if (hasBody) {
+                    headers['Content-Type'] = 'application/json';
                 }
             }
 
@@ -3380,19 +3605,48 @@ customElements.define('af-array', AfArray);
 
         // Body
         if (!['GET', 'HEAD'].includes(method)) {
-            const bodyParams = handler.params.filter(p => p.extractor === 'Body');
-            if (bodyParams.length > 0) {
-                let val = '{}';
-                const p = bodyParams[0];
-                const el = document.querySelector('[data-endpoint="' + handler.offset + '"][data-param="' + p.name + '"][data-extractor="Body"]');
-                if (el) {
-                    if (el.tagName === 'AF-FIELD') {
-                        val = JSON.stringify(el.getValue());
-                    } else {
-                        val = el.value || val;
+            const multipartParams = handler.params.filter(p => p.extractor === 'Multipart' || p.extractor === 'MultipartForm');
+            if (multipartParams.length > 0) {
+                // Multipart: generate -F flags
+                const mpDiv = document.querySelector('[data-endpoint="' + handler.offset + '"][data-extractor="Multipart"]');
+                if (mpDiv) {
+                    const fileInputs = mpDiv.querySelectorAll('[data-extractor="MultipartFile"]');
+                    for (const inp of fileInputs) {
+                        const fieldName = inp.getAttribute('data-param');
+                        if (inp.files && inp.files.length > 0) {
+                            if (fieldName === 'files') {
+                                for (const f of inp.files) {
+                                    parts.push('-F "file=@' + f.name + '"');
+                                }
+                            } else {
+                                parts.push('-F "' + fieldName + '=@' + inp.files[0].name + '"');
+                            }
+                        } else {
+                            parts.push('-F "' + fieldName + '=@filename"');
+                        }
+                    }
+                    const textInputs = mpDiv.querySelectorAll('[data-extractor="MultipartText"]');
+                    for (const inp of textInputs) {
+                        const fieldName = inp.getAttribute('data-param');
+                        const val = inp.type === 'checkbox' ? (inp.checked ? 'true' : 'false') : (inp.value || '{' + fieldName + '}');
+                        parts.push('-F "' + fieldName + '=' + val + '"');
                     }
                 }
-                parts.push("-d '" + val + "'");
+            } else {
+                const bodyParams = handler.params.filter(p => p.extractor === 'Body');
+                if (bodyParams.length > 0) {
+                    let val = '{}';
+                    const p = bodyParams[0];
+                    const el = document.querySelector('[data-endpoint="' + handler.offset + '"][data-param="' + p.name + '"][data-extractor="Body"]');
+                    if (el) {
+                        if (el.tagName === 'AF-FIELD') {
+                            val = JSON.stringify(el.getValue());
+                        } else {
+                            val = el.value || val;
+                        }
+                    }
+                    parts.push("-d '" + val + "'");
+                }
             }
         }
 

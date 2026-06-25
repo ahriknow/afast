@@ -11,7 +11,8 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 - **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients
 - **Interactive API Docs** — built-in Web docs with online testing
 - **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, TCP
-- **TLS / HTTPS** — rustls with ALPN for HTTP/2
+- **TLS / HTTPS** — rustls with ALPN for HTTP/2, hot-reload via channel
+- **File Upload** — `Multipart` (raw) and `MultipartForm<T>` (typed) extractors with `#[derive(FromFormData)]`
 - **RESTful Endpoints** — `#[get]`/`#[post]`/`#[put]`/`#[delete]` with JSON
 - **WebSocket & SSE** — `#[ws]` and `#[sse]` route macros
 - **Long Connections** — bidirectional streaming via `Receiver`/`Sender`
@@ -25,7 +26,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 
 ```toml
 [dependencies]
-afast = { version = "0.1.20", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.21", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

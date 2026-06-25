@@ -114,6 +114,10 @@ pub struct HttpConfig {
     pub allowed_ws_origins: Vec<String>,
     #[cfg(feature = "tls")]
     pub tls_config: Option<crate::app::TlsConfig>,
+    /// TLS reload channel receiver for hot-reloading certificates at runtime.
+    #[cfg(feature = "tls")]
+    pub tls_reload_rx:
+        Option<tokio::sync::broadcast::Receiver<Option<crate::app::TlsReloadMessage>>>,
     #[cfg(feature = "rate-limit")]
     pub rate_limiter: Option<Arc<RateLimiter>>,
     /// Handler names indexed by handler ID, for rate-limit lookups.
@@ -145,6 +149,37 @@ pub struct HttpConfig {
     pub doc_code_rate_limit_policy: Option<String>,
 }
 
+/// Builds a TLS acceptor from certificate and key file paths.
+///
+/// Returns `Ok(Some(TlsAcceptor))` if both files exist and are valid.
+/// Returns `Ok(None)` if either file doesn't exist (graceful fallback to plain HTTP).
+/// Returns `Err` if files exist but cannot be parsed.
+#[cfg(feature = "tls")]
+pub fn build_tls_acceptor(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<Option<tokio_rustls::TlsAcceptor>, Error> {
+    // Check if cert files exist before trying to load them
+    if !std::path::Path::new(cert_path).exists() || !std::path::Path::new(key_path).exists() {
+        return Ok(None);
+    }
+
+    // Install the ring crypto provider (idempotent — safe to call multiple times).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let certs = load_certs(cert_path)?;
+    let key = load_key(key_path)?;
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| Error::Http {
+            message: e.to_string(),
+        })?;
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(Some(tokio_rustls::TlsAcceptor::from(Arc::new(
+        server_config,
+    ))))
+}
+
 /// Starts the HTTP server and blocks until a shutdown signal is received.
 ///
 /// This function binds a TCP listener, compiles ordinary HTTP routes
@@ -153,6 +188,9 @@ pub struct HttpConfig {
 /// with upgrade support (for merged WebSocket mode). When TLS is
 /// enabled via the `tls` feature, connections are wrapped with TLS
 /// and support ALPN negotiation for HTTP/2.
+///
+/// If TLS certificate files don't exist at startup, the server falls
+/// back to plain HTTP. Use the reload channel to reload certificates at runtime.
 pub async fn serve(
     config: HttpConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -162,8 +200,6 @@ pub async fn serve(
         .map_err(|e| Error::Http {
             message: e.to_string(),
         })?;
-
-    println!("afast: http server listening on {}", config.addr);
 
     // Compile ordinary route patterns once at startup to avoid
     // re-parsing on every request.
@@ -295,22 +331,68 @@ pub async fn serve(
     });
 
     // Set up TLS acceptor if TLS config is provided.
+    // Uses Arc<RwLock> to support dynamic certificate reloading via channel.
     #[cfg(feature = "tls")]
-    let tls_acceptor = if let Some(ref cfg) = config.tls_config {
-        // Install the ring crypto provider (idempotent — safe to call multiple times).
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let certs = load_certs(&cfg.cert_path)?;
-        let key = load_key(&cfg.key_path)?;
-        let mut server_config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .map_err(|e| Error::Http {
-                message: e.to_string(),
-            })?;
-        server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        Some(tokio_rustls::TlsAcceptor::from(Arc::new(server_config)))
-    } else {
-        None
+    let tls_acceptor: Arc<tokio::sync::RwLock<Option<tokio_rustls::TlsAcceptor>>> =
+        if let Some(ref cfg) = config.tls_config {
+            match build_tls_acceptor(&cfg.cert_path, &cfg.key_path) {
+                Ok(Some(acceptor)) => Arc::new(tokio::sync::RwLock::new(Some(acceptor))),
+                Ok(None) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "afast: TLS cert files not found, starting without encryption: {}",
+                        config.addr
+                    );
+                    Arc::new(tokio::sync::RwLock::new(None))
+                }
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "afast: failed to load TLS certs: {}, starting without encryption",
+                        e
+                    );
+                    Arc::new(tokio::sync::RwLock::new(None))
+                }
+            }
+        } else {
+            Arc::new(tokio::sync::RwLock::new(None))
+        };
+
+    // Store initial cert paths for reloading
+    #[cfg(feature = "tls")]
+    let mut cert_paths = config
+        .tls_config
+        .as_ref()
+        .map(|c| (c.cert_path.clone(), c.key_path.clone()));
+
+    // TLS reload channel — spawn a helper task to forward from broadcast to mpsc.
+    // This avoids borrowing issues with broadcast::Receiver in tokio::select!.
+    #[cfg(feature = "tls")]
+    let mut tls_reload_rx = {
+        let (mpsc_tx, mpsc_rx) =
+            tokio::sync::mpsc::channel::<Option<crate::app::TlsReloadMessage>>(16);
+        if let Some(mut bcast_rx) = config.tls_reload_rx {
+            tokio::spawn(async move {
+                loop {
+                    match bcast_rx.recv().await {
+                        Ok(msg) => {
+                            if mpsc_tx.send(msg).await.is_err() {
+                                break; // receiver dropped
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            // Skip lagged messages
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break; // sender dropped
+                        }
+                    }
+                }
+            });
+            Some(mpsc_rx)
+        } else {
+            None
+        }
     };
 
     // Semaphore to limit concurrent connections.
@@ -336,31 +418,35 @@ pub async fn serve(
                                 .unwrap_or_else(|_| "unknown".to_string());
 
                             #[cfg(feature = "tls")]
-                            match tls {
-                                Some(ref acceptor) => {
-                                    let tls_timeout = std::time::Duration::from_secs(10);
-                                    match tokio::time::timeout(tls_timeout, acceptor.accept(stream)).await {
-                                        Ok(Ok(tls_stream)) => {
-                                            let client_ip = tls_stream.get_ref().0
-                                                .peer_addr()
-                                                .map(|a| a.ip().to_string())
-                                                .unwrap_or(peer_ip);
-                                            let io = hyper_util::rt::TokioIo::new(tls_stream);
-                                            serve_connection(io, shared, client_ip, timeout).await;
-                                        }
-                                        Ok(Err(e)) => {
-                                            eprintln!("afast: tls handshake error: {}", e);
-                                        }
-                                        Err(_) => {
-                                            eprintln!("afast: tls handshake timeout");
+                            {
+                                let acceptor = tls.read().await;
+                                match &*acceptor {
+                                    Some(acceptor_ref) => {
+                                        let tls_timeout = std::time::Duration::from_secs(10);
+                                        match tokio::time::timeout(tls_timeout, acceptor_ref.accept(stream)).await {
+                                            Ok(Ok(tls_stream)) => {
+                                                let client_ip = tls_stream.get_ref().0
+                                                    .peer_addr()
+                                                    .map(|a| a.ip().to_string())
+                                                    .unwrap_or(peer_ip);
+                                                let io = hyper_util::rt::TokioIo::new(tls_stream);
+                                                serve_connection(io, shared, client_ip, timeout).await;
+                                            }
+                                            Ok(Err(e)) => {
+                                                eprintln!("afast: tls handshake error: {}", e);
+                                            }
+                                            Err(_) => {
+                                                #[cfg(debug_assertions)]
+                                                eprintln!("afast: tls handshake timeout");
+                                            }
                                         }
                                     }
+                                    None => {
+                                        let io = hyper_util::rt::TokioIo::new(stream);
+                                        serve_connection(io, shared, peer_ip, timeout).await;
+                                    }
                                 }
-                                None => {
-                                    let io = hyper_util::rt::TokioIo::new(stream);
-                                    serve_connection(io, shared, peer_ip, timeout).await;
-                                }
-                            };
+                            }
                             #[cfg(not(feature = "tls"))]
                             {
                                 let io = hyper_util::rt::TokioIo::new(stream);
@@ -369,6 +455,54 @@ pub async fn serve(
                         });
                     }
                     Err(e) => eprintln!("afast: http accept error: {}", e),
+                }
+            }
+            // Handle TLS certificate reload via channel
+            reload_msg = async {
+                #[cfg(feature = "tls")]
+                {
+                    match tls_reload_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                }
+                #[cfg(not(feature = "tls"))]
+                {
+                    std::future::pending().await
+                }
+            } => {
+                #[cfg(feature = "tls")]
+                if let Some(reload_msg) = reload_msg {
+                    // Resolve paths: use provided paths or fall back to originals
+                    let (cp, kp) = match reload_msg {
+                        Some(msg) => {
+                            cert_paths = Some((msg.cert_path.clone(), msg.key_path.clone()));
+                            (msg.cert_path, msg.key_path)
+                        }
+                        None => match cert_paths {
+                            Some((ref c, ref k)) => (c.clone(), k.clone()),
+                            None => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("afast: no cert paths available for reload");
+                                continue;
+                            }
+                        },
+                    };
+                    match build_tls_acceptor(&cp, &kp) {
+                        Ok(Some(new_acceptor)) => {
+                            let mut acceptor = tls_acceptor.write().await;
+                            *acceptor = Some(new_acceptor);
+                            println!("afast: TLS certificates reloaded successfully");
+                        }
+                        Ok(None) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("afast: TLS cert files not found during reload, keeping current state");
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("afast: failed to reload TLS certs: {}, keeping current state", e);
+                        }
+                    }
                 }
             }
             _ = shutdown_rx.recv() => break,

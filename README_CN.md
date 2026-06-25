@@ -11,7 +11,8 @@
 - **自动代码生成** — TypeScript / JavaScript / Kotlin / Rust 客户端
 - **交互式 API 文档** — 内置 Web 文档，在线测试
 - **多传输层** — WebSocket、HTTP/1.1、HTTP/2、TCP
-- **TLS / HTTPS** — 基于 rustls，ALPN 协商 HTTP/2
+- **TLS / HTTPS** — 基于 rustls，ALPN 协商 HTTP/2，支持 channel 热重载
+- **文件上传** — `Multipart`（原始）和 `MultipartForm<T>`（类型化）提取器，支持 `#[derive(FromFormData)]` 宏
 - **RESTful 端点** — `#[get]`/`#[post]`/`#[put]`/`#[delete]` + JSON
 - **WebSocket & SSE** — `#[ws]` 和 `#[sse]` 路由宏
 - **长连接** — 通过 `Receiver`/`Sender` 双向流式通信
@@ -25,7 +26,7 @@
 
 ```toml
 [dependencies]
-afast = { version = "0.1.20", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.21", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

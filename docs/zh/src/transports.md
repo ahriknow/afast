@@ -49,6 +49,46 @@ let app = AFast::new()
     .http("0.0.0.0:5000");  // 相同地址，自动合并
 ```
 
+## TLS / HTTPS
+
+AFast 支持基于 rustls 的 TLS/HTTPS，ALPN 协商 HTTP/2。
+
+### 基本用法
+
+```rust
+let app = AFast::new()
+    .service(svc)
+    .https("0.0.0.0:5443", "./cert.pem", "./key.pem", None);
+```
+
+### 优雅降级
+
+如果证书文件不存在，服务器自动降级为普通 HTTP：
+
+```text
+afast: TLS cert files not found, starting without encryption: [::]:5443
+```
+
+### 热重载证书
+
+通过 `broadcast` channel 在运行时重载证书，无需重启：
+
+```rust
+let (reload_tx, reload_rx) = tokio::sync::broadcast::channel(1);
+
+let app = AFast::new()
+    .https("0.0.0.0:5443", "./cert.pem", "./key.pem", Some(reload_rx));
+
+// 使用原始路径重载
+reload_tx.send(None).unwrap();
+
+// 使用新路径重载
+reload_tx.send(Some(TlsReloadMessage {
+    cert_path: "/new/cert.pem".into(),
+    key_path: "/new/key.pem".into(),
+})).unwrap();
+```
+
 ## Ordinary HTTP (REST)
 
 使用 `ordinary-http`，在 `service!` 宏内使用 `get`/`post`/`put`/`patch`/`delete` 定义 RESTful 路由：

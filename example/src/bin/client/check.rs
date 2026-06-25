@@ -29,6 +29,20 @@ pub struct CatchAllGetCatchAllResponse {
     pub caught: String,
     pub message: String,
 }
+#[derive(Debug, Clone)]
+pub struct UploadFileUploadResponse {
+    pub filename: String,
+    pub field_name: String,
+    pub content_type: String,
+    pub size: u64,
+}
+#[derive(Debug, Clone)]
+pub struct UploadFileTypedUploadResponse {
+    pub filename: String,
+    pub field_name: String,
+    pub content_type: String,
+    pub size: u64,
+}
 /// Client for the `check` service.
 /// Check Service
 pub struct CheckClient {

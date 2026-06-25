@@ -7,6 +7,7 @@
 - [生命周期钩子](./hooks.md)
 - [请求上下文 (`Ctx`)](./context.md)
 - [传输层](./transports.md)
+- [文件上传](./file-upload.md)
 - [代码生成](./code-generation.md)
 - [二进制协议](./binary-protocol.md)
 - [交互式文档](./api-docs.md)

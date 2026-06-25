@@ -161,11 +161,8 @@ impl RoutePattern {
                             }
                         }
                         RouteSegment::Param(name) => {
-                            if let Some(path_seg) = path_segments.get(i) {
-                                params.insert(name.to_string(), path_seg.to_string());
-                            } else {
-                                return None;
-                            }
+                            let path_seg = path_segments.get(i)?;
+                            params.insert(name.to_string(), path_seg.to_string());
                         }
                         RouteSegment::CatchAll(name) => {
                             // Consume all remaining segments.

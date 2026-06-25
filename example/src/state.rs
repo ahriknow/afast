@@ -27,6 +27,8 @@
 
 use afast::{AFastDeserialize, AFastSerialize, Tag};
 
+#[cfg(feature = "tls")]
+use afast::TlsReloadMessage;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -40,10 +42,24 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
+    /// TLS reload sender — send `None` to reload with original paths,
+    /// or `Some(TlsReloadMessage)` for new paths.
+    #[cfg(feature = "tls")]
+    pub reload_tx: Arc<tokio::sync::broadcast::Sender<Option<TlsReloadMessage>>>,
 }
 
 impl AppState {
     /// Creates a new AppState with a seeded database.
+    #[cfg(feature = "tls")]
+    pub fn new(reload_tx: tokio::sync::broadcast::Sender<Option<TlsReloadMessage>>) -> Self {
+        Self {
+            db: Arc::new(Mutex::new(Database::new())),
+            reload_tx: Arc::new(reload_tx),
+        }
+    }
+
+    /// Creates a new AppState without TLS reload support.
+    #[cfg(not(feature = "tls"))]
     pub fn new() -> Self {
         Self {
             db: Arc::new(Mutex::new(Database::new())),

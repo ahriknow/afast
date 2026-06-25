@@ -1512,12 +1512,14 @@ fn ordinary_handler_method_ts(
     let mut param_param: Option<&ParamMeta> = None;
     let mut query_param: Option<&ParamMeta> = None;
     let mut body_param: Option<&ParamMeta> = None;
+    let mut multipart_param: Option<&ParamMeta> = None;
 
     for param in meta.params {
         match param.extractor {
             "Param" => param_param = Some(param),
             "Query" => query_param = Some(param),
             "Body" => body_param = Some(param),
+            "Multipart" | "MultipartForm" => multipart_param = Some(param),
             _ => {}
         }
     }
@@ -1541,6 +1543,10 @@ fn ordinary_handler_method_ts(
     }
     if let Some(p) = body_param {
         data_type_fields.push(format!("body: {}", param_ts_type(p, "Body")));
+    }
+    if multipart_param.is_some() {
+        // Multipart: accept FormData directly (raw) or form fields (typed)
+        data_type_fields.push("body: FormData".to_string());
     }
 
     // Function params string
@@ -1652,6 +1658,7 @@ fn ordinary_handler_method_ts(
 
     // Build fetch options
     let needs_body = body_param.is_some()
+        || multipart_param.is_some()
         || method == "POST"
         || method == "PUT"
         || method == "PATCH"
@@ -1692,6 +1699,7 @@ fn ordinary_handler_method_ts(
                     ind
                 ));
             }
+            // Don't set Content-Type for multipart — browser sets it with boundary
             if header_count > 0 {
                 body_lines.push(format!("{}for (const fn of this._headers) {{", ind));
                 body_lines.push(format!("{}    const val = await fn();", ind));
@@ -1714,6 +1722,9 @@ fn ordinary_handler_method_ts(
         // Body
         if let Some(_p) = body_param {
             body_lines.push(format!("{}opts.body = JSON.stringify(request.body);", ind));
+        } else if multipart_param.is_some() {
+            // Multipart: pass FormData directly (no Content-Type header needed)
+            body_lines.push(format!("{}opts.body = request.body;", ind));
         }
 
         body_lines.push(format!(
