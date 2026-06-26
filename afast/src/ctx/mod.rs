@@ -53,8 +53,15 @@ impl RequestCtx {
 
     /// Inserts a value, keyed by its type.
     /// Replaces any existing value of the same type.
+    ///
+    /// If the lock is poisoned (another thread panicked while holding it),
+    /// the poison is recovered automatically.
     pub fn insert<T: Send + Sync + 'static>(&self, value: T) {
-        let mut entries = self.inner.entries.write().unwrap();
+        let mut entries = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         entries.insert(TypeId::of::<T>(), Box::new(value));
     }
 
@@ -63,8 +70,11 @@ impl RequestCtx {
     ///
     /// Requires `T: Clone` because the `RwLock` read guard cannot escape
     /// this method.  For large values, wrap in `Arc` to make cloning cheap.
+    ///
+    /// If the lock is poisoned (another thread panicked while holding it),
+    /// the poison is recovered automatically.
     pub fn get<T: Send + Sync + Clone + 'static>(&self) -> Option<T> {
-        let entries = self.inner.entries.read().unwrap();
+        let entries = self.inner.entries.read().unwrap_or_else(|e| e.into_inner());
         entries
             .get(&TypeId::of::<T>())
             .and_then(|val| val.downcast_ref::<T>())

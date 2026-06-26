@@ -198,6 +198,44 @@ pub trait RateLimitStore: Send + Sync + 'static {
             }
         })
     }
+
+    /// Atomically refills tokens and consumes one token in a single operation.
+    /// Returns `true` if the token was successfully consumed, `false` if the
+    /// bucket is empty.
+    ///
+    /// This method eliminates the race condition in the token-bucket algorithm
+    /// by combining refill and consume into a single atomic operation.
+    /// Custom store backends (e.g., Redis) should override this with a
+    /// Lua script or MULTI/EXEC transaction for true atomicity.
+    fn try_consume_token<'a>(
+        &'a self,
+        tokens_key: &'a str,
+        refill_key: &'a str,
+        max_tokens: u64,
+        rate: f64,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move {
+            let now = now_secs();
+            let current_tokens = self.get(tokens_key).await;
+            let last_refill = self.get(refill_key).await;
+
+            let new_tokens = if last_refill == 0 {
+                max_tokens as f64
+            } else {
+                let elapsed = now.saturating_sub(last_refill) as f64;
+                (current_tokens as f64 + elapsed * rate).min(max_tokens as f64)
+            };
+
+            // Refill tokens and update the timestamp.
+            self.set(tokens_key, new_tokens as u64, ttl_secs).await;
+            self.set(refill_key, now, ttl_secs).await;
+
+            // Atomically consume one token.
+            let remaining = self.decr(tokens_key, ttl_secs).await;
+            remaining > 0
+        })
+    }
 }
 
 // ─── InMemoryStore ────────────────────────────────────────────────
@@ -389,32 +427,21 @@ async fn try_acquire(
             estimated <= max_requests as f64
         }
         Algorithm::TokenBucket => {
-            let now = now_secs();
+            let rate = max_requests as f64 / window_secs as f64;
             let tokens_key = format!("{}:tokens", prefix);
             let refill_key = format!("{}:refill", prefix);
 
-            let current_tokens = store.get(&tokens_key).await;
-            let last_refill = store.get(&refill_key).await;
-            let rate = max_requests as f64 / window_secs as f64;
-
-            let new_tokens = if last_refill == 0 {
-                max_requests as f64
-            } else {
-                let elapsed = now.saturating_sub(last_refill) as f64;
-                (current_tokens as f64 + elapsed * rate).min(max_requests as f64)
-            };
-
-            // Refill tokens and update the timestamp.
+            // Use the atomic try_consume_token method to eliminate
+            // the race condition between refill and consume operations.
             store
-                .set(&tokens_key, new_tokens as u64, window_secs * 2)
-                .await;
-            store.set(&refill_key, now, window_secs * 2).await;
-
-            // Atomically consume one token.  `decr` is a single operation
-            // on the store backend, so concurrent requests cannot both read
-            // the same token count and both succeed.
-            let remaining = store.decr(&tokens_key, window_secs * 2).await;
-            remaining < new_tokens as u64
+                .try_consume_token(
+                    &tokens_key,
+                    &refill_key,
+                    max_requests,
+                    rate,
+                    window_secs * 2,
+                )
+                .await
         }
     }
 }

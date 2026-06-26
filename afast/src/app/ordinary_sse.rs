@@ -112,7 +112,7 @@ impl SseSender {
             retry: None,
         }
         .to_wire();
-        self.tx.send(wire).await.map_err(|_| Error::Ws {
+        self.tx.send(wire).await.map_err(|_| Error::Http {
             message: "sse channel closed".into(),
         })
     }
@@ -132,7 +132,7 @@ impl SseSender {
             retry: None,
         }
         .to_wire();
-        self.tx.send(wire).await.map_err(|_| Error::Ws {
+        self.tx.send(wire).await.map_err(|_| Error::Http {
             message: "sse channel closed".into(),
         })
     }
@@ -140,7 +140,7 @@ impl SseSender {
     /// Sends a raw `SseEvent` with full control over all fields.
     pub async fn send_raw(&self, event: SseEvent) -> Result<(), Error> {
         let wire = event.to_wire();
-        self.tx.send(wire).await.map_err(|_| Error::Ws {
+        self.tx.send(wire).await.map_err(|_| Error::Http {
             message: "sse channel closed".into(),
         })
     }

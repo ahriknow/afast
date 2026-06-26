@@ -324,7 +324,11 @@ pub async fn handle_connection(
                         let (from_handler_tx, mut from_handler_rx) = mpsc::channel::<Vec<u8>>(32);
 
                         let conn_id = next_conn_id;
-                        next_conn_id += 1;
+                        next_conn_id = next_conn_id.wrapping_add(1);
+                        // Skip 0 because it has special meaning in push frames.
+                        if next_conn_id == 0 {
+                            next_conn_id = 1;
+                        }
 
                         {
                             let mut conns = connections.lock().await;
@@ -374,7 +378,9 @@ pub async fn handle_connection(
                             // is written as a push frame on the TCP stream.
                             if result.is_ok() {
                                 while let Some(bytes) = from_handler_rx.recv().await {
-                                    let _ = push_tx.send((conn_id, bytes)).await;
+                                    if push_tx.send((conn_id, bytes)).await.is_err() {
+                                        eprintln!("afast: tcp push channel full, message dropped for conn_id={}", conn_id);
+                                    }
                                 }
                             }
 

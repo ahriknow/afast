@@ -458,7 +458,7 @@ pub async fn serve(
                 }
             }
             // Handle TLS certificate reload via channel
-            reload_msg = async {
+            _reload_msg = async {
                 #[cfg(feature = "tls")]
                 {
                     match tls_reload_rx.as_mut() {
@@ -472,7 +472,7 @@ pub async fn serve(
                 }
             } => {
                 #[cfg(feature = "tls")]
-                if let Some(reload_msg) = reload_msg {
+                if let Some(reload_msg) = _reload_msg {
                     // Resolve paths: use provided paths or fall back to originals
                     let (cp, kp) = match reload_msg {
                         Some(msg) => {
@@ -1055,9 +1055,80 @@ async fn handle_request(
                     let state = shared.state.clone();
                     let invoker = compiled.invoker;
                     let req_ctx = crate::ctx::RequestCtx::new();
+
+                    // Rate-limit check for catch-all routes.
+                    #[cfg(feature = "rate-limit")]
+                    if let Some(ref limiter) = shared.rate_limiter {
+                        let handler_name = compiled.handler_name;
+                        let mut ctx = ConnectionContext::new(client_ip.to_string());
+                        populate_header_cache(req.headers(), &mut ctx.header_cache);
+                        if let Err(e) = limiter.check(handler_name, &mut ctx).await {
+                            let retry = limiter.retry_after_secs(handler_name);
+                            let status = StatusCode::TOO_MANY_REQUESTS;
+                            let body = super::util::json_error_body(e.code(), e.message());
+                            return Ok(Response::builder()
+                                .status(status)
+                                .header("content-type", "application/json; charset=utf-8")
+                                .header("retry-after", retry.to_string())
+                                .body(Full::new(Bytes::from(body)).boxed())
+                                .expect("valid response builder"));
+                        }
+                    }
+
+                    #[cfg(feature = "hook")]
+                    let forwarded_for = extract_forwarded_for(req.headers());
+
+                    // Hook: before_request for catch-all routes
+                    #[cfg(feature = "hook")]
+                    let hook_ctx = crate::hook::RequestContext {
+                        handler_name: compiled.handler_name,
+                        handler_desc: "",
+                        transport: "http",
+                        is_binary: false,
+                        method: compiled.method,
+                        long_connection: false,
+                        handler_id: 0,
+                        state: state.clone(),
+                        ctx: req_ctx.clone(),
+                        attrs: compiled.attrs,
+                        client_ip: client_ip.to_string(),
+                        forwarded_for,
+                    };
+                    #[cfg(feature = "hook")]
+                    let hook_key = &compiled.hook_key;
+                    #[cfg(feature = "hook")]
+                    let mut _guards: Vec<Box<dyn crate::hook::RequestGuard>> = {
+                        shared
+                            .named_hooks
+                            .get(hook_key)
+                            .map(|hooks| {
+                                hooks
+                                    .iter()
+                                    .filter_map(|h| h.before_request(&hook_ctx))
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    };
+
                     let result = invoker
                         .call_ordinary(req, &path_params, query_string, &state, &req_ctx)
                         .await;
+
+                    // Hook: on_response / on_error for catch-all routes
+                    #[cfg(feature = "hook")]
+                    match &result {
+                        Ok(_) => {
+                            for g in &mut _guards {
+                                g.on_response(&hook_ctx, &[]);
+                            }
+                        }
+                        Err(e) => {
+                            for g in &mut _guards {
+                                g.on_error(&hook_ctx, e);
+                            }
+                        }
+                    }
+
                     return match result {
                         Ok(response) => {
                             let resp = response.map(|b| b.boxed());

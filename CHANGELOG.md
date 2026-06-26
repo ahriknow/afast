@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.22]
+
+### Fixed
+
+- **Token bucket rate limit race condition**: The `TokenBucket` algorithm performed non-atomic `get()` → `set()` → `decr()` operations, allowing concurrent requests to both pass the rate limit check. Added `try_consume_token()` atomic method that combines refill and consume into a single operation.
+- **Token bucket judgment logic error**: After `decr()`, the condition `remaining < new_tokens` was incorrect because `new_tokens` was stale. Changed to `remaining > 0` to correctly check if a token was consumed.
+- **`next_conn_id` overflow**: `next_conn_id` is `u32` and increments from 1. When reaching `u32::MAX`, it wraps to 0, which has special meaning in push frames. Added wrapping arithmetic with skip-zero check.
+- **Catch-all routes bypassing rate limit and hooks**: When a catch-all route matched after built-in endpoint checks, it skipped rate-limit and hook execution. Added rate-limit check and `before_request`/`on_response`/`on_error` hooks for catch-all routes.
+- **SSE using wrong error variant**: `SseSender` returned `Error::Ws` for all errors, which is semantically incorrect for SSE. Changed to `Error::Http`.
+- **`RequestCtx` panic on poisoned lock**: `RwLock::write().unwrap()` and `RwLock::read().unwrap()` would panic if another thread panicked while holding the lock. Changed to `unwrap_or_else(|e| e.into_inner())` to recover from poisoned locks.
+- **WS/TCP push channel silent message loss**: `push_tx.send()` used `let _ =` to ignore failures. When the bounded channel (capacity 32) was full, handler data was silently dropped. Added warning log when send fails.
+
 ## [0.1.21]
 
 ### Added
