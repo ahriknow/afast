@@ -62,19 +62,95 @@ GET /code/api/rs?call=tcp-async
 
 ## 客户端使用
 
+### TypeScript / JavaScript
+
 ```typescript
 import { ApiClient } from './api';
 
 // 专用 WS 端口
-const wsClient = new ApiClient('ws://localhost:3001');
-const wsResult = await wsClient.apis.user.list_users({ page: 1, size: 20 });
+const wsClient = new ApiClient({
+  host: 'localhost',
+  port: 3001,
+  tls: false,
+  transport: 'ws',
+  debug: false,
+});
+await wsClient.apis._ready;
+const result = await wsClient.apis.user.list_users({ page: 1, size: 20 });
 
-// 合并模式（WS 和 HTTP 在同一端口）
-const mergedClient = new ApiClient('ws://localhost:5001');
-// 自动连接到 ws://localhost:5001/_ws
+// HTTP (fetch) 模式
+const httpClient = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  debug: false,
+});
+await httpClient.apis._ready;
+const users = await httpClient.apis.user.list_users({ page: 1, size: 20 });
+```
+
+### Custom 提取器
+
+通过 `customs` 为 `Custom<T>` 提取器提供值：
+
+```typescript
+const client = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  customs: {
+    AuthCustom: () => ({ token: 'my-token' }),
+  },
+});
+```
+
+### Header 提取器
+
+通过 `headers` 为 `Header<T>` 提取器提供值：
+
+```typescript
+const client = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  headers: {
+    AuthHeader: async () => ({ authorization: 'Bearer my-token' }),
+  },
+});
+```
+
+### Kotlin
+
+```kotlin
+// HTTP 模式
+val client = ApiClient(host = "localhost", port = 5001, tls = false)
+val users = client.userListUsers(page = 1, size = 20)
+
+// OkHttp 模式（Android 兼容）
+val client = ApiClient(host = "localhost", port = 5001, tls = false, callType = KtCallType.OkHttp)
+
+// WebSocket 模式
+val wsClient = ApiClient(host = "localhost", port = 3001, tls = false, callType = KtCallType.Ws)
+```
+
+### Rust
+
+```rust
+// 异步 TCP 客户端
+let mut client = AfastSocket::connect("localhost:4001").await?;
+let users: ListUsersResp = client.call(1, &req).await?;
+
+// 同步 TCP 客户端
+let mut client = AfastSocketSync::connect("localhost:4001")?;
+let users: ListUsersResp = client.call(1, &req)?;
 ```
 
 客户端传输模式在构造时确定。
+
+> **注意**：普通 HTTP 路由（如 `#[get]`、`#[post]`）仅在 `fetch`/`http` 传输模式下可用。WS/TCP 传输仅支持二进制协议 handler（`#[handler]`）。
 
 ## 客户端缓存
 

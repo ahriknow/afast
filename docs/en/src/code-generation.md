@@ -62,19 +62,95 @@ GET /code/api/rs?call=tcp-async
 
 ## Client Usage
 
+### TypeScript / JavaScript
+
 ```typescript
 import { ApiClient } from './api';
 
 // Dedicated WS port
-const wsClient = new ApiClient('ws://localhost:3001');
-const wsResult = await wsClient.apis.user.list_users({ page: 1, size: 20 });
+const wsClient = new ApiClient({
+  host: 'localhost',
+  port: 3001,
+  tls: false,
+  transport: 'ws',
+  debug: false,
+});
+await wsClient.apis._ready;
+const result = await wsClient.apis.user.list_users({ page: 1, size: 20 });
 
-// Merged mode (WS and HTTP on the same port)
-const mergedClient = new ApiClient('ws://localhost:5001');
-// Auto-connects to ws://localhost:5001/_ws
+// HTTP (fetch) mode
+const httpClient = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  debug: false,
+});
+await httpClient.apis._ready;
+const users = await httpClient.apis.user.list_users({ page: 1, size: 20 });
+```
+
+### Custom Extractors
+
+Pass `customs` to provide values for `Custom<T>` extractors:
+
+```typescript
+const client = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  customs: {
+    AuthCustom: () => ({ token: 'my-token' }),
+  },
+});
+```
+
+### Header Extractors
+
+Pass `headers` to provide values for `Header<T>` extractors:
+
+```typescript
+const client = new ApiClient({
+  host: 'localhost',
+  port: 5001,
+  tls: false,
+  transport: 'fetch',
+  headers: {
+    AuthHeader: async () => ({ authorization: 'Bearer my-token' }),
+  },
+});
+```
+
+### Kotlin
+
+```kotlin
+// HTTP mode
+val client = ApiClient(host = "localhost", port = 5001, tls = false)
+val users = client.userListUsers(page = 1, size = 20)
+
+// OkHttp mode (Android-compatible)
+val client = ApiClient(host = "localhost", port = 5001, tls = false, callType = KtCallType.OkHttp)
+
+// WebSocket mode
+val wsClient = ApiClient(host = "localhost", port = 3001, tls = false, callType = KtCallType.Ws)
+```
+
+### Rust
+
+```rust
+// Async TCP client
+let mut client = AfastSocket::connect("localhost:4001").await?;
+let users: ListUsersResp = client.call(1, &req).await?;
+
+// Sync TCP client
+let mut client = AfastSocketSync::connect("localhost:4001")?;
+let users: ListUsersResp = client.call(1, &req)?;
 ```
 
 The client transport mode is fixed at construction time.
+
+> **Note**: Ordinary HTTP routes (e.g., `#[get]`, `#[post]`) are only available with `fetch`/`http` transport. WS/TCP transport only supports binary protocol handlers (`#[handler]`).
 
 ## Client-Side Caching
 
