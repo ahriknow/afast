@@ -429,6 +429,7 @@ async fn main() {
                     JsTsCallType::WxWs,       // WeChat Mini Program WS
                 ]),
                 path: "./client".into(),
+                services: None,
             },
             // JavaScript client (same transport options as TypeScript)
             GenerateTarget {
@@ -444,6 +445,7 @@ async fn main() {
                     JsTsCallType::WxWs,
                 ]),
                 path: "./client".into(),
+                services: None,
             },
             // Kotlin client
             GenerateTarget {
@@ -454,12 +456,14 @@ async fn main() {
                     KtCallType::Tcp,  // java.net.Socket
                 ]),
                 path: "./client".into(),
+                services: None,
             },
             // Rust client (TCP async via tokio)
             GenerateTarget {
                 debug: true,
                 lang: Lang::RS(vec![RsCallType::TcpAsync]),
                 path: "./example/src/bin/client".into(),
+                services: None,
             },
         ])
         // Register all services

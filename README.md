@@ -26,7 +26,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 
 ```toml
 [dependencies]
-afast = { version = "0.1.22", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.23", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

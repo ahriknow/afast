@@ -110,6 +110,28 @@ impl CodeBuf {
     }
 }
 
+/// Returns `true` if `name` matches the wildcard `pattern`.
+///
+/// Supports `*` as a wildcard that matches any sequence of characters.
+/// - `"user*"` matches `"user"`, `"user_admin"`, `"user_list"`, etc.
+/// - `"*admin"` matches `"admin"`, `"user_admin"`, etc.
+/// - `"user*admin"` matches `"user_admin"`, `"user_super_admin"`, etc.
+/// - `"user"` (no wildcard) matches only `"user"` exactly.
+#[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
+pub(crate) fn matches_wildcard(name: &str, pattern: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        name.starts_with(prefix)
+    } else if let Some(suffix) = pattern.strip_prefix('*') {
+        name.ends_with(suffix)
+    } else if let Some((before, after)) = pattern.split_once('*') {
+        name.starts_with(before)
+            && name.ends_with(after)
+            && name.len() >= before.len() + after.len()
+    } else {
+        name == pattern
+    }
+}
+
 /// Convenience macro for adding a formatted line to a `CodeBuf`.
 ///
 /// Equivalent to `cb.f(format_args!(...))` but shorter.

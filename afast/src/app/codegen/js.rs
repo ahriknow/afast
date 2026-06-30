@@ -13,7 +13,7 @@
     clippy::only_used_in_recursion
 )]
 
-use super::buf::CodeBuf;
+use super::buf::{CodeBuf, matches_wildcard};
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
@@ -3492,12 +3492,15 @@ impl AFast {
     /// and writes them into `dir`. Each service produces one `.js` file.
     /// `calls` selects which transport backends to include (Fetch, Ws, etc.).
     /// When `debug` is true the generated methods log requests and responses.
+    /// When `filter` is `Some`, only services whose names appear in the list
+    /// are generated.
     #[cfg(feature = "js")]
     pub fn generate_js(
         &self,
         dir: &Path,
         calls: &[crate::JsTsCallType],
         debug: bool,
+        filter: Option<&[String]>,
     ) -> Result<(), Error> {
         use std::fs;
 
@@ -3507,6 +3510,11 @@ impl AFast {
 
         for svc in &self.services {
             if svc.name.is_empty() {
+                continue;
+            }
+            if let Some(f) = filter
+                && !f.iter().any(|p| matches_wildcard(&svc.name, p))
+            {
                 continue;
             }
             write_service_js(svc, dir, calls, debug)?;

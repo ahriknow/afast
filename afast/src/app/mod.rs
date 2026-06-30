@@ -184,6 +184,10 @@ pub struct GenerateTarget {
     /// request and response details after each request. For long-connection
     /// handlers, each sent message is also logged. Defaults to `false`.
     pub debug: bool,
+    /// Optional service name filter. When `Some`, only services whose names
+    /// appear in the list will be generated for this target. When `None`,
+    /// all registered services are generated.
+    pub services: Option<Vec<String>>,
 }
 
 /// Configuration for the interactive API documentation endpoint.
@@ -998,15 +1002,24 @@ impl AFast {
         #[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
         if let Some(code_config) = &self.code_config {
             for target in code_config {
+                let filter = target.services.as_deref();
                 match &target.lang {
                     #[cfg(feature = "ts")]
-                    Lang::TS(calls) => self.generate_ts(&target.path, calls, target.debug)?,
+                    Lang::TS(calls) => {
+                        self.generate_ts(&target.path, calls, target.debug, filter)?
+                    }
                     #[cfg(feature = "js")]
-                    Lang::JS(calls) => self.generate_js(&target.path, calls, target.debug)?,
+                    Lang::JS(calls) => {
+                        self.generate_js(&target.path, calls, target.debug, filter)?
+                    }
                     #[cfg(feature = "kt")]
-                    Lang::KT(calls) => self.generate_kt(&target.path, calls, target.debug)?,
+                    Lang::KT(calls) => {
+                        self.generate_kt(&target.path, calls, target.debug, filter)?
+                    }
                     #[cfg(feature = "rs")]
-                    Lang::RS(calls) => self.generate_rs(&target.path, calls, target.debug)?,
+                    Lang::RS(calls) => {
+                        self.generate_rs(&target.path, calls, target.debug, filter)?
+                    }
                     #[allow(unreachable_patterns)]
                     _ => panic!("warning: language generation not enabled"),
                 }

@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-use super::buf::CodeBuf;
+use super::buf::{CodeBuf, matches_wildcard};
 use crate::{AFast, Error, Handler, HandlerMeta, ParamMeta, Service, TagKind, TagMeta};
 use std::path::Path;
 
@@ -2881,12 +2881,15 @@ impl AFast {
     /// the files to `dir`.  Produces one `common.kt` with shared types and
     /// one `{service}.kt` per service.  The `calls` slice controls which
     /// transport methods (Http, Ws, Tcp) are included.
+    /// When `filter` is `Some`, only services whose names appear in the list
+    /// are generated.
     #[cfg(feature = "kt")]
     pub fn generate_kt(
         &self,
         dir: &Path,
         calls: &[crate::KtCallType],
         debug: bool,
+        filter: Option<&[String]>,
     ) -> Result<(), Error> {
         use std::fs;
 
@@ -2897,13 +2900,32 @@ impl AFast {
         let seq64 = cfg!(feature = "seq64");
         let has_ws = calls.iter().any(|c| matches!(c, crate::KtCallType::Ws));
         let has_tcp = calls.iter().any(|c| matches!(c, crate::KtCallType::Tcp));
-        let common = generate_common_kt(&self.services, seq64, has_ws, has_tcp);
+
+        // Filter services for common file generation
+        let filtered_svcs: Vec<Service> = self
+            .services
+            .iter()
+            .filter(|svc| {
+                !svc.name.is_empty()
+                    && filter
+                        .map(|f| f.iter().any(|p| matches_wildcard(&svc.name, p)))
+                        .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+
+        let common = generate_common_kt(&filtered_svcs, seq64, has_ws, has_tcp);
         fs::write(dir.join("common.kt"), &common).map_err(|e| Error::Io {
             message: e.to_string(),
         })?;
 
         for svc in &self.services {
             if svc.name.is_empty() {
+                continue;
+            }
+            if let Some(f) = filter
+                && !f.iter().any(|p| matches_wildcard(&svc.name, p))
+            {
                 continue;
             }
             write_service_kt(svc, dir, calls, debug)?;

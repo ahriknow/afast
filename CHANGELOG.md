@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23]
+
+### Added
+
+- **Service filter for code generation**: `GenerateTarget` gains an optional `services: Option<Vec<String>>` field. When `Some`, only services matching the filter are generated. Supports wildcard patterns: `"user*"` (prefix), `"*admin"` (suffix), `"user*admin"` (contains). Multiple targets can direct different services to different output directories.
+- **`// @ts-nocheck` in generated TypeScript**: Generated `.ts` files now include `// @ts-nocheck` at the top to skip TypeScript type checking.
+
 ## [0.1.22]
 
 ### Fixed
