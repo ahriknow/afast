@@ -51,7 +51,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
+use crate::error::{CODE_HANDLER_NOT_FOUND, CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
 use crate::handler::HandlerInvoker;
 #[cfg(feature = "rate-limit")]
 use crate::rate_limit::{ConnectionContext, RateLimiter};
@@ -160,13 +160,23 @@ pub async fn handle_connection(
     #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
     body_size_limit: usize,
 ) {
+    let peer_addr = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     let peer_ip = stream
         .peer_addr()
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
     #[cfg(feature = "rate-limit")]
-    let mut conn_ctx = ConnectionContext::new(peer_ip.clone());
+    let mut conn_ctx = {
+        let mut ctx = ConnectionContext::new(peer_ip.clone());
+        // Use full peer address (IP:port) for per-connection rate limiting
+        // so that distinct TCP connections from the same IP are independent.
+        ctx.client_ip = peer_addr.clone();
+        ctx
+    };
     let client_ip = peer_ip;
 
     let (mut reader, mut writer) = stream.into_split();
@@ -295,7 +305,7 @@ pub async fn handle_connection(
                     let invoker = match handlers.get(&handler_id) {
                         Some(invoker) => *invoker,
                         None => {
-                            let resp = make_error(req_id, 102, &format!("handler not found (id={})", handler_id));
+                            let resp = make_error(req_id, CODE_HANDLER_NOT_FOUND, &format!("handler not found (id={})", handler_id));
                             let _ = write_frame(&mut writer, &resp).await;
                             continue;
                         }

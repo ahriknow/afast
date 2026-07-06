@@ -39,8 +39,10 @@ pub const CODE_TCP: i64 = -90010;
 pub const CODE_LONG_CONNECTION_NOT_SUPPORTED: i64 = -90011;
 /// Request rejected by rate limiter.
 pub const CODE_RATE_LIMITED: i64 = -90012;
+/// Handler ID not found in dispatch table.
+pub const CODE_HANDLER_NOT_FOUND: i64 = -90013;
 
-const CODE_MIN: i64 = -90012;
+const CODE_MIN: i64 = -90013;
 const CODE_MAX: i64 = -90000;
 
 // Check whether a code falls in the reserved range to prevent

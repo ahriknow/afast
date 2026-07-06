@@ -60,7 +60,7 @@ use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::accept_hdr_async_with_config;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::error::{CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
+use crate::error::{CODE_HANDLER_NOT_FOUND, CODE_MSG_TOO_SHORT, CODE_PAYLOAD_MISMATCH};
 use crate::handler::HandlerInvoker;
 #[cfg(feature = "rate-limit")]
 use crate::rate_limit::{ConnectionContext, RateLimiter};
@@ -251,7 +251,7 @@ pub async fn handle_websocket<S>(
                             let invoker = match handlers.get(&handler_id) {
                                 Some(invoker) => *invoker,
                                 None => {
-                                    let _ = sink.send(make_error(req_id, 102, &format!("handler not found (id={})", handler_id))).await;
+                                    let _ = sink.send(make_error(req_id, CODE_HANDLER_NOT_FOUND, &format!("handler not found (id={})", handler_id))).await;
                                     continue;
                                 }
                             };
@@ -459,6 +459,10 @@ pub async fn handle_connection(
     body_size_limit: usize,
     allowed_origins: Vec<String>,
 ) {
+    let peer_addr = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     let peer_ip = stream
         .peer_addr()
         .map(|a| a.ip().to_string())
@@ -505,7 +509,13 @@ pub async fn handle_connection(
     };
 
     #[cfg(feature = "rate-limit")]
-    let conn_ctx = Some(ConnectionContext::new(peer_ip.clone()));
+    let conn_ctx = {
+        let mut ctx = ConnectionContext::new(peer_ip.clone());
+        // Use full peer address (IP:port) for per-connection rate limiting
+        // so that distinct WS connections from the same IP are independent.
+        ctx.client_ip = peer_addr;
+        Some(ctx)
+    };
     let client_ip = peer_ip.clone();
 
     handle_websocket(

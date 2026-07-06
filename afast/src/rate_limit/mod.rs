@@ -272,6 +272,74 @@ impl InMemoryStore {
         });
         Self { data }
     }
+
+    /// Atomically refills and consumes a token in a single write-lock
+    /// acquisition. This eliminates the race condition where concurrent
+    /// requests could both read the same token count and both pass.
+    async fn try_consume_token_inner(
+        &self,
+        tokens_key: &str,
+        refill_key: &str,
+        max_tokens: u64,
+        rate: f64,
+        ttl_secs: u64,
+    ) -> bool {
+        let now = now_secs();
+        let mut map = self.data.write().await;
+
+        // Expired check helper
+        let is_expired = |exp: &Option<u64>| exp.is_some_and(|e| now >= e);
+
+        // Get current tokens (reset if expired)
+        let current_tokens = match map.get(tokens_key) {
+            Some((val, Some(exp))) if now < *exp => *val,
+            Some((_, Some(_))) => {
+                // expired — will reset below
+                0
+            }
+            Some((val, None)) => *val,
+            None => 0,
+        };
+
+        // Get last refill time (reset if expired)
+        let last_refill = match map.get(refill_key) {
+            Some((val, Some(exp))) if now < *exp => *val,
+            _ => 0,
+        };
+
+        // Calculate new token count
+        let new_tokens = if last_refill == 0 {
+            max_tokens as f64
+        } else {
+            let elapsed = now.saturating_sub(last_refill) as f64;
+            (current_tokens as f64 + elapsed * rate).min(max_tokens as f64)
+        };
+
+        let tokens_exp = if ttl_secs > 0 {
+            Some(now + ttl_secs)
+        } else {
+            None
+        };
+        let refill_exp = if ttl_secs > 0 {
+            Some(now + ttl_secs)
+        } else {
+            None
+        };
+
+        // Refill tokens
+        map.insert(tokens_key.to_string(), (new_tokens as u64, tokens_exp));
+        map.insert(refill_key.to_string(), (now, refill_exp));
+
+        // Consume one token
+        if let Some(entry) = map.get_mut(tokens_key)
+            && !is_expired(&entry.1)
+            && entry.0 > 0
+        {
+            entry.0 -= 1;
+            return true;
+        }
+        false
+    }
 }
 
 impl Default for InMemoryStore {
@@ -364,6 +432,22 @@ impl RateLimitStore for InMemoryStore {
                 entry.1 = Some(now + ttl_secs);
             }
             entry.0
+        })
+    }
+
+    /// Overrides the default `try_consume_token` with a truly atomic
+    /// implementation using a single write-lock acquisition.
+    fn try_consume_token<'a>(
+        &'a self,
+        tokens_key: &'a str,
+        refill_key: &'a str,
+        max_tokens: u64,
+        rate: f64,
+        ttl_secs: u64,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move {
+            self.try_consume_token_inner(tokens_key, refill_key, max_tokens, rate, ttl_secs)
+                .await
         })
     }
 }
@@ -469,11 +553,19 @@ impl ConnectionContext {
 
     /// Returns a stable connection ID string for this context.
     ///
-    /// For per-connection rate limiting, the ID is derived from the client IP
-    /// only (not a counter), so the same connection always maps to the same key.
+    /// For per-connection rate limiting, the ID includes the full peer
+    /// address (IP:port) when available, so that distinct connections
+    /// from the same IP are rate-limited independently.
     #[allow(dead_code)]
     fn connection_id(&self) -> String {
         self.client_ip.clone()
+    }
+
+    /// Sets a unique connection identifier (e.g. `ip:port`) for
+    /// per-connection rate limiting in WS/TCP transports.
+    #[allow(dead_code)]
+    pub fn set_connection_id(&mut self, id: String) {
+        self.client_ip = id;
     }
 
     /// Extracts the rate-limit key and an optional per-connection identifier.

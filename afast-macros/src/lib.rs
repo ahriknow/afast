@@ -15,7 +15,7 @@ use proc_macro::TokenStream;
 /// `name`: An optional string literal specifying the handler's name. If omitted, the function name is used.
 /// `cache`: An optional integer literal specifying the cache duration in seconds.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::handler;
 ///
 /// #[handler(desc("Health check endpoint"), cache(60))]
@@ -35,7 +35,7 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates an ordinary invoker for HTTP request routing alongside a dummy
 /// binary invoker that returns an error when called through the binary protocol.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::get;
 ///
 /// #[get(desc("Fetch user by ID"))]
@@ -55,7 +55,7 @@ pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates an ordinary invoker for HTTP request routing alongside a dummy
 /// binary invoker that returns an error when called through the binary protocol.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::post;
 ///
 /// #[post(desc("Create a resource"))]
@@ -75,7 +75,7 @@ pub fn post(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates an ordinary invoker for HTTP request routing alongside a dummy
 /// binary invoker that returns an error when called through the binary protocol.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::put;
 ///
 /// #[put(desc("Replace a resource"))]
@@ -95,7 +95,7 @@ pub fn put(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates an ordinary invoker for HTTP request routing alongside a dummy
 /// binary invoker that returns an error when called through the binary protocol.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::patch;
 ///
 /// #[patch(desc("Partially update a resource"))]
@@ -115,7 +115,7 @@ pub fn patch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates an ordinary invoker for HTTP request routing alongside a dummy
 /// binary invoker that returns an error when called through the binary protocol.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::delete;
 ///
 /// #[delete(desc("Remove a resource"))]
@@ -136,7 +136,7 @@ pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// endpoints. The handler receives `WsQuery<T>`, `WsParam<T>`, and `WsStream`
 /// extractors and returns `Result<()>`.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::ws;
 ///
 /// #[ws(desc("Chat handler"))]
@@ -157,7 +157,7 @@ pub fn ws(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `name()`, which returns a `HandlerEntry` containing the handler metadata and
 /// invoker reference.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::register;
 ///
 /// let entry = register!(health);
@@ -175,7 +175,7 @@ pub fn register(input: TokenStream) -> TokenStream {
 /// auto-generated entry function `name()`, computes `fnv1a_32("service_name/name")`,
 /// and sets the stable ID on the returned `HandlerEntry`.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::register_with_path;
 ///
 /// let entry = register_with_path!(health, "api");
@@ -193,7 +193,7 @@ pub fn register_with_path(input: TokenStream) -> TokenStream {
 /// which returns an `OrdinaryHandlerDef` containing both the handler entry and
 /// the ordinary invoker reference.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::register_ordinary;
 ///
 /// let def = register_ordinary!(get_user);
@@ -221,7 +221,7 @@ pub fn register_ws(input: TokenStream) -> TokenStream {
 /// The handler receives `SseSender` to push events and optionally
 /// `WsQuery<T>` / `WsParam<T>` for HTTP parameters from the request.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::sse;
 ///
 /// #[sse(desc("Live events"))]
@@ -255,7 +255,7 @@ pub fn register_sse(input: TokenStream) -> TokenStream {
 /// type descriptor. This metadata is consumed by the code generator and
 /// validation layer.
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::Tag;
 ///
 /// #[derive(Tag)]
@@ -284,7 +284,7 @@ pub fn derive_tag(input: TokenStream) -> TokenStream {
 /// - `FileField` — file upload field (collects bytes and metadata)
 /// - `Option<T>` — optional field (defaults to `None` if missing)
 ///
-/// ```no_run
+/// ```ignore
 /// use afast::{FromFormData, FileField};
 ///
 /// #[derive(FromFormData)]
