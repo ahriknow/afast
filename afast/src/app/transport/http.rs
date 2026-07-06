@@ -1335,9 +1335,11 @@ async fn handle_api(
             resp.push(0u8);
             resp.extend_from_slice(&0i64.to_le_bytes());
             resp.extend_from_slice(&data);
+            let content_length = resp.len();
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "application/octet-stream")
+                .header("content-length", content_length.to_string())
                 .body(Full::new(Bytes::from(resp)).boxed())
                 .expect("valid response builder"))
         }
@@ -1347,7 +1349,17 @@ async fn handle_api(
             } else {
                 e.message()
             };
-            error_response(StatusCode::OK, e.code(), msg)
+            // Map error codes to appropriate HTTP status codes
+            let status = match e.code() {
+                crate::error::CODE_RATE_LIMITED => StatusCode::TOO_MANY_REQUESTS,
+                crate::error::CODE_LONG_CONNECTION_NOT_SUPPORTED => StatusCode::BAD_REQUEST,
+                crate::error::CODE_INVALID_PARAM => StatusCode::BAD_REQUEST,
+                crate::error::CODE_SERIALIZE => StatusCode::BAD_REQUEST,
+                crate::error::CODE_HANDLER => StatusCode::INTERNAL_SERVER_ERROR,
+                crate::error::CODE_STATE_NOT_FOUND => StatusCode::INTERNAL_SERVER_ERROR,
+                _ => StatusCode::OK,
+            };
+            error_response(status, e.code(), msg)
         }
     }
 }
@@ -2097,9 +2109,11 @@ fn error_response(
     resp.push(1u8);
     resp.extend_from_slice(&code.to_le_bytes());
     resp.extend_from_slice(msg_bytes);
+    let body_len = resp.len();
     Ok(Response::builder()
         .status(status)
         .header("content-type", "application/octet-stream")
+        .header("content-length", body_len.to_string())
         .body(Full::new(Bytes::from(resp)).boxed())
         .expect("valid response builder"))
 }

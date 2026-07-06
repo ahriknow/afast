@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.24]
+
+### Fixed
+
+- **`set_codegen_marker` panic on double call**: Changed from `OnceLock::set().expect()` to `OnceLock::get_or_init()`, preventing panics when called multiple times (e.g., in tests). The first call wins; subsequent calls are no-ops.
+- **CORS credentials + wildcard origin**: `CorsConfig::allow_credentials(true)` now validates in debug builds that `allowed_origins` does not contain `"*"`, which violates the CORS specification (`Access-Control-Allow-Credentials: true` cannot be combined with `Access-Control-Allow-Origin: *`).
+- **Binary API error responses always returned HTTP 200**: `handle_api` now maps error codes to appropriate HTTP status codes: `CODE_RATE_LIMITED` → `429 Too Many Requests`, `CODE_INVALID_PARAM`/`CODE_SERIALIZE`/`CODE_LONG_CONNECTION_NOT_SUPPORTED` → `400 Bad Request`, `CODE_HANDLER`/`CODE_STATE_NOT_FOUND` → `500 Internal Server Error`. Previously all errors returned `200 OK` with the error encoded in the binary body, which confused monitoring tools and proxies.
+- **Missing `Content-Length` header in binary API responses**: Both success and error responses from `POST /_api` now include `Content-Length` header, improving compatibility with proxies and HTTP clients.
+- **`RateLimitKey::Connection` created a new ID per `check()` call**: `ConnectionContext` generated a new monotonic counter on each `extract_key()` call, defeating per-connection rate limiting. Changed to use a stable key derived from the client IP, so the same connection maps to the same rate-limit bucket.
+
 ## [0.1.23]
 
 ### Added

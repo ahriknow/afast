@@ -21,13 +21,12 @@ static CODEGEN_MARKER: OnceLock<String> = OnceLock::new();
 /// Sets the code-generation marker. Must be called once at application
 /// startup, before any code generation runs.
 ///
-/// # Panics
-///
-/// Panics if called more than once.
+/// If called more than once, the marker is not updated and the original
+/// value is preserved (no panic).
 pub fn set_codegen_marker(marker: &str) {
-    CODEGEN_MARKER
-        .set(marker.to_string())
-        .expect("codegen marker already set");
+    // Use get_or_init pattern: only set if not already initialized.
+    // This prevents panics when called multiple times (e.g., in tests).
+    CODEGEN_MARKER.get_or_init(|| marker.to_string());
 }
 
 /// Returns the code-generation marker, or `"afast"` if never set.

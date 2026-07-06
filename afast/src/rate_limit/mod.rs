@@ -456,8 +456,6 @@ pub struct ConnectionContext {
     pub client_ip: String,
     /// Header values cached at connection/handshake time.
     pub header_cache: HashMap<String, String>,
-    /// Monotonically increasing counter used to generate unique connection IDs.
-    conn_counter: u64,
 }
 
 impl ConnectionContext {
@@ -466,15 +464,16 @@ impl ConnectionContext {
         Self {
             client_ip,
             header_cache: HashMap::new(),
-            conn_counter: 0,
         }
     }
 
-    /// Returns a unique connection ID string for this context.
+    /// Returns a stable connection ID string for this context.
+    ///
+    /// For per-connection rate limiting, the ID is derived from the client IP
+    /// only (not a counter), so the same connection always maps to the same key.
     #[allow(dead_code)]
-    fn next_conn_id(&mut self) -> String {
-        self.conn_counter += 1;
-        format!("{}#{}", self.client_ip, self.conn_counter)
+    fn connection_id(&self) -> String {
+        self.client_ip.clone()
     }
 
     /// Extracts the rate-limit key and an optional per-connection identifier.
@@ -488,7 +487,10 @@ impl ConnectionContext {
             RateLimitKey::Ip => Some((self.client_ip.clone(), None)),
             RateLimitKey::Header(name) => self.header_cache.get(*name).cloned().map(|v| (v, None)),
             RateLimitKey::Connection => {
-                let conn_id = self.next_conn_id();
+                // Use a stable connection ID based on client IP.
+                // For HTTP requests, each request is a separate "connection".
+                // For WS/TCP, the connection ID should be set externally.
+                let conn_id = self.connection_id();
                 Some((self.client_ip.clone(), Some(conn_id)))
             }
             RateLimitKey::Global => Some(("_global".to_string(), None)),

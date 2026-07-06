@@ -146,6 +146,10 @@ impl SseSender {
     }
 
     /// Closes the SSE stream. The client will see the connection close.
+    ///
+    /// Sends an empty event which is used as a sentinel value to signal
+    /// the stream to end. The handler can continue executing after
+    /// calling this method, but no more events will be delivered.
     pub async fn close(&self) {
         let _ = self.tx.send(String::new()).await;
     }

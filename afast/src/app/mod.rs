@@ -350,7 +350,16 @@ impl CorsConfig {
     }
 
     /// Enables `Access-Control-Allow-Credentials`.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `allow_credentials` is `true` but
+    /// `allowed_origins` contains `"*"`, which violates the CORS spec.
     pub fn allow_credentials(mut self, allow: bool) -> Self {
+        debug_assert!(
+            !(allow && self.allowed_origins.contains(&"*".to_string())),
+            "CORS: allow_credentials cannot be true when allowed_origins contains \"*\""
+        );
         self.allow_credentials = allow;
         self
     }
