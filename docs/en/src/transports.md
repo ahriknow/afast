@@ -102,7 +102,7 @@ struct UserQuery { page: i64, size: i64 }
 #[derive(Serialize)]
 struct UserResponse { id: i64, name: String }
 
-#[get(":id")]
+#[get(desc("Get user info"))]
 async fn get_user(
     state: State<AppState>,
     param: Param<UserPath>,

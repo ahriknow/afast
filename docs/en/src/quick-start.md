@@ -60,6 +60,24 @@ async fn main() {
             counter: Arc::new(Mutex::new(0)),
         })
         .service(svc)
+        .generate(vec![
+            GenerateTarget {
+                debug: true,
+                lang: Lang::TS(vec![
+                    JsTsCallType::Fetch,
+                ]),
+                path: "./client".into(),
+                services: None,
+            },
+            GenerateTarget {
+                debug: true,
+                lang: Lang::JS(vec![
+                    JsTsCallType::Ws,
+                ]),
+                path: "./client".into(),
+                services: None,
+            },
+        ])
         .http("0.0.0.0:5000")
         .run().await.unwrap();
 }
