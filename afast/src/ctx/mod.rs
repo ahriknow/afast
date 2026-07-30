@@ -7,7 +7,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! // In a hook:
 //! request_ctx.insert(RequestId("abc-123".into()));
 //!

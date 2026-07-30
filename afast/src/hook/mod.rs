@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use afast::hook::{Hook, RequestContext, RequestGuard};
 //!
 //! struct Timing;

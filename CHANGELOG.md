@@ -2,6 +2,12 @@
 
 ## [0.1.24]
 
+### Added
+
+- **C# / .NET client code generator** (`cs` feature): New C# client code generation supporting `NetCallType::Http` (`System.Net.Http.HttpClient`), `NetCallType::Ws` (`System.Net.WebSockets.ClientWebSocket`), and `NetCallType::Tcp` (`System.Net.Sockets.TcpClient`). Generates complete class/record definitions with XML doc comments, nested `Apis` class structure matching Kotlin's `inner class` pattern, binary protocol `BinaryWriter`/`BinaryReader`, `AfastSocket` long-connection handle, and ordinary HTTP/WS/SSE route methods. Available via `Lang::CS(vec![NetCallType::Http, NetCallType::Ws, NetCallType::Tcp])` in `GenerateTarget` or `/code/{service}/cs` HTTP endpoint. Requires .NET 10+.
+- **Dynamic `Transport` enum in generated C# clients**: The `Transport` enum now only includes the transport types actually requested via `NetCallType`, rather than always emitting all three variants.
+- **Conditional `using` directives in generated C# code**: `using System.Net.Sockets` and `using System.Net.WebSockets` are now only included when the corresponding transport types are requested. The common file (`Common.cs`) no longer includes unnecessary `using` directives.
+
 ### Fixed
 
 - **`set_codegen_marker` panic on double call**: Changed from `OnceLock::set().expect()` to `OnceLock::get_or_init()`, preventing panics when called multiple times (e.g., in tests). The first call wins; subsequent calls are no-ops.

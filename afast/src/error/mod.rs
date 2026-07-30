@@ -192,7 +192,7 @@ impl std::error::Error for Error {}
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use afast::AFastError;
 ///
 /// enum MyError {

@@ -459,7 +459,7 @@ pub async fn handle_connection(
     body_size_limit: usize,
     allowed_origins: Vec<String>,
 ) {
-    let peer_addr = stream
+    let _peer_addr = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
@@ -513,7 +513,7 @@ pub async fn handle_connection(
         let mut ctx = ConnectionContext::new(peer_ip.clone());
         // Use full peer address (IP:port) for per-connection rate limiting
         // so that distinct WS connections from the same IP are independent.
-        ctx.client_ip = peer_addr;
+        ctx.client_ip = _peer_addr;
         Some(ctx)
     };
     let client_ip = peer_ip.clone();

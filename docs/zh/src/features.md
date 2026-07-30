@@ -17,6 +17,7 @@
 | `js` | JavaScript 客户端生成 (ESM + JSDoc) | — |
 | `kt` | Kotlin 客户端生成 | — |
 | `rs` | Rust 客户端生成 (Tokio 异步 / std 同步 TCP) | — |
+| `cs` | C# / .NET 客户端生成 (HttpClient / WebSocket / TCP) | — |
 | `code` | 按需代码生成，端点 `/code/{service}/{lang}` | `http` |
 
 ## 文档

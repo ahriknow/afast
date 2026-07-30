@@ -2,13 +2,13 @@
 
 [简体中文](./README_CN.md) | English | [📖 Documentation](https://afast.ahriknow.help)
 
-A high-performance Rust web framework. Annotate functions with `#[handler]` — the framework auto-registers routes, dispatches requests via a compact binary protocol, and generates TypeScript / JavaScript / Kotlin / Rust client code with one click.
+A high-performance Rust web framework. Annotate functions with `#[handler]` — the framework auto-registers routes, dispatches requests via a compact binary protocol, and generates TypeScript / JavaScript / Kotlin / Rust / C# client code with one click.
 
 ## Features
 
 - **Zero Route Definitions** — `#[handler]` annotation, no manual routing table
 - **Compact Binary Protocol** — smaller and faster than JSON
-- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust clients
+- **Auto Code Generation** — TypeScript / JavaScript / Kotlin / Rust / C# clients
 - **Interactive API Docs** — built-in Web docs with online testing
 - **Multiple Transports** — WebSocket, HTTP/1.1, HTTP/2, TCP
 - **TLS / HTTPS** — rustls with ALPN for HTTP/2, hot-reload via channel
@@ -26,7 +26,7 @@ A high-performance Rust web framework. Annotate functions with `#[handler]` — 
 
 ```toml
 [dependencies]
-afast = { version = "0.1.23", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.24", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

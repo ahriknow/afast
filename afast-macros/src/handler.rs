@@ -1524,7 +1524,7 @@ fn type_to_string(ty: &Type) -> String {
 /// The handler function receives `WsQuery<T>`, `WsParam<T>`, and
 /// `WsSender`/`WsReceiver` extractors, and returns `Result<()>`.
 ///
-/// ```ignore
+/// ```no_run
 /// use afast::ws;
 ///
 /// #[ws(desc("Chat handler"))]

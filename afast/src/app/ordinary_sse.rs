@@ -9,7 +9,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! #[sse(desc("Live notifications"))]
 //! async fn notifications(sender: SseSender) -> afast::Result<()> {
 //!     for i in 0..10 {

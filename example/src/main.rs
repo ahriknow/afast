@@ -60,7 +60,7 @@
 
 use afast::{
     AFast, Algorithm, CorsConfig, DocConfig, GenerateTarget, JsTsCallType, KtCallType, Lang,
-    RateLimitConfig, RateLimitKey, RateLimitPolicy, RsCallType, service,
+    NetCallType, RateLimitConfig, RateLimitKey, RateLimitPolicy, RsCallType, service,
 };
 
 #[cfg(feature = "tls")]
@@ -463,6 +463,17 @@ async fn main() {
                 debug: true,
                 lang: Lang::RS(vec![RsCallType::TcpAsync]),
                 path: "./example/src/bin/client".into(),
+                services: None,
+            },
+            // C# / .NET client
+            GenerateTarget {
+                debug: true,
+                lang: Lang::CS(vec![
+                    // NetCallType::Http, // System.Net.Http.HttpClient
+                    NetCallType::Ws,  // System.Net.WebSockets.ClientWebSocket
+                    NetCallType::Tcp, // System.Net.Sockets.TcpClient
+                ]),
+                path: "./client".into(),
                 services: None,
             },
         ])

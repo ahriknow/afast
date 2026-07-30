@@ -1501,12 +1501,37 @@ fn handle_code(
                 "rust code generation is not enabled (rebuild with the 'rs' feature)",
             );
         }
+        #[cfg(feature = "cs")]
+        "cs" => {
+            let calls: Vec<crate::NetCallType> = raw_calls
+                .iter()
+                .filter_map(|s| crate::NetCallType::parse(s))
+                .collect();
+            let calls = if calls.is_empty() {
+                vec![
+                    crate::NetCallType::Http,
+                    crate::NetCallType::Ws,
+                    crate::NetCallType::Tcp,
+                ]
+            } else {
+                calls
+            };
+            Some((crate::Lang::CS(calls), "text/x-csharp; charset=utf-8"))
+        }
+        #[cfg(not(feature = "cs"))]
+        "cs" => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                CODE_HTTP,
+                "csharp code generation is not enabled (rebuild with the 'cs' feature)",
+            );
+        }
         _ => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 CODE_HTTP,
                 &format!(
-                    "unsupported lang '{}', expected 'ts', 'js', 'kt', or 'rs'",
+                    "unsupported lang '{}', expected 'ts', 'js', 'kt', 'rs', or 'cs'",
                     lang_str
                 ),
             );

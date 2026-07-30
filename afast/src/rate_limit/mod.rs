@@ -113,7 +113,7 @@ impl RateLimitConfig {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// let config = RateLimitConfig::new()
     ///     .store(Arc::new(MyRedisStore::new("redis://localhost")));
     /// ```

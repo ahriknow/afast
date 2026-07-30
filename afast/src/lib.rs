@@ -10,7 +10,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```ignore
+//! ```no_run
 //! use afast::{AFast, handler, service, State, Data, Result};
 //! use afast::{AFastDeserialize, AFastSerialize, Tag};
 //!
@@ -87,7 +87,7 @@
 //! A **service** groups handlers into a namespace. Each service generates a
 //! separate client code file. Use the [`service!`] macro:
 //!
-//! ```ignore
+//! ```no_run
 //! let svc = service!("api", "My API" => {
 //!     h(health),
 //!     group("user" => {
@@ -103,7 +103,7 @@
 //! using `#[get]`, `#[post]`, `#[put]`, `#[delete]`, `#[patch]` macros.
 //! These use JSON request/response bodies instead of the binary protocol.
 //!
-//! ```ignore
+//! ```no_run
 //! use afast::{get, post, Query, Param, Body, Json, HttpResult};
 //!
 //! #[get(desc("List users"))]
@@ -122,7 +122,7 @@
 //! All handlers return [`Result<T>`], which is `Result<T, Error>`.
 //! Use [`Error::custom`] to create user-defined errors:
 //!
-//! ```ignore
+//! ```no_run
 //! return Err(Error::custom(404, "user not found"));
 //! ```
 //!
@@ -211,7 +211,7 @@ pub use afastdata::{AFastDeserialize, AFastSerialize};
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// #[handler(desc("Uses shared state"))]
 /// async fn my_handler(
 ///     state: afast::State<AppState>,
@@ -233,7 +233,7 @@ pub struct State<T: 'static>(pub &'static T);
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// #[handler(desc("Handler with request context"))]
 /// async fn my_handler(
 ///     ctx: afast::Ctx<RequestId>,
@@ -253,7 +253,7 @@ pub struct Ctx<T>(pub T);
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// #[derive(AFastDeserialize, Tag)]
 /// #[tag("Request body")]
 /// struct MyReq { name: String }
@@ -279,7 +279,7 @@ pub struct Data<T>(pub T);
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// #[derive(AFastDeserialize, Tag)]
 /// #[tag("Credentials")]
 /// struct Auth { token: i64 }
@@ -440,7 +440,7 @@ pub trait FromFormData: Sized {
 ///
 /// # Without generic (raw multer access)
 ///
-/// ```ignore
+/// ```no_run
 /// #[post(desc("Upload file"))]
 /// async fn upload(mut form: Multipart) -> HttpResult<Json<UploadResult>> {
 ///     while let Some(mut field) = form.next_field().await? {
@@ -452,7 +452,7 @@ pub trait FromFormData: Sized {
 ///
 /// # With generic (typed extraction via `FromFormData`)
 ///
-/// ```ignore
+/// ```no_run
 /// struct UploadForm {
 ///     name: String,
 ///     file: FileField,
@@ -611,7 +611,7 @@ pub struct Status(pub hyper::StatusCode);
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// // 302 Found (default)
 /// Redirect::temporary("/login")
 ///
@@ -1016,4 +1016,4 @@ pub use app::ordinary_sse::{SseEvent, SseSender};
 pub use app::ordinary_ws;
 #[cfg(feature = "ordinary-ws")]
 pub use app::ordinary_ws::{WsMessage, WsParam, WsQuery, WsReceiver, WsSender};
-pub use app::{GenerateTarget, JsTsCallType, Lang};
+pub use app::{GenerateTarget, JsTsCallType, Lang, NetCallType};

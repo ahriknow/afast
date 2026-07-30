@@ -3,7 +3,7 @@
 ## 静态生成（编译时文件输出）
 
 ```rust
-use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType};
+use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType, NetCallType};
 
 let app = AFast::new()
     .service(api_svc)
@@ -18,6 +18,11 @@ let app = AFast::new()
             path: "./src/bin/client".into(),
             debug: true,
         },
+        GenerateTarget {
+            lang: Lang::CS(vec![NetCallType::Http, NetCallType::Ws, NetCallType::Tcp]),
+            path: "./client".into(),
+            debug: true,
+        },
     ]);
 ```
 
@@ -28,6 +33,7 @@ GET /code/api/ts?call=fetch,ws
 GET /code/api/js?call=fetch,ws
 GET /code/pay/kt?call=http,ws,tcp
 GET /code/api/rs?call=tcp-async
+GET /code/api/cs?call=http,ws,tcp
 ```
 
 ## 支持的传输类型
@@ -59,6 +65,14 @@ GET /code/api/rs?call=tcp-async
 |----|-----|
 | `tcp-async` | `tokio::net::TcpStream` (异步) |
 | `tcp-sync` | `std::net::TcpStream` (同步) |
+
+### C# / .NET
+
+| 值 | API |
+|----|-----|
+| `http` / `fetch` | `System.Net.Http.HttpClient` |
+| `ws` | `System.Net.WebSockets.ClientWebSocket` |
+| `tcp` | `System.Net.Sockets.TcpClient` |
 
 ## 客户端使用
 
@@ -146,6 +160,25 @@ let users: ListUsersResp = client.call(1, &req).await?;
 // 同步 TCP 客户端
 let mut client = AfastSocketSync::connect("localhost:4001")?;
 let users: ListUsersResp = client.call(1, &req)?;
+```
+
+### C# / .NET
+
+```csharp
+// HTTP 模式
+await using var client = new ApiClient("localhost", 5001, false, ApiClient.Transport.Http);
+var users = await client.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// WebSocket 模式
+await using var wsClient = new ApiClient("localhost", 3001, false, ApiClient.Transport.Ws);
+var result = await wsClient.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// TCP 模式
+await using var tcpClient = new ApiClient("localhost", 4001, false, ApiClient.Transport.Tcp);
+var result = await tcpClient.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// Custom 提取器
+client.Customs["AuthCustom"] = async () => new AuthCustom { Token = "my-token" };
 ```
 
 客户端传输模式在构造时确定。

@@ -3,7 +3,7 @@
 ## Static Generation (compile-time file output)
 
 ```rust
-use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType};
+use afast::{GenerateTarget, Lang, JsTsCallType, RsCallType, NetCallType};
 
 let app = AFast::new()
     .service(api_svc)
@@ -18,6 +18,11 @@ let app = AFast::new()
             path: "./src/bin/client".into(),
             debug: true,
         },
+        GenerateTarget {
+            lang: Lang::CS(vec![NetCallType::Http, NetCallType::Ws, NetCallType::Tcp]),
+            path: "./client".into(),
+            debug: true,
+        },
     ]);
 ```
 
@@ -28,6 +33,7 @@ GET /code/api/ts?call=fetch,ws
 GET /code/api/js?call=fetch,ws
 GET /code/pay/kt?call=http,ws,tcp
 GET /code/api/rs?call=tcp-async
+GET /code/api/cs?call=http,ws,tcp
 ```
 
 ## Supported Transport Types
@@ -59,6 +65,14 @@ GET /code/api/rs?call=tcp-async
 |-------|-----|
 | `tcp-async` | `tokio::net::TcpStream` (async) |
 | `tcp-sync` | `std::net::TcpStream` (sync) |
+
+### C# / .NET
+
+| Value | API |
+|-------|-----|
+| `http` / `fetch` | `System.Net.Http.HttpClient` |
+| `ws` | `System.Net.WebSockets.ClientWebSocket` |
+| `tcp` | `System.Net.Sockets.TcpClient` |
 
 ## Client Usage
 
@@ -146,6 +160,25 @@ let users: ListUsersResp = client.call(1, &req).await?;
 // Sync TCP client
 let mut client = AfastSocketSync::connect("localhost:4001")?;
 let users: ListUsersResp = client.call(1, &req)?;
+```
+
+### C# / .NET
+
+```csharp
+// HTTP mode
+await using var client = new ApiClient("localhost", 5001, false, ApiClient.Transport.Http);
+var users = await client.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// WebSocket mode
+await using var wsClient = new ApiClient("localhost", 3001, false, ApiClient.Transport.Ws);
+var result = await wsClient.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// TCP mode
+await using var tcpClient = new ApiClient("localhost", 4001, false, ApiClient.Transport.Tcp);
+var result = await tcpClient.Apis.User.ListUsers(new UserListUsersRequest { Page = 1, Size = 20 });
+
+// Custom extractors
+client.Customs["AuthCustom"] = async () => new AuthCustom { Token = "my-token" };
 ```
 
 The client transport mode is fixed at construction time.

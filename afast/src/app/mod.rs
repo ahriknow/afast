@@ -142,6 +142,38 @@ impl RsCallType {
     }
 }
 
+/// Transport protocol variant for .NET / C# generated clients.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NetCallType {
+    /// HTTP via `System.Net.Http.HttpClient`.
+    Http,
+    /// WebSocket via `System.Net.WebSockets.ClientWebSocket`.
+    Ws,
+    /// TCP via `System.Net.Sockets.TcpClient`.
+    Tcp,
+}
+
+impl NetCallType {
+    /// Parses a call-type string from the `?call=` query parameter.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "http" | "fetch" => Some(NetCallType::Http),
+            "ws" => Some(NetCallType::Ws),
+            "tcp" => Some(NetCallType::Tcp),
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical string representation for use in query parameters.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NetCallType::Http => "http",
+            NetCallType::Ws => "ws",
+            NetCallType::Tcp => "tcp",
+        }
+    }
+}
+
 /// Target language for client code generation.
 pub enum Lang {
     /// TypeScript (`.ts` files with full type annotations).
@@ -168,6 +200,12 @@ pub enum Lang {
     /// Stub variant when the `rs` feature is disabled.
     #[cfg(not(feature = "rs"))]
     RS,
+    /// C# / .NET (`.cs` files with full type annotations).
+    #[cfg(feature = "cs")]
+    CS(Vec<NetCallType>),
+    /// Stub variant when the `cs` feature is disabled.
+    #[cfg(not(feature = "cs"))]
+    CS,
 }
 
 /// Specifies a code generation output target.
@@ -257,7 +295,7 @@ impl Default for DocConfig {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// AFast::new()
 ///     .cors(CorsConfig::permissive())
 ///     .http("0.0.0.0:5000")
@@ -391,7 +429,7 @@ pub struct TlsConfig {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// // Reload using the original paths (re-read cert files)
 /// sender.send(TlsReloadMessage::default()).unwrap();
 ///
@@ -433,7 +471,7 @@ pub fn build_tls_acceptor(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// let app = AFast::new()
 ///     .state(AppState { db_url: "localhost".into() })
 ///     .service(api_svc)
@@ -660,7 +698,7 @@ impl AFast {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// AFast::new()
     ///     .security_headers(vec![
     ///         ("x-content-type-options", "nosniff"),
@@ -682,7 +720,7 @@ impl AFast {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use afast::app::CorsConfig;
     ///
     /// AFast::new()
@@ -752,7 +790,7 @@ impl AFast {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// AFast::new()
     ///     .ws_origins(vec!["https://example.com", "https://app.example.com"])
     ///     .ws("0.0.0.0:3000")
@@ -798,7 +836,7 @@ impl AFast {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```no_run
     /// let (reload_tx, reload_rx) = tokio::sync::broadcast::channel(1);
     ///
     /// let app = AFast::new()
@@ -1028,6 +1066,10 @@ impl AFast {
                     #[cfg(feature = "rs")]
                     Lang::RS(calls) => {
                         self.generate_rs(&target.path, calls, target.debug, filter)?
+                    }
+                    #[cfg(feature = "cs")]
+                    Lang::CS(calls) => {
+                        self.generate_cs(&target.path, calls, target.debug, filter)?
                     }
                     #[allow(unreachable_patterns)]
                     _ => panic!("warning: language generation not enabled"),

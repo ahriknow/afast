@@ -160,7 +160,7 @@ pub async fn handle_connection(
     #[cfg(feature = "rate-limit")] handler_names: HashMap<u32, String>,
     body_size_limit: usize,
 ) {
-    let peer_addr = stream
+    let _peer_addr = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
@@ -174,7 +174,7 @@ pub async fn handle_connection(
         let mut ctx = ConnectionContext::new(peer_ip.clone());
         // Use full peer address (IP:port) for per-connection rate limiting
         // so that distinct TCP connections from the same IP are independent.
-        ctx.client_ip = peer_addr.clone();
+        ctx.client_ip = _peer_addr.clone();
         ctx
     };
     let client_ip = peer_ip;

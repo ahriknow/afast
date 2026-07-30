@@ -36,6 +36,10 @@ pub fn generate_code(
         Lang::RS(calls) => Ok(super::rs::generate_service_rs(svc, calls, false)),
         #[cfg(not(feature = "rs"))]
         Lang::RS => Err(CodeError::LangNotEnabled("rs".to_string())),
+        #[cfg(feature = "cs")]
+        Lang::CS(calls) => Ok(super::cs::generate_service_cs(svc, calls, false)),
+        #[cfg(not(feature = "cs"))]
+        Lang::CS => Err(CodeError::LangNotEnabled("cs".to_string())),
     }
 }
 

@@ -2,13 +2,13 @@
 
 简体中文 | [English](./README.md) | [📖 文档](https://afast.ahriknow.help)
 
-高性能 Rust Web 后端框架。用 `#[handler]` 标注函数即可——框架自动注册路由、通过紧凑二进制协议分发请求，并一键生成 TypeScript / JavaScript / Kotlin / Rust 客户端代码。
+高性能 Rust Web 后端框架。用 `#[handler]` 标注函数即可——框架自动注册路由、通过紧凑二进制协议分发请求，并一键生成 TypeScript / JavaScript / Kotlin / Rust / C# 客户端代码。
 
 ## 特性
 
 - **零路由定义** — `#[handler]` 标注函数，无需手动路由表
 - **紧凑二进制协议** — 比 JSON 更小更快
-- **自动代码生成** — TypeScript / JavaScript / Kotlin / Rust 客户端
+- **自动代码生成** — TypeScript / JavaScript / Kotlin / Rust / C# 客户端
 - **交互式 API 文档** — 内置 Web 文档，在线测试
 - **多传输层** — WebSocket、HTTP/1.1、HTTP/2、TCP
 - **TLS / HTTPS** — 基于 rustls，ALPN 协商 HTTP/2，支持 channel 热重载
@@ -26,7 +26,7 @@
 
 ```toml
 [dependencies]
-afast = { version = "0.1.23", features = ["http", "ordinary-http"] }
+afast = { version = "0.1.24", features = ["http", "ordinary-http"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

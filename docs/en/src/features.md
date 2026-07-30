@@ -17,6 +17,7 @@
 | `js` | JavaScript client generation (ESM + JSDoc) | — |
 | `kt` | Kotlin client generation | — |
 | `rs` | Rust client generation (Tokio async / std sync TCP) | — |
+| `cs` | C# / .NET client generation (HttpClient / WebSocket / TCP) | — |
 | `code` | On-demand code generation at `/code/{service}/{lang}` | `http` |
 
 ## Documentation

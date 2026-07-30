@@ -5,7 +5,7 @@ use std::fmt;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// let mut cb = CodeBuf::new();
 /// cb.l("fn main() {");
 /// cb.l("    println!(\"hello\");");
@@ -117,7 +117,13 @@ impl CodeBuf {
 /// - `"*admin"` matches `"admin"`, `"user_admin"`, etc.
 /// - `"user*admin"` matches `"user_admin"`, `"user_super_admin"`, etc.
 /// - `"user"` (no wildcard) matches only `"user"` exactly.
-#[cfg(any(feature = "ts", feature = "js", feature = "kt", feature = "rs"))]
+#[cfg(any(
+    feature = "ts",
+    feature = "js",
+    feature = "kt",
+    feature = "rs",
+    feature = "cs"
+))]
 pub(crate) fn matches_wildcard(name: &str, pattern: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
         name.starts_with(prefix)
@@ -138,7 +144,7 @@ pub(crate) fn matches_wildcard(name: &str, pattern: &str) -> bool {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// let mut cb = CodeBuf::new();
 /// cbl!(cb, "let x = {};", 42);
 /// ```

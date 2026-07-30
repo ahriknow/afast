@@ -26,6 +26,7 @@ afast = { path = "../afast", features = [
     "ts",
     "kt",
     "rs",
+    "cs",
     "code",
     "doc",
     "marker",
