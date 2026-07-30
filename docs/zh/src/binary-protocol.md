@@ -2,20 +2,29 @@
 
 ## 类型映射
 
-| Rust 类型 | TS/JS 类型 | Kotlin 类型 |
-|-----------|-----------|------------|
-| `i8` ~ `i64`, `u8` ~ `u64`, `f32`, `f64` | `number` | `Int`/`Long`/`Float`/`Double` |
-| `bool` | `boolean` | `Boolean` |
-| `String`, `&str` | `string` | `String` |
-| `Vec<u8>` | `Uint8Array` | `ByteArray` |
-| `Option<T>` | `T \| null` | `T?` |
-| `Vec<T>` | `T[]` | `List<T>` |
-| struct | `{ field: Type }` | `data class` |
-| enum | `{ tag: 'Variant', data: ... }` | `sealed class` |
+| Rust 类型 | TS/JS 类型 | Kotlin 类型 | C# 类型 |
+|-----------|-----------|------------|----------|
+| `i8` | `number` | `Byte` | `sbyte` |
+| `u8` | `number` | `Byte` | `byte` |
+| `i16` | `number` | `Short` | `short` |
+| `u16` | `number` | `Short` | `ushort` |
+| `i32` | `number` | `Int` | `int` |
+| `u32` | `number` | `Int` | `uint` |
+| `i64` | `number` | `Long` | `long` |
+| `u64` | `number` | `Long` | `ulong` |
+| `f32` | `number` | `Float` | `float` |
+| `f64` | `number` | `Double` | `double` |
+| `bool` | `boolean` | `Boolean` | `bool` |
+| `String`, `&str` | `string` | `String` | `string` |
+| `Vec<u8>` | `Uint8Array` | `ByteArray` | `byte[]` |
+| `Option<T>` | `T \| null` | `T?` | `T?` |
+| `Vec<T>` | `T[]` | `List<T>` | `List<T>` |
+| struct | `{ field: Type }` | `data class` | `class` |
+| enum | `{ tag: 'Variant', data: ... }` | `sealed class` | `abstract record` + `sealed record` |
 
 ## 错误码
 
-系统保留错误码范围为 `-90011` 到 `-90000`。用户自定义错误不得使用此范围。
+系统保留错误码范围为 `-90012` 到 `-90000`。用户自定义错误不得使用此范围。
 
 | 常量 | 值 | 描述 |
 |------|-----|------|

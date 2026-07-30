@@ -2,20 +2,29 @@
 
 ## Type Mapping
 
-| Rust Type | TS/JS Type | Kotlin Type |
-|-----------|-----------|------------|
-| `i8` ~ `i64`, `u8` ~ `u64`, `f32`, `f64` | `number` | `Int`/`Long`/`Float`/`Double` |
-| `bool` | `boolean` | `Boolean` |
-| `String`, `&str` | `string` | `String` |
-| `Vec<u8>` | `Uint8Array` | `ByteArray` |
-| `Option<T>` | `T \| null` | `T?` |
-| `Vec<T>` | `T[]` | `List<T>` |
-| struct | `{ field: Type }` | `data class` |
-| enum | `{ tag: 'Variant', data: ... }` | `sealed class` |
+| Rust Type | TS/JS Type | Kotlin Type | C# Type |
+|-----------|-----------|------------|----------|
+| `i8` | `number` | `Byte` | `sbyte` |
+| `u8` | `number` | `Byte` | `byte` |
+| `i16` | `number` | `Short` | `short` |
+| `u16` | `number` | `Short` | `ushort` |
+| `i32` | `number` | `Int` | `int` |
+| `u32` | `number` | `Int` | `uint` |
+| `i64` | `number` | `Long` | `long` |
+| `u64` | `number` | `Long` | `ulong` |
+| `f32` | `number` | `Float` | `float` |
+| `f64` | `number` | `Double` | `double` |
+| `bool` | `boolean` | `Boolean` | `bool` |
+| `String`, `&str` | `string` | `String` | `string` |
+| `Vec<u8>` | `Uint8Array` | `ByteArray` | `byte[]` |
+| `Option<T>` | `T \| null` | `T?` | `T?` |
+| `Vec<T>` | `T[]` | `List<T>` | `List<T>` |
+| struct | `{ field: Type }` | `data class` | `class` |
+| enum | `{ tag: 'Variant', data: ... }` | `sealed class` | `abstract record` + `sealed record` |
 
 ## Error Codes
 
-System reserved error codes range from `-90011` to `-90000`. User-defined errors must not use this range.
+System reserved error codes range from `-90012` to `-90000`. User-defined errors must not use this range.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
