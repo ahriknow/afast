@@ -49,7 +49,13 @@ pub enum CodeError {
     /// The requested service name was not found in the registered services.
     ServiceNotFound(String),
     /// The requested language feature is not enabled at compile time.
-    #[cfg(not(all(feature = "ts", feature = "js", feature = "kt", feature = "rs")))]
+    #[cfg(not(all(
+        feature = "ts",
+        feature = "js",
+        feature = "kt",
+        feature = "rs",
+        feature = "cs"
+    )))]
     LangNotEnabled(String),
 }
 
@@ -58,7 +64,13 @@ impl std::fmt::Display for CodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CodeError::ServiceNotFound(name) => write!(f, "service '{}' not found", name),
-            #[cfg(not(all(feature = "ts", feature = "js", feature = "kt", feature = "rs")))]
+            #[cfg(not(all(
+                feature = "ts",
+                feature = "js",
+                feature = "kt",
+                feature = "rs",
+                feature = "cs"
+            )))]
             CodeError::LangNotEnabled(lang) => {
                 write!(f, "language '{}' generation is not enabled", lang)
             }

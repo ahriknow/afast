@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.25]
+
+### Fixed
+
+- **LangNotEnabled Error**: Add C# not enable.
+
 ## [0.1.24]
 
 ### Added
