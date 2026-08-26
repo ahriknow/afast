@@ -7,7 +7,7 @@
 ```rust
 let app = AFast::new()
     .service(svc)
-    .document(afast::DocConfig::with("My API", "./docs"))
+    .document(afast::DocConfig::with("My API", "./docs").basic_auth("username", "password"))
     .http("0.0.0.0:5001");
 ```
 

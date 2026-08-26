@@ -399,7 +399,9 @@ async fn main() {
             }
         })
         // Enable interactive API documentation at /doc
-        .document(DocConfig::with("Blog API Docs", "./client/doc"));
+        .document(
+            DocConfig::with("Blog API Docs", "./client/doc").basic_auth("username", "password"),
+        );
 
     // Register global hooks (only when "hook" feature is enabled)
     #[cfg(feature = "hook")]

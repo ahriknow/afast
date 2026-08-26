@@ -99,6 +99,9 @@ pub struct HttpConfig {
     pub services: Vec<Service>,
     #[cfg(feature = "doc")]
     pub doc_title: Option<String>,
+    /// Optional HTTP Basic Auth credentials for the documentation endpoint.
+    #[cfg(feature = "doc")]
+    pub doc_auth: Option<(Option<String>, Option<String>)>,
     #[cfg(feature = "doc")]
     pub ws_addr_str: Option<String>,
     #[cfg(feature = "ordinary-http")]
@@ -293,6 +296,8 @@ pub async fn serve(
         services: config.services,
         #[cfg(feature = "doc")]
         doc_title: config.doc_title,
+        #[cfg(feature = "doc")]
+        doc_auth: config.doc_auth,
         #[cfg(feature = "doc")]
         http_addr: config.addr.to_string(),
         #[cfg(feature = "doc")]
@@ -568,6 +573,9 @@ struct SharedState {
     services: Vec<Service>,
     #[cfg(feature = "doc")]
     doc_title: Option<String>,
+    /// Optional HTTP Basic Auth credentials for the documentation endpoint.
+    #[cfg(feature = "doc")]
+    doc_auth: Option<(Option<String>, Option<String>)>,
     #[cfg(feature = "doc")]
     http_addr: String,
     #[cfg(feature = "doc")]
@@ -681,6 +689,50 @@ struct CompiledSseRoute {
 /// 3. Ordinary SSE routes (`GET` with path matching).
 /// 4. Ordinary WS routes (`GET` WebSocket upgrade with path matching).
 /// 5. 404 for unmatched paths.
+#[cfg(feature = "doc")]
+fn doc_auth_valid(
+    headers: &hyper::HeaderMap,
+    credentials: &Option<(Option<String>, Option<String>)>,
+) -> bool {
+    let Some((Some(expected_user), Some(expected_password))) = credentials else {
+        return true;
+    };
+    let Some(value) = headers.get(hyper::header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(value) = value.to_str() else {
+        return false;
+    };
+    let Some(encoded) = value
+        .get(..6)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("Basic "))
+    else {
+        return false;
+    };
+    let Ok(decoded) = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &value[encoded.len()..],
+    ) else {
+        return false;
+    };
+    let Ok(decoded) = std::str::from_utf8(&decoded) else {
+        return false;
+    };
+    let Some((username, password)) = decoded.split_once(':') else {
+        return false;
+    };
+    username == expected_user && password == expected_password
+}
+
+#[cfg(feature = "doc")]
+fn doc_unauthorized() -> Response<BoxBody> {
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("www-authenticate", r#"Basic realm="afast-doc""#)
+        .body(Full::new(Bytes::new()).boxed())
+        .expect("valid response builder")
+}
+
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     shared: &SharedState,
@@ -1014,6 +1066,9 @@ async fn handle_request(
         Some("doc") => {
             if method != hyper::Method::GET {
                 return method_not_allowed();
+            }
+            if !doc_auth_valid(req.headers(), &shared.doc_auth) {
+                return Ok(doc_unauthorized());
             }
             // Rate-limit check for /doc endpoint.
             #[cfg(feature = "rate-limit")]

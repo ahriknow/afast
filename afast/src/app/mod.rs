@@ -239,6 +239,10 @@ pub struct DocConfig {
     /// If set, HTML documentation files are written to this directory
     /// at application startup, in addition to being served via HTTP.
     pub output: Option<PathBuf>,
+    /// Optional HTTP Basic Auth username for the documentation endpoint.
+    pub username: Option<String>,
+    /// Optional HTTP Basic Auth password for the documentation endpoint.
+    pub password: Option<String>,
 }
 
 #[cfg(feature = "doc")]
@@ -248,6 +252,8 @@ impl DocConfig {
         Self {
             title: None,
             output: None,
+            username: None,
+            password: None,
         }
     }
 
@@ -256,6 +262,8 @@ impl DocConfig {
         Self {
             title: Some(title.to_string()),
             output: None,
+            username: None,
+            password: None,
         }
     }
 
@@ -264,6 +272,8 @@ impl DocConfig {
         Self {
             title: Some(title.to_string()),
             output: Some(output.into()),
+            username: None,
+            password: None,
         }
     }
 
@@ -277,6 +287,13 @@ impl DocConfig {
     /// directory on startup.
     pub fn output(mut self, path: impl Into<PathBuf>) -> Self {
         self.output = Some(path.into());
+        self
+    }
+
+    /// Enables HTTP Basic Auth for the `/doc` endpoint.
+    pub fn basic_auth(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+        self.username = Some(username.into());
+        self.password = Some(password.into());
         self
     }
 }
@@ -1196,7 +1213,7 @@ impl AFast {
                 let https_services = http_services.clone();
 
                 #[cfg(feature = "doc")]
-                let doc_title = self.doc_config.and_then(|c| c.title);
+                let doc_title = self.doc_config.as_ref().and_then(|c| c.title.clone());
 
                 // Build the rate limiter (if configured).
                 #[cfg(feature = "rate-limit")]
@@ -1364,6 +1381,11 @@ impl AFast {
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
                     #[cfg(feature = "doc")]
+                    let doc_auth_clone = self
+                        .doc_config
+                        .as_ref()
+                        .map(|config| (config.username.clone(), config.password.clone()));
+                    #[cfg(feature = "doc")]
                     let ws_addr_clone = self.ws_addr.clone();
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
@@ -1397,6 +1419,8 @@ impl AFast {
                                 services: http_services,
                                 #[cfg(feature = "doc")]
                                 doc_title: doc_title_clone,
+                                #[cfg(feature = "doc")]
+                                doc_auth: doc_auth_clone,
                                 #[cfg(feature = "doc")]
                                 ws_addr_str: ws_addr_clone,
                                 #[cfg(feature = "ordinary-http")]
@@ -1457,6 +1481,11 @@ impl AFast {
                     #[cfg(feature = "doc")]
                     let doc_title_clone = doc_title.clone();
                     #[cfg(feature = "doc")]
+                    let doc_auth_clone = self
+                        .doc_config
+                        .as_ref()
+                        .map(|config| (config.username.clone(), config.password.clone()));
+                    #[cfg(feature = "doc")]
                     let ws_addr_clone = self.ws_addr.clone();
                     #[cfg(feature = "ordinary-http")]
                     let ordinary_routes = self.ordinary_routes.clone();
@@ -1489,6 +1518,8 @@ impl AFast {
                                 services: https_services,
                                 #[cfg(feature = "doc")]
                                 doc_title: doc_title_clone,
+                                #[cfg(feature = "doc")]
+                                doc_auth: doc_auth_clone,
                                 #[cfg(feature = "doc")]
                                 ws_addr_str: ws_addr_clone,
                                 #[cfg(feature = "ordinary-http")]

@@ -2,6 +2,10 @@
 
 ## [0.1.25]
 
+### Added
+
+- **Basic auth doc**: Add option basic auth to doc endpoint.
+
 ### Fixed
 
 - **LangNotEnabled Error**: Add C# not enable.

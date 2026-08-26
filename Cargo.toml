@@ -3,7 +3,7 @@ resolver = "3"
 members = ["afast", "afast-macros", "example"]
 
 [workspace.package]
-version = "0.1.24"
+version = "0.1.25"
 edition = "2024"
 authors = ["ahriknow <ahriknow@ahriknow.com>"]
 license = "MIT"
@@ -13,8 +13,8 @@ keywords = ["web", "framework", "backend", "http", "async"]
 categories = ["web-programming", "asynchronous"]
 
 [workspace.dependencies]
-afast = { version = "0.1.24", path = "afast", features = ["ts"] }
-afast-macros = { version = "0.1.24", path = "afast-macros" }
+afast = { version = "0.1.25", path = "afast", features = ["ts"] }
+afast-macros = { version = "0.1.25", path = "afast-macros" }
 afastdata = { version = "0.0.10" }
 serde = { version = "1" }
 serde_json = { version = "1" }
@@ -24,6 +24,7 @@ futures-util = { version = "0.3" }
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
 http-body-util = { version = "0.1" }
+base64 = { version = "0.22" }
 tokio-rustls = { version = "0.26" }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = { version = "2" }

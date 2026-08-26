@@ -21,7 +21,7 @@ ws = ["tokio-tungstenite", "dep:futures-util"]
 http = ["hyper", "hyper-util", "http-body-util"]
 tcp = ["binary"]
 code = ["http"]
-doc = ["http", "js"]
+doc = ["http", "js", "dep:base64"]
 kt = []
 seq64 = []
 len64 = []
@@ -46,6 +46,7 @@ futures-util = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
